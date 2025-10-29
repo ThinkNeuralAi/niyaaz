@@ -1,0 +1,3 @@
+# This file ensures the videos directory is tracked by git
+# Place your video files here (.mp4, .avi, .mov)
+# Video files are ignored by .gitignore to keep repository size small

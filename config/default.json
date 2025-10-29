@@ -1,0 +1,43 @@
+{
+  "app": {
+    "name": "Sakshi.AI",
+    "version": "1.0.0",
+    "debug": true,
+    "host": "0.0.0.0",
+    "port": 5000
+  },
+  "database": {
+    "type": "postgresql",
+    "host": "localhost",
+    "port": 5432,
+    "name": "sakshiai",
+    "username": "postgres",
+    "password": "ajmal123",
+    "echo": false,
+    "note": "This config file is for reference only. Actual database URL is set in app.py line 33"
+  },
+  "detection": {
+    "confidence_threshold": 0.6,
+    "tracking_max_disappeared": 30,
+    "tracking_max_distance": 80
+  },
+  "people_counter": {
+    "default_orientation": "vertical",
+    "reset_counts_daily": true
+  },
+  "queue_monitor": {
+    "dwell_time_threshold": 3.0,
+    "queue_alert_threshold": 2,
+    "counter_threshold": 1,
+    "alert_cooldown": 180
+  },
+  "video_processing": {
+    "max_fps": 30,
+    "max_width": 1280,
+    "stream_fps": 15
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  }
+}

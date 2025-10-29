@@ -1,0 +1,3495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sakshi.AI - Dashboard</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { 
+            --bg-primary: #0D1117; 
+            --bg-secondary: #161B22; 
+            --border-color: #30363D; 
+            --text-primary: #C9D1D9; 
+            --text-secondary: #8B949E; 
+            --accent-color: #238636; 
+            --accent-hover: #2ea043; 
+        }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            margin: 0; 
+            background-color: var(--bg-primary); 
+            color: var(--text-primary); 
+        }
+        .glass-nav { 
+            background: rgba(13, 17, 23, 0.6); 
+            backdrop-filter: blur(10px); 
+            -webkit-backdrop-filter: blur(10px); 
+            border-bottom: 1px solid var(--border-color); 
+        }
+        .header { 
+            padding: 15px 30px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between; 
+        }
+        .header-logo { 
+            display: flex; 
+            align-items: center; 
+            gap: 12px; 
+        }
+        .header h1 { 
+            margin: 0; 
+            font-size: 1.5em; 
+            font-weight: 700; 
+            color: #fff; 
+        }
+        .container { 
+            padding: 20px; 
+            max-width: 1400px; 
+            margin: 0 auto; 
+        }
+        .app-section { 
+            background-color: var(--bg-secondary); 
+            border: 1px solid var(--border-color); 
+            border-radius: 8px; 
+            margin-bottom: 25px; 
+        }
+        .app-header { 
+            padding: 15px 20px; 
+            border-bottom: 1px solid var(--border-color); 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            cursor: move; 
+        }
+        .app-header h2 { 
+            margin: 0; 
+            font-size: 1.2em; 
+        }
+        .app-header .status { 
+            font-size: 0.9em; 
+            color: var(--text-secondary); 
+        }
+        .app-header .status .online-dot { 
+            display: inline-block; 
+            width: 8px; 
+            height: 8px; 
+            background-color: var(--accent-color); 
+            border-radius: 50%; 
+            margin-right: 6px; 
+        }
+        .app-content { 
+            padding: 20px; 
+        }
+        .btn { 
+            padding: 8px 16px; 
+            cursor: pointer; 
+            border: 1px solid var(--border-color); 
+            background-color: #21262d; 
+            color: var(--text-primary); 
+            border-radius: 6px; 
+            transition: background-color 0.2s; 
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn:hover { 
+            background-color: var(--border-color); 
+        }
+        .btn-primary { 
+            background-color: var(--accent-color); 
+            border-color: var(--accent-color); 
+            color: #fff; 
+        }
+        .btn-primary:hover { 
+            background-color: var(--accent-hover); 
+            border-color: var(--accent-hover); 
+        }
+        .layout-grid { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 20px; 
+        }
+        .stream-box { 
+            border: 1px solid var(--border-color); 
+            border-radius: 8px; 
+            overflow: hidden; 
+            max-width: 100%; 
+            position: relative; 
+        }
+        .stream-box img { 
+            width: 100%; 
+            display: block; 
+            background-color: #000; 
+        }
+        .stream-header, .stream-footer { 
+            padding: 10px; 
+            background-color: var(--bg-primary); 
+            font-weight: bold; 
+        }
+        .stream-header { 
+            font-size: 0.9em; 
+            text-align: left; 
+        }
+        .stream-footer { 
+            font-size: 1.1em; 
+            text-align: center; 
+        }
+        .tab-nav { 
+            display: flex; 
+            border-bottom: 1px solid var(--border-color); 
+            flex-wrap: wrap; 
+        }
+        .tab-button { 
+            padding: 10px 15px; 
+            cursor: pointer; 
+            background: transparent; 
+            color: var(--text-secondary); 
+            border: none; 
+            border-bottom: 3px solid transparent; 
+            font-size: 0.9em; 
+        }
+        .tab-button.active { 
+            border-bottom: 3px solid var(--accent-color); 
+            font-weight: bold; 
+            color: var(--text-primary); 
+        }
+        .tab-content { 
+            display: none; 
+            padding-top: 15px; 
+        }
+        .tab-content.active { 
+            display: block; 
+        }
+        .channel-controls {
+            margin: 15px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .channel-selector {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+        .form-input {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 6px;
+            min-width: 300px;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+        .rtsp-form {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .rtsp-channels {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        .rtsp-channel-card {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 15px;
+        }
+        .rtsp-channel-card h4 {
+            margin: 0 0 8px 0;
+            font-size: 1.1em;
+            color: var(--text-primary);
+        }
+        .rtsp-channel-card .rtsp-url {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            word-break: break-all;
+        }
+        .rtsp-channel-card .channel-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .alerts-section {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+        }
+        .alert-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .alert-gifs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .alert-gif-card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 15px;
+            text-align: center;
+        }
+        .alert-gif-card .alert-gif {
+            max-width: 100%;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .alert-gif-card .alert-info {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .alert-gif-card .alert-message {
+            font-size: 0.95em;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+            padding: 8px;
+            background-color: var(--bg-primary);
+            border-radius: 4px;
+        }
+        .alert-gif-card .alert-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+        }
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .counting-line-controls, .roi-controls {
+            display: none;
+            gap: 10px;
+            align-items: center;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: var(--bg-primary);
+            border-radius: 6px;
+        }
+        .counting-line-controls.active, .roi-controls.active {
+            display: flex;
+        }
+        .btn-group {
+            display: flex;
+            gap: 5px;
+        }
+        .btn.selected {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+            color: white;
+        }
+        .roi-canvas, .line-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            z-index: 10;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        .roi-canvas.active, .line-canvas.active {
+            pointer-events: all;
+        }
+        #lineCanvas {
+            pointer-events: all;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.8);
+        }
+        .modal-content {
+            background-color: var(--bg-secondary);
+            margin: 5% auto;
+            padding: 25px;
+            border: 1px solid var(--border-color);
+            width: 90%;
+            max-width: 900px;
+            border-radius: 8px;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .modal-header h2 {
+            margin: 0;
+        }
+        .close-btn {
+            color: var(--text-secondary);
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .status-indicator {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .status-online {
+            background-color: rgba(35, 134, 54, 0.2);
+            color: #2ea043;
+        }
+        .status-offline {
+            background-color: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+        }
+        .hidden {
+            display: none !important;
+        }
+        @media (max-width: 768px) { 
+            .layout-grid { 
+                grid-template-columns: 1fr; 
+            }
+            .video-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+<header class="glass-nav sticky top-0 z-50">
+    <div class="header max-w-[1400px] mx-auto">
+        <div class="header-logo">
+            <svg class="w-8 h-8 text-green-500" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 18.5C8.97 18.5 6.5 16.03 6.5 13H8.5C8.5 14.93 10.07 16.5 12 16.5C13.93 16.5 15.5 14.93 15.5 13C15.5 11.07 13.93 9.5 12 9.5C10.07 9.5 8.5 11.07 8.5 13H6.5C6.5 9.97 8.97 7.5 12 7.5C15.03 7.5 17.5 9.97 17.5 13C17.5 16.03 15.03 18.5 12 18.5Z" fill="currentColor"/>
+            </svg>
+            <h1>Sakshi<span style="color: var(--accent-color);">.AI</span></h1>
+        </div>
+        <a href="/" style="color: var(--text-secondary); font-size: 0.9em; text-decoration: none;">&larr; Back to Landing Page</a>
+    </div>
+</header>
+
+<div class="container" id="dashboard-container">
+    <!-- RTSP Channel Management Section -->
+    <div class="app-section">
+        <div class="app-header">
+            <h2>📹 RTSP Channels</h2>
+            <div class="status">
+                <span class="online-dot"></span>
+                <span>Channel Manager</span>
+            </div>
+        </div>
+        <div class="app-content">
+            <div class="rtsp-controls">
+                <div class="rtsp-form">
+                    <input type="text" id="rtsp-channel-name" placeholder="Channel Name (e.g., Camera 1)" class="form-input">
+                    <input type="text" id="rtsp-url" placeholder="RTSP URL (e.g., rtsp://192.168.1.100:554/stream)" class="form-input">
+                    <button class="btn btn-primary" onclick="addRtspChannel()">Add RTSP Channel</button>
+                </div>
+            </div>
+            
+            <div id="rtsp-channels-list" class="rtsp-channels">
+                <!-- RTSP channels will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <div class="app-section">
+        <div class="app-header">
+            <h2>🎯 People Counter</h2>
+            <div class="status">
+                <span class="online-dot"></span>
+                <span>Service Online</span>
+            </div>
+        </div>
+        <div class="app-content">
+            <div class="tab-nav">
+                <button class="tab-button active" onclick="openTab(event, 'PeopleCounter')">Live Monitoring</button>
+                <button class="tab-button" onclick="openTab(event, 'PeopleCounterReports')">Analytics & Reports</button>
+            </div>
+            
+            <div id="PeopleCounter" class="tab-content active">
+                <div class="channel-controls">
+                    <select id="pc-channel-selector" class="channel-selector">
+                        <option value="">Select a video file...</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="startAnalysisModule('PeopleCounter')">Start People Counting</button>
+                    <button class="btn" onclick="stopAnalysisModule('PeopleCounter')">Stop</button>
+                </div>
+                
+                <div id="pc-video-grid" class="video-grid">
+                    <!-- Video streams will be added here dynamically -->
+                </div>
+            </div>
+            
+            <div id="PeopleCounterReports" class="tab-content">
+                <h3>Footfall Analytics & Reports</h3>
+                
+                <!-- Report Controls -->
+                <div style="margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                    <div>
+                        <label for="pc-report-channel" style="margin-right: 8px; font-weight: 500;">Channel:</label>
+                        <select id="pc-report-channel" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: white;">
+                            <option value="">Select Channel</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label for="pc-report-period" style="margin-right: 8px; font-weight: 500;">Period:</label>
+                        <select id="pc-report-period" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: white;">
+                            <option value="24hours">Last 24 Hours (Hourly)</option>
+                            <option value="7days" selected>Last 7 Days</option>
+                            <option value="30days">Last 30 Days</option>
+                        </select>
+                    </div>
+                    
+                    <button onclick="loadFootfallReport()" style="padding: 8px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                        📊 Load Report
+                    </button>
+                    
+                    <button onclick="refreshFootfallReport()" style="padding: 8px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                        🔄 Refresh
+                    </button>
+                </div>
+                
+                <!-- Report Content -->
+                <div id="pc-reports-content" style="min-height: 300px;">
+                    <div style="text-align: center; padding: 40px; color: #999;">
+                        <p>👆 Select a channel and click "Load Report" to view analytics</p>
+                    </div>
+                </div>
+                
+                <!-- Chart Container -->
+                <div id="pc-chart-container" style="display: none; margin-top: 30px;">
+                    <canvas id="pc-footfall-chart" style="max-height: 400px;"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="app-section">
+        <div class="app-header">
+            <h2>📊 Queue Monitor</h2>
+            <div class="status">
+                <span class="online-dot"></span>
+                <span>Service Online</span>
+            </div>
+        </div>
+        <div class="app-content">
+            <div class="tab-nav">
+                <button class="tab-button active" onclick="openTab(event, 'QueueMonitor')">Live Monitoring</button>
+                <button class="tab-button" onclick="openTab(event, 'QueueMonitorReports')">Analytics & Reports</button>
+            </div>
+            
+            <div id="QueueMonitor" class="tab-content active">
+                <div class="channel-controls">
+                    <select id="qm-channel-selector" class="channel-selector">
+                        <option value="">Select a video file...</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="startAnalysisModule('QueueMonitor')">Start Queue Monitoring</button>
+                    <button class="btn" onclick="stopAnalysisModule('QueueMonitor')">Stop</button>
+                </div>
+                
+                <div id="qm-video-grid" class="video-grid">
+                    <!-- Video streams will be added here dynamically -->
+                </div>
+            </div>
+            
+            <div id="QueueMonitorReports" class="tab-content">
+                <h3>Queue Analytics & Alert History</h3>
+                <p>Select a channel to view queue performance and alerts.</p>
+                
+                <!-- Alert GIFs Section -->
+                <div class="alerts-section" style="margin-top: 30px;">
+                    <h4>🚨 Recent Alert Recordings</h4>
+                    <div class="alert-controls">
+                        <select id="alert-channel-filter" class="channel-selector">
+                            <option value="">All Channels</option>
+                        </select>
+                        <button class="btn" onclick="loadAlertGifs()">Refresh Alerts</button>
+                        <button class="btn" onclick="clearOldAlerts()">Clear Old Alerts</button>
+                    </div>
+                    
+                    <div id="alert-gifs-grid" class="alert-gifs-grid">
+                        <!-- Alert GIFs will be loaded here -->
+                    </div>
+                </div>
+                
+                <div id="qm-reports-content">
+                    <!-- Reports content will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bag Detection Section -->
+<div class="container">
+    <div class="app-section">
+        <div class="app-header">
+            <h2>👜 Bag Detection</h2>
+            <div class="status">
+                <span class="online-dot"></span>
+                <span>Service Online</span>
+            </div>
+        </div>
+        <div class="app-content">
+            <div class="tab-nav">
+                <button class="tab-button active" onclick="openTab(event, 'BagDetection')">Live Monitoring</button>
+                <button class="tab-button" onclick="openTab(event, 'BagDetectionReports')">Analytics & Alerts</button>
+                <button class="tab-button" onclick="openTab(event, 'BagDetectionSettings')">Settings</button>
+            </div>
+            
+            <div id="BagDetection" class="tab-content active">
+                <div class="channel-controls">
+                    <select id="bd-channel-selector" class="channel-selector">
+                        <option value="">Select a video source...</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="startAnalysisModule('BagDetection')">Start Bag Detection</button>
+                    <button class="btn" onclick="stopAnalysisModule('BagDetection')">Stop</button>
+                    <button class="btn" onclick="openBagSettingsModal()">⚙️ Configure Settings</button>
+                </div>
+                
+                <div class="info-box" style="margin: 20px 0;">
+                    <strong>ℹ️ Unattended Baggage Detection:</strong>
+                    <ul style="margin: 10px 0 0 20px; font-size: 0.9em;">
+                        <li>Detects bags (backpack, handbag, suitcase) and tracks their movement</li>
+                        <li>Identifies bags left stationary without nearby owners for extended periods</li>
+                        <li>Automatically records 4-second GIF when unattended bag is detected</li>
+                        <li>Alerts shown in real-time with bag location and duration</li>
+                        <li>Adjustable proximity threshold, time threshold, and alert cooldown</li>
+                    </ul>
+                </div>
+                
+                <div id="bd-video-grid" class="video-grid">
+                    <!-- Video streams will be added here dynamically -->
+                </div>
+            </div>
+            
+            <div id="BagDetectionReports" class="tab-content">
+                <h3>Unattended Baggage Alerts</h3>
+                
+                <div class="filter-controls" style="margin-bottom: 20px;">
+                    <select id="bag-alert-channel-filter" class="channel-selector" style="margin-right: 10px;">
+                        <option value="">All Channels</option>
+                    </select>
+                    <button class="btn" onclick="loadBagAlerts()">🔄 Refresh</button>
+                    <button class="btn" onclick="clearOldBagAlerts()">🗑️ Clear Old Alerts (7+ days)</button>
+                </div>
+                
+                <div id="bag-alerts-grid" class="alert-gifs-grid">
+                    <!-- Alert GIFs will be displayed here -->
+                    <p style="color: var(--text-secondary); text-align: center; padding: 40px;">
+                        Loading alerts...
+                    </p>
+                </div>
+            </div>
+            
+            <div id="BagDetectionSettings" class="tab-content">
+                <h3>Detection Settings</h3>
+                <div style="max-width: 600px;">
+                    <div class="setting-group">
+                        <label><strong>Time Threshold (seconds):</strong></label>
+                        <input type="number" id="bd-time-threshold" value="20" min="5" max="300" step="5" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        <small>Minimum time a bag must be stationary to trigger alert</small>
+                    </div>
+                    
+                    <div class="setting-group" style="margin-top: 20px;">
+                        <label><strong>Proximity Threshold (pixels):</strong></label>
+                        <input type="number" id="bd-proximity-threshold" value="120" min="50" max="300" step="10" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        <small>Maximum distance between bag and person to consider them together</small>
+                    </div>
+                    
+                    <div class="setting-group" style="margin-top: 20px;">
+                        <label><strong>Alert Cooldown (seconds):</strong></label>
+                        <input type="number" id="bd-alert-cooldown" value="60" min="30" max="300" step="10" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        <small>Minimum time between repeated alerts for the same bag</small>
+                    </div>
+                    
+                    <div class="setting-group" style="margin-top: 20px;">
+                        <label><strong>Confidence Threshold:</strong></label>
+                        <input type="number" id="bd-confidence" value="0.35" min="0.1" max="0.9" step="0.05" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        <small>Minimum detection confidence (lower = more detections but more false positives)</small>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="saveBagSettings()" style="margin-top: 20px;">Save Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Heatmap Section -->
+<div class="container">
+    <div class="app-section">
+        <div class="app-header">
+            <h2>🔥 Heatmap Analytics</h2>
+            <div class="status">
+                <span class="online-dot"></span>
+                <span>Service Online</span>
+            </div>
+        </div>
+        <div class="app-content">
+            <div class="tab-nav">
+                <button class="tab-button active" onclick="openTab(event, 'Heatmap')">Live Heatmap</button>
+                <button class="tab-button" onclick="openTab(event, 'HeatmapSnapshots')">Snapshots</button>
+                <button class="tab-button" onclick="openTab(event, 'HeatmapSettings')">Settings</button>
+            </div>
+            
+            <div id="Heatmap" class="tab-content active">
+                <div class="channel-controls">
+                    <select id="hm-channel-selector" class="channel-selector">
+                        <option value="">Select a video source...</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="startAnalysisModule('Heatmap')">Start Heatmap</button>
+                    <button class="btn" onclick="stopAnalysisModule('Heatmap')">Stop</button>
+                    <button class="btn" onclick="captureHeatmapSnapshot()">📸 Capture Snapshot</button>
+                </div>
+                
+                <div class="info-box" style="margin: 20px 0;">
+                    <strong>ℹ️ Activity Heatmap:</strong>
+                    <ul style="margin: 10px 0 0 20px; font-size: 0.9em;">
+                        <li>Visualizes movement patterns and high-activity zones</li>
+                        <li>Warmer colors (red/yellow) indicate higher activity areas</li>
+                        <li>Cooler colors (blue/green) indicate lower activity areas</li>
+                        <li>Automatic snapshots saved every 30 seconds</li>
+                        <li>Useful for analyzing customer behavior and traffic patterns</li>
+                    </ul>
+                </div>
+                
+                <div id="hm-video-grid" class="video-grid">
+                    <!-- Video streams will be added here dynamically -->
+                </div>
+            </div>
+            
+            <div id="HeatmapSnapshots" class="tab-content">
+                <h3>Heatmap Snapshots</h3>
+                
+                <div class="filter-controls" style="margin-bottom: 20px;">
+                    <select id="hm-channel-filter" class="channel-selector" style="margin-right: 10px;">
+                        <option value="">All Channels</option>
+                    </select>
+                    <button class="btn" onclick="loadHeatmapSnapshots()">🔄 Refresh</button>
+                    <button class="btn" onclick="clearOldHeatmapSnapshots()">🗑️ Clear Old Snapshots (7+ days)</button>
+                </div>
+                
+                <div id="heatmap-snapshots-grid" class="alert-gifs-grid">
+                    <!-- Heatmap snapshots will be displayed here -->
+                    <p style="color: var(--text-secondary); text-align: center; padding: 40px;">
+                        Loading snapshots...
+                    </p>
+                </div>
+            </div>
+            
+            <div id="HeatmapSettings" class="tab-content">
+                <h3>Heatmap Configuration</h3>
+                <div style="max-width: 600px;">
+                    <div class="setting-group">
+                        <label><strong>Decay Rate:</strong></label>
+                        <input type="number" id="hm-decay-rate" value="0.95" min="0.8" max="0.99" step="0.01" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        <small>How quickly the heatmap fades (higher = slower fade)</small>
+                    </div>
+                    
+                    <div class="setting-group" style="margin-top: 20px;">
+                        <label><strong>Snapshot Interval (seconds):</strong></label>
+                        <input type="number" id="hm-snapshot-interval" value="30" min="10" max="300" step="10" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        <small>Time between automatic snapshots</small>
+                    </div>
+                    
+                    <div class="setting-group" style="margin-top: 20px;">
+                        <label><strong>Heatmap Intensity:</strong></label>
+                        <input type="number" id="hm-intensity" value="0.6" min="0.3" max="1.0" step="0.1" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        <small>Opacity of heatmap overlay on video</small>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="saveHeatmapSettings()" style="margin-top: 20px;">Save Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ROI Editor Modal -->
+<div id="roiModal" class="modal">
+    <div class="modal-content" style="max-width: 95%; max-height: 95vh;">
+        <div class="modal-header">
+            <h2>Configure Queue Areas</h2>
+            <span class="close-btn" onclick="closeRoiModal()">&times;</span>
+        </div>
+        <div style="padding: 20px;">
+            <div id="roiInstructions" style="margin-bottom: 15px; padding: 10px; background-color: rgba(59, 130, 246, 0.1); border-radius: 5px; border-left: 4px solid #3b82f6;">
+                <strong>Drawing Queue Area (Yellow):</strong>
+                <ul style="margin: 5px 0 0 20px; font-size: 0.9em;">
+                    <li>Click to add points and create polygon boundaries</li>
+                    <li>Drag existing points to adjust the area shape</li>
+                    <li>Double-click on points to delete them</li>
+                    <li>Areas are shown as <strong>outline borders only</strong> (no fill)</li>
+                    <li>Need at least 3 points to form a complete area</li>
+                </ul>
+            </div>
+            
+            <!-- Real-time ROI Information -->
+            <div style="margin-bottom: 15px; padding: 8px; background-color: rgba(34, 197, 94, 0.1); border-radius: 5px; border-left: 4px solid #22c55e;">
+                <strong>Area Status:</strong>
+                <div id="roiInfo" style="font-family: monospace; font-size: 0.9em; margin-top: 5px;">
+                    Queue Area: 0 points | Counter Area: 0 points
+                </div>
+            </div>
+            
+            <div style="position: relative; display: inline-block;">
+                <img id="roiImage" style="max-width: 100%; height: auto;">
+                <canvas id="roiCanvas" style="position: absolute; top: 0; left: 0; cursor: crosshair;"></canvas>
+            </div>
+            <div style="margin-top: 20px;">
+                <div class="btn-group">
+                    <button class="btn selected" onclick="setRoiMode('main')">Queue Area (Yellow)</button>
+                    <button class="btn" onclick="setRoiMode('secondary')">Counter Area (Cyan)</button>
+                </div>
+                <div style="margin-top: 10px;">
+                    <div class="btn-group">
+                        <button class="btn" onclick="createRectangleRoi()">Rectangle</button>
+                        <button class="btn" onclick="createCircleRoi()">Circle</button>
+                        <button class="btn" onclick="clearCurrentRoi()">Clear Current</button>
+                        <button class="btn" onclick="clearAllRoi()">Clear All</button>
+                    </div>
+                </div>
+                <div style="margin-top: 10px;">
+                    <button class="btn btn-primary" onclick="saveRoi()">Save Configuration</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Counting Line Editor Modal -->
+<div id="lineModal" class="modal">
+    <div class="modal-content" style="max-width: 95%; max-height: 95vh;">
+        <div class="modal-header">
+            <h2>Configure Counting Line</h2>
+            <span class="close-btn" onclick="closeLineModal()">&times;</span>
+        </div>
+        <div style="padding: 20px;">
+            <div style="margin-bottom: 15px; padding: 10px; background-color: rgba(59, 130, 246, 0.1); border-radius: 5px; border-left: 4px solid #3b82f6;">
+                <strong>Instructions:</strong>
+                <ul style="margin: 5px 0 0 20px; font-size: 0.9em;">
+                    <li>Drag the <span style="color: #ff0000; font-weight: bold;">red START point</span> and <span style="color: #0000ff; font-weight: bold;">blue END point</span> to adjust line position and length</li>
+                    <li>Click and drag the <span style="color: #00ff00; font-weight: bold;">green line</span> itself to move the entire line</li>
+                    <li>The line can be positioned at any angle and length within the video frame</li>
+                    <li>People crossing the line in either direction will be counted</li>
+                </ul>
+            </div>
+            
+            <!-- Real-time Line Information -->
+            <div style="margin-bottom: 15px; padding: 8px; background-color: rgba(34, 197, 94, 0.1); border-radius: 5px; border-left: 4px solid #22c55e;">
+                <strong>Line Properties:</strong>
+                <div id="lineInfo" style="font-family: monospace; font-size: 0.9em; margin-top: 5px;">
+                    Length: 100.0% | Angle: 90.0°
+                </div>
+            </div>
+            
+            <div style="position: relative; display: inline-block;">
+                <img id="lineImage" style="max-width: 100%; height: auto;">
+                <canvas id="lineCanvas" style="position: absolute; top: 0; left: 0; cursor: crosshair;"></canvas>
+            </div>
+            <div style="margin-top: 20px;">
+                <div class="btn-group">
+                    <button class="btn selected" onclick="setLineOrientation('vertical')">Vertical Preset</button>
+                    <button class="btn" onclick="setLineOrientation('horizontal')">Horizontal Preset</button>
+                    <button class="btn" onclick="setLineDiagonal()">Diagonal Preset</button>
+                </div>
+                <div style="margin-top: 10px;">
+                    <button class="btn" onclick="resetLineToCenter()">Reset to Center</button>
+                    <button class="btn" onclick="flipLineDirection()">Flip Direction</button>
+                    <button class="btn" onclick="extendLine()">Extend Line</button>
+                    <button class="btn" onclick="shortenLine()">Shorten Line</button>
+                </div>
+                <div style="margin-top: 10px;">
+                    <button class="btn btn-primary" onclick="saveLine()">Save Line Position</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Global variables
+    const socket = io(`http://${window.location.hostname}:5000`);
+    let activeChannels = {
+        'PeopleCounter': {},
+        'QueueMonitor': {},
+        'BagDetection': {},
+        'Heatmap': {}
+    };
+    let sharedChannels = {};  // Track which channels are shared across modules
+    
+    // Auto-refresh for hourly report
+    let reportRefreshInterval = null;
+    
+    // ROI Editor state
+    let roiState = {
+        currentApp: null,
+        currentChannel: null,
+        currentMode: 'main',
+        points: { main: [], secondary: [] },
+        canvas: null,
+        ctx: null,
+        imageLoaded: false,
+        isDragging: false,
+        dragPointIndex: -1,
+        isDrawing: false,
+        hoverPointIndex: -1,
+        hoverMode: null
+    };
+    
+    // Line Editor state  
+    let lineState = {
+        currentApp: null,
+        currentChannel: null,
+        orientation: 'vertical',
+        line: { start: {x: 0.5, y: 0}, end: {x: 0.5, y: 1} },
+        isDragging: false,
+        dragPoint: null, // 'start', 'end', or 'line' (entire line)
+        canvas: null,
+        ctx: null,
+        imageLoaded: false
+    };
+
+    // Initialize dashboard
+    document.addEventListener('DOMContentLoaded', function() {
+        loadAvailableChannels();
+        loadRtspChannels();
+        loadAlertGifs();
+        loadBagAlerts();  // Load bag detection alerts
+        loadHeatmapSnapshots();  // Load heatmap snapshots
+        loadPCReportChannels();  // Load channels for People Counter reports
+        setupSocketListeners();
+        
+        // Request notification permission
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    });
+
+    // Socket.IO connection handlers
+    socket.on('connect', () => {
+        console.log('✅ Connected to Sakshi.AI');
+    });
+
+    socket.on('disconnect', () => {
+        console.warn('⚠️ Disconnected from Sakshi.AI');
+    });
+
+    // Real-time data handlers
+    socket.on('count_update', (data) => {
+        updatePeopleCountDisplay(data);
+    });
+
+    socket.on('queue_update', (data) => {
+        updateQueueDisplay(data);
+    });
+
+    socket.on('queue_alert', (data) => {
+        showQueueAlert(data);
+    });
+
+    socket.on('bag_detection_update', (data) => {
+        updateBagDetectionDisplay(data);
+    });
+
+    function setupSocketListeners() {
+        // Additional socket listeners can be added here
+    }
+
+    // Load available video channels (both RTSP and video files)
+    async function loadAvailableChannels() {
+        try {
+            const response = await fetch('/api/get_channels/PeopleCounter');
+            const channels = await response.json();
+            
+            const pcSelector = document.getElementById('pc-channel-selector');
+            const qmSelector = document.getElementById('qm-channel-selector');
+            const bdSelector = document.getElementById('bd-channel-selector');
+            const hmSelector = document.getElementById('hm-channel-selector');
+            const alertFilter = document.getElementById('alert-channel-filter');
+            const bagAlertFilter = document.getElementById('bag-alert-channel-filter');
+            const hmFilter = document.getElementById('hm-channel-filter');
+            
+            // Clear existing options
+            pcSelector.innerHTML = '<option value="">Select a channel...</option>';
+            qmSelector.innerHTML = '<option value="">Select a channel...</option>';
+            if (bdSelector) bdSelector.innerHTML = '<option value="">Select a channel...</option>';
+            if (hmSelector) hmSelector.innerHTML = '<option value="">Select a channel...</option>';
+            if (alertFilter) {
+                alertFilter.innerHTML = '<option value="">All Channels</option>';
+            }
+            if (bagAlertFilter) {
+                bagAlertFilter.innerHTML = '<option value="">All Channels</option>';
+            }
+            if (hmFilter) {
+                hmFilter.innerHTML = '<option value="">All Channels</option>';
+            }
+            
+            // Add channels to selectors
+            channels.forEach(channel => {
+                const displayName = channel.type === 'rtsp' ? 
+                    `📹 ${channel.name}` : 
+                    `🎬 ${channel.name}`;
+                
+                const option1 = new Option(displayName, channel.id);
+                const option2 = new Option(displayName, channel.id);
+                const option3 = new Option(displayName, channel.id);
+                const option4 = alertFilter ? new Option(displayName, channel.id) : null;
+                const option5 = bagAlertFilter ? new Option(displayName, channel.id) : null;
+                const option6 = hmSelector ? new Option(displayName, channel.id) : null;
+                const option7 = hmFilter ? new Option(displayName, channel.id) : null;
+                
+                option1.dataset.type = channel.type;
+                option2.dataset.type = channel.type;
+                option3.dataset.type = channel.type;
+                if (option6) option6.dataset.type = channel.type;
+                
+                if (channel.rtsp_url) {
+                    option1.dataset.rtspUrl = channel.rtsp_url;
+                    option2.dataset.rtspUrl = channel.rtsp_url;
+                    option3.dataset.rtspUrl = channel.rtsp_url;
+                    if (option6) option6.dataset.rtspUrl = channel.rtsp_url;
+                } else if (channel.path) {
+                    option1.dataset.videoPath = channel.path;
+                    option2.dataset.videoPath = channel.path;
+                    option3.dataset.videoPath = channel.path;
+                    if (option6) option6.dataset.videoPath = channel.path;
+                }
+                
+                pcSelector.add(option1);
+                qmSelector.add(option2);
+                if (bdSelector) bdSelector.add(option3);
+                if (hmSelector) hmSelector.add(option6);
+                if (alertFilter && option4) {
+                    alertFilter.add(option4);
+                }
+                if (bagAlertFilter && option5) {
+                    bagAlertFilter.add(option5);
+                }
+                if (hmFilter && option7) {
+                    hmFilter.add(option7);
+                }
+            });
+            
+        } catch (error) {
+            console.error('Failed to load channels:', error);
+        }
+    }
+
+    // Load and display RTSP channels
+    async function loadRtspChannels() {
+        try {
+            const response = await fetch('/api/get_channels/PeopleCounter');
+            const channels = await response.json();
+            
+            const rtspChannels = channels.filter(ch => ch.type === 'rtsp');
+            const channelsList = document.getElementById('rtsp-channels-list');
+            
+            if (rtspChannels.length === 0) {
+                channelsList.innerHTML = '<p style="color: var(--text-secondary);">No RTSP channels configured. Add one above to get started.</p>';
+                return;
+            }
+            
+            channelsList.innerHTML = rtspChannels.map(channel => `
+                <div class="rtsp-channel-card">
+                    <h4>${channel.name}</h4>
+                    <div class="rtsp-url">${channel.rtsp_url}</div>
+                    <div class="channel-actions">
+                        <button class="btn btn-primary" onclick="testRtspChannel('${channel.id}', '${channel.rtsp_url}')">Test Connection</button>
+                        <button class="btn" onclick="removeRtspChannel('${channel.id}')">Remove</button>
+                    </div>
+                </div>
+            `).join('');
+            
+        } catch (error) {
+            console.error('Failed to load RTSP channels:', error);
+        }
+    }
+
+    // Add new RTSP channel
+    async function addRtspChannel() {
+        const nameInput = document.getElementById('rtsp-channel-name');
+        const urlInput = document.getElementById('rtsp-url');
+        
+        const name = nameInput.value.trim();
+        const rtspUrl = urlInput.value.trim();
+        
+        if (!name || !rtspUrl) {
+            alert('Please enter both channel name and RTSP URL');
+            return;
+        }
+        
+        if (!rtspUrl.startsWith('rtsp://')) {
+            alert('RTSP URL must start with rtsp://');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/add_rtsp_channel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    name: name,
+                    rtsp_url: rtspUrl
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Clear inputs
+                nameInput.value = '';
+                urlInput.value = '';
+                
+                // Reload channels
+                await loadRtspChannels();
+                await loadAvailableChannels();
+                
+                alert(`RTSP channel "${name}" added successfully!`);
+            } else {
+                alert(`Failed to add RTSP channel: ${result.error}`);
+            }
+            
+        } catch (error) {
+            console.error('Error adding RTSP channel:', error);
+            alert('Failed to add RTSP channel. Please try again.');
+        }
+    }
+
+    // Remove RTSP channel
+    async function removeRtspChannel(channelId) {
+        if (!confirm('Are you sure you want to remove this RTSP channel?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/remove_rtsp_channel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    channel_id: channelId
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Reload channels
+                await loadRtspChannels();
+                await loadAvailableChannels();
+                
+                alert('RTSP channel removed successfully!');
+            } else {
+                alert(`Failed to remove RTSP channel: ${result.error}`);
+            }
+            
+        } catch (error) {
+            console.error('Error removing RTSP channel:', error);
+            alert('Failed to remove RTSP channel. Please try again.');
+        }
+    }
+
+    // Test RTSP channel connection
+    async function testRtspChannel(channelId, rtspUrl) {
+        alert(`Testing connection to ${rtspUrl}...\n\nNote: This will attempt to start the channel briefly to test connectivity.`);
+        
+        try {
+            // Try to start the channel
+            const response = await fetch('/api/start_channel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    app_name: 'PeopleCounter',
+                    channel_id: channelId,
+                    rtsp_url: rtspUrl
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                alert('✅ RTSP connection successful!');
+                
+                // Stop the test immediately
+                await fetch('/api/stop_channel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        app_name: 'PeopleCounter',
+                        channel_id: channelId
+                    })
+                });
+            } else {
+                alert(`❌ RTSP connection failed: ${result.error}`);
+            }
+            
+        } catch (error) {
+            console.error('Error testing RTSP channel:', error);
+            alert('❌ RTSP connection test failed. Please check the URL and network connectivity.');
+        }
+    }
+
+    // Alert GIF Management Functions
+    async function loadAlertGifs() {
+        try {
+            const channelFilter = document.getElementById('alert-channel-filter').value;
+            const url = channelFilter ? 
+                `/api/get_alert_gifs?channel_id=${channelFilter}&limit=20` : 
+                '/api/get_alert_gifs?limit=20';
+            
+            const response = await fetch(url);
+            const result = await response.json();
+            
+            if (result.success) {
+                displayAlertGifs(result.alert_gifs);
+            } else {
+                console.error('Failed to load alert GIFs:', result.error);
+            }
+        } catch (error) {
+            console.error('Error loading alert GIFs:', error);
+        }
+    }
+
+    function displayAlertGifs(alertGifs) {
+        const grid = document.getElementById('alert-gifs-grid');
+        
+        if (!alertGifs || alertGifs.length === 0) {
+            grid.innerHTML = '<p style="color: var(--text-secondary); text-align: center; grid-column: 1 / -1;">No alert recordings found.</p>';
+            return;
+        }
+        
+        grid.innerHTML = alertGifs.map(gif => `
+            <div class="alert-gif-card">
+                <img src="${gif.gif_url}" alt="Alert GIF" class="alert-gif" 
+                     onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                <div style="display: none; color: var(--text-secondary); font-style: italic;">GIF not available</div>
+                
+                <div class="alert-info">
+                    📅 ${new Date(gif.created_at).toLocaleString()}<br>
+                    📹 Channel: ${gif.channel_id}<br>
+                    ⏱️ Duration: ${gif.duration_seconds}s | Frames: ${gif.frame_count}<br>
+                    💾 Size: ${gif.file_size_mb} MB
+                </div>
+                
+                <div class="alert-message">
+                    ${gif.alert_message || 'Queue Alert'}
+                </div>
+                
+                <div class="alert-actions">
+                    <button class="btn" onclick="downloadAlertGif('${gif.gif_filename}')">Download</button>
+                    <button class="btn" onclick="deleteAlertGif(${gif.id})" style="background-color: #d73a49;">Delete</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function deleteAlertGif(gifId) {
+        if (!confirm('Are you sure you want to delete this alert recording?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/delete_alert_gif/${gifId}`, {
+                method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                alert('Alert recording deleted successfully');
+                loadAlertGifs(); // Reload the grid
+            } else {
+                alert(`Failed to delete alert recording: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('Error deleting alert GIF:', error);
+            alert('Failed to delete alert recording');
+        }
+    }
+
+    function downloadAlertGif(filename) {
+        const link = document.createElement('a');
+        link.href = `/static/alerts/${filename}`;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    async function clearOldAlerts() {
+        if (!confirm('Are you sure you want to clear alert recordings older than 7 days?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/clear_old_alerts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    days: 7,
+                    alert_type: 'queue_alert'
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                alert(`Successfully deleted ${result.deleted_count} old queue alerts`);
+                loadAlertGifs();  // Reload the alert list
+            } else {
+                alert('Error: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error clearing old alerts:', error);
+            alert('Failed to clear old alerts');
+        }
+    }
+
+    // ============= Footfall Report Functions =============
+    let footfallChart = null;
+
+    // Load channel list into People Counter reports dropdown
+    async function loadPCReportChannels() {
+        try {
+            const response = await fetch('/api/get_channels/PeopleCounter');
+            const channels = await response.json();
+            
+            const selector = document.getElementById('pc-report-channel');
+            selector.innerHTML = '<option value="">Select Channel</option>';
+            
+            channels.forEach(channel => {
+                const displayName = channel.type === 'rtsp' ? 
+                    `📹 ${channel.name}` : 
+                    `🎬 ${channel.name}`;
+                selector.add(new Option(displayName, channel.id));
+            });
+        } catch (error) {
+            console.error('Failed to load report channels:', error);
+        }
+    }
+
+    // Load footfall report for selected channel and period
+    async function loadFootfallReport() {
+        const channelId = document.getElementById('pc-report-channel').value;
+        const period = document.getElementById('pc-report-period').value;
+        
+        if (!channelId) {
+            alert('Please select a channel first');
+            return;
+        }
+        
+        // Clear any existing refresh interval
+        if (reportRefreshInterval) {
+            clearInterval(reportRefreshInterval);
+            reportRefreshInterval = null;
+        }
+        
+        const contentDiv = document.getElementById('pc-reports-content');
+        contentDiv.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="spinner"></div><p>Loading report...</p></div>';
+        
+        try {
+            const response = await fetch(`/api/get_footfall_report/${channelId}?period=${period}`);
+            const report = await response.json();
+            
+            if (report.error) {
+                throw new Error(report.error);
+            }
+            
+            displayFootfallReport(report, channelId, period);
+            
+            // Auto-refresh hourly report every 60 seconds
+            if (period === '24hours') {
+                reportRefreshInterval = setInterval(() => {
+                    const currentChannelId = document.getElementById('pc-report-channel').value;
+                    const currentPeriod = document.getElementById('pc-report-period').value;
+                    
+                    // Only refresh if still viewing the same hourly report
+                    if (currentChannelId === channelId && currentPeriod === '24hours') {
+                        fetch(`/api/get_footfall_report/${channelId}?period=24hours`)
+                            .then(res => res.json())
+                            .then(report => {
+                                if (!report.error) {
+                                    displayFootfallReport(report, channelId, '24hours');
+                                }
+                            })
+                            .catch(err => console.error('Auto-refresh error:', err));
+                    } else {
+                        // Stop refresh if user switched to different report
+                        clearInterval(reportRefreshInterval);
+                        reportRefreshInterval = null;
+                    }
+                }, 60000); // Refresh every 60 seconds
+            }
+            
+        } catch (error) {
+            console.error('Error loading report:', error);
+            contentDiv.innerHTML = `<div style="text-align: center; padding: 40px; color: #e74c3c;"><p>❌ Error: ${error.message}</p></div>`;
+        }
+    }
+
+    // Display footfall report with table and chart
+    function displayFootfallReport(report, channelId, period) {
+        const contentDiv = document.getElementById('pc-reports-content');
+        const chartContainer = document.getElementById('pc-chart-container');
+        
+        if (!report.data || report.data.length === 0) {
+            contentDiv.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #999;">
+                    <h3>📊 No Data Available</h3>
+                    <p>No footfall data recorded for this period.</p>
+                    <p style="margin-top: 20px; font-size: 14px;">Start the People Counter to begin recording data.</p>
+                </div>
+            `;
+            chartContainer.style.display = 'none';
+            return;
+        }
+        
+        // Calculate totals
+        let totalIn = 0, totalOut = 0;
+        report.data.forEach(item => {
+            totalIn += item.in_count || 0;
+            totalOut += item.out_count || 0;
+        });
+        
+        // Generate table based on period
+        let tableHTML = '';
+        if (period === '24hours') {
+            // Get current time for "Last Updated" display
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            
+            // Hourly table
+            tableHTML = `
+                <div style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="margin: 0;">📊 Hourly Footfall Report</h3>
+                        <div style="display: flex; gap: 20px; align-items: center;">
+                            <div style="font-size: 0.85em; color: #666; padding: 5px 10px; background: #e8f5e9; border-radius: 4px;">
+                                🔄 Auto-refreshing every 60s<br>
+                                <span style="font-size: 0.9em;">Last updated: ${timeStr}</span>
+                            </div>
+                            <div><strong>Total IN:</strong> <span style="color: #28a745;">${totalIn}</span></div>
+                            <div><strong>Total OUT:</strong> <span style="color: #dc3545;">${totalOut}</span></div>
+                            <div><strong>Net:</strong> <span style="color: #007bff;">${totalIn - totalOut}</span></div>
+                        </div>
+                    </div>
+                    
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                                    <th style="padding: 12px; text-align: left;">Hour</th>
+                                    <th style="padding: 12px; text-align: center;">Entries (IN)</th>
+                                    <th style="padding: 12px; text-align: center;">Exits (OUT)</th>
+                                    <th style="padding: 12px; text-align: center;">Total Traffic</th>
+                                    <th style="padding: 12px; text-align: center;">Net Flow</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${report.data.map(item => `
+                                    <tr style="border-bottom: 1px solid #dee2e6;">
+                                        <td style="padding: 10px; font-weight: 500;">${String(item.hour).padStart(2, '0')}:00 - ${String(item.hour).padStart(2, '0')}:59</td>
+                                        <td style="padding: 10px; text-align: center; color: #28a745;"><strong>${item.in_count}</strong></td>
+                                        <td style="padding: 10px; text-align: center; color: #dc3545;"><strong>${item.out_count}</strong></td>
+                                        <td style="padding: 10px; text-align: center;"><strong>${item.total}</strong></td>
+                                        <td style="padding: 10px; text-align: center; color: ${(item.in_count - item.out_count) >= 0 ? '#007bff' : '#fd7e14'};"><strong>${item.in_count - item.out_count > 0 ? '+' : ''}${item.in_count - item.out_count}</strong></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        } else {
+            // Daily table
+            tableHTML = `
+                <div style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="margin: 0;">📊 Daily Footfall Report</h3>
+                        <div style="display: flex; gap: 20px;">
+                            <div><strong>Total IN:</strong> <span style="color: #28a745;">${totalIn}</span></div>
+                            <div><strong>Total OUT:</strong> <span style="color: #dc3545;">${totalOut}</span></div>
+                            <div><strong>Net:</strong> <span style="color: #007bff;">${totalIn - totalOut}</span></div>
+                        </div>
+                    </div>
+                    
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                                    <th style="padding: 12px; text-align: left;">Date</th>
+                                    <th style="padding: 12px; text-align: center;">Entries (IN)</th>
+                                    <th style="padding: 12px; text-align: center;">Exits (OUT)</th>
+                                    <th style="padding: 12px; text-align: center;">Total Traffic</th>
+                                    <th style="padding: 12px; text-align: center;">Net Flow</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${report.data.map(item => {
+                                    const date = new Date(item.date);
+                                    const dateStr = date.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'});
+                                    return `
+                                        <tr style="border-bottom: 1px solid #dee2e6;">
+                                            <td style="padding: 10px; font-weight: 500;">${dateStr}</td>
+                                            <td style="padding: 10px; text-align: center; color: #28a745;"><strong>${item.in_count}</strong></td>
+                                            <td style="padding: 10px; text-align: center; color: #dc3545;"><strong>${item.out_count}</strong></td>
+                                            <td style="padding: 10px; text-align: center;"><strong>${item.total}</strong></td>
+                                            <td style="padding: 10px; text-align: center; color: ${(item.in_count - item.out_count) >= 0 ? '#007bff' : '#fd7e14'};"><strong>${item.in_count - item.out_count > 0 ? '+' : ''}${item.in_count - item.out_count}</strong></td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+        
+        contentDiv.innerHTML = tableHTML;
+        
+        // Show and update chart
+        chartContainer.style.display = 'block';
+        updateFootfallChart(report, period);
+    }
+
+    // Update footfall chart
+    function updateFootfallChart(report, period) {
+        const ctx = document.getElementById('pc-footfall-chart');
+        
+        if (!ctx) return;
+        
+        // Destroy existing chart
+        if (footfallChart) {
+            footfallChart.destroy();
+        }
+        
+        let labels, inData, outData;
+        
+        if (period === '24hours') {
+            labels = report.data.map(item => `${String(item.hour).padStart(2, '0')}:00`);
+            inData = report.data.map(item => item.in_count);
+            outData = report.data.map(item => item.out_count);
+        } else {
+            labels = report.data.map(item => {
+                const date = new Date(item.date);
+                return date.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+            });
+            inData = report.data.map(item => item.in_count);
+            outData = report.data.map(item => item.out_count);
+        }
+        
+        footfallChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Entries (IN)',
+                        data: inData,
+                        borderColor: '#28a745',
+                        backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    },
+                    {
+                        label: 'Exits (OUT)',
+                        data: outData,
+                        borderColor: '#dc3545',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: period === '24hours' ? 'Hourly Footfall Trends' : 'Daily Footfall Trends',
+                        font: {size: 16}
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Refresh current report
+    function refreshFootfallReport() {
+        const channelId = document.getElementById('pc-report-channel').value;
+        if (channelId) {
+            loadFootfallReport();
+        } else {
+            alert('Please select a channel first');
+        }
+    }
+
+    // ============= Bag Detection Functions =============
+    
+    // Load bag detection alerts
+    async function loadBagAlerts() {
+        try {
+            const channelFilter = document.getElementById('bag-alert-channel-filter').value;
+            const url = `/api/get_alert_gifs?alert_type=bag_unattended${channelFilter ? '&channel_id=' + channelFilter : ''}`;
+            
+            const response = await fetch(url);
+            const result = await response.json();
+            
+            if (result.success) {
+                displayBagAlerts(result.gifs);
+            } else {
+                console.error('Error loading bag alerts:', result.error);
+            }
+        } catch (error) {
+            console.error('Error loading bag alerts:', error);
+        }
+    }
+    
+    // Display bag alerts in grid
+    function displayBagAlerts(alerts) {
+        const grid = document.getElementById('bag-alerts-grid');
+        
+        if (!alerts || alerts.length === 0) {
+            grid.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    <h3>📦 No Alerts Yet</h3>
+                    <p>No unattended baggage detected.</p>
+                    <p style="margin-top: 20px; font-size: 14px;">Start Bag Detection to monitor for unattended items.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        grid.innerHTML = alerts.map(alert => `
+            <div class="alert-gif-card">
+                <div class="gif-preview">
+                    <img src="/static/alerts/${alert.gif_filename}" alt="Bag Alert" loading="lazy">
+                </div>
+                <div class="gif-info">
+                    <div class="gif-channel">
+                        <strong>📹 Channel:</strong> ${alert.channel_id}
+                    </div>
+                    <div class="gif-time">
+                        <strong>🕐 Time:</strong> ${new Date(alert.created_at).toLocaleString()}
+                    </div>
+                    <div class="gif-message">
+                        <strong>⚠️ Alert:</strong> ${alert.alert_message}
+                    </div>
+                    <div class="gif-stats">
+                        <span>📊 ${alert.frame_count} frames</span>
+                        <span>⏱️ ${alert.duration_seconds}s</span>
+                        <span>💾 ${(alert.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                    </div>
+                </div>
+                <div class="gif-actions">
+                    <button class="btn btn-sm" onclick="downloadAlertGif('${alert.gif_filename}')">📥 Download</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteBagAlert(${alert.id})">🗑️ Delete</button>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    // Delete bag alert
+    async function deleteBagAlert(gifId) {
+        if (!confirm('Are you sure you want to delete this alert?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/delete_alert_gif/${gifId}`, {
+                method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                loadBagAlerts();
+            } else {
+                alert('Error deleting alert: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error deleting alert:', error);
+            alert('Failed to delete alert');
+        }
+    }
+    
+    // Clear old bag alerts
+    async function clearOldBagAlerts() {
+        if (!confirm('This will delete all bag alerts older than 7 days. Continue?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/clear_old_alerts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    days: 7,
+                    alert_type: 'bag_unattended'
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                alert(`Successfully deleted ${result.deleted_count} old bag alerts`);
+                loadBagAlerts();  // Reload the alert list
+            } else {
+                alert('Error: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error clearing old bag alerts:', error);
+            alert('Failed to clear old bag alerts');
+        }
+    }
+    
+    // Open bag settings modal
+    function openBagSettingsModal() {
+        // Settings are in the settings tab, so just switch to it
+        openTab({target: document.querySelector('[onclick*="BagDetectionSettings"]')}, 'BagDetectionSettings');
+    }
+    
+    // Save bag detection settings
+    async function saveBagSettings() {
+        const settings = {
+            time_threshold: parseFloat(document.getElementById('bd-time-threshold').value),
+            proximity_threshold: parseFloat(document.getElementById('bd-proximity-threshold').value),
+            alert_cooldown: parseFloat(document.getElementById('bd-alert-cooldown').value),
+            confidence: parseFloat(document.getElementById('bd-confidence').value)
+        };
+        
+        try {
+            const response = await fetch('/api/set_bag_settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    settings: settings
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                alert('Settings saved successfully!');
+            } else {
+                alert('Error saving settings: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            alert('Failed to save settings');
+        }
+    }
+
+    // ============= Heatmap Functions =============
+    
+    // Load heatmap snapshots
+    async function loadHeatmapSnapshots() {
+        try {
+            const channelFilter = document.getElementById('hm-channel-filter')?.value || '';
+            let url = '/api/get_heatmap_snapshots?limit=50';
+            if (channelFilter) {
+                url += `&channel_id=${channelFilter}`;
+            }
+            
+            const response = await fetch(url);
+            const result = await response.json();
+            
+            if (result.success) {
+                displayHeatmapSnapshots(result.snapshots);
+            } else {
+                console.error('Failed to load heatmap snapshots:', result.error);
+            }
+        } catch (error) {
+            console.error('Error loading heatmap snapshots:', error);
+        }
+    }
+    
+    // Display heatmap snapshots in grid
+    function displayHeatmapSnapshots(snapshots) {
+        const grid = document.getElementById('heatmap-snapshots-grid');
+        
+        if (!snapshots || snapshots.length === 0) {
+            grid.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    <h3>🔥 No Snapshots Yet</h3>
+                    <p>No heatmap snapshots available.</p>
+                    <p style="margin-top: 20px; font-size: 14px;">Start Heatmap to generate activity visualizations.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        grid.innerHTML = snapshots.map(snapshot => `
+            <div class="alert-gif-card">
+                <div class="gif-preview">
+                    <img src="/static/heatmaps/${snapshot.filename}" alt="Heatmap Snapshot" loading="lazy">
+                </div>
+                <div class="gif-info">
+                    <div class="gif-channel">
+                        <strong>📹 Channel:</strong> ${snapshot.channel_id}
+                    </div>
+                    <div class="gif-time">
+                        <strong>🕐 Time:</strong> ${new Date(snapshot.created_at).toLocaleString()}
+                    </div>
+                    <div class="gif-stats">
+                        <span>💾 ${(snapshot.file_size / 1024).toFixed(2)} KB</span>
+                    </div>
+                </div>
+                <div class="gif-actions">
+                    <button class="btn btn-sm" onclick="downloadHeatmapSnapshot('${snapshot.filename}')">📥 Download</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteHeatmapSnapshot(${snapshot.id})">🗑️ Delete</button>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    // Download heatmap snapshot
+    function downloadHeatmapSnapshot(filename) {
+        const link = document.createElement('a');
+        link.href = `/static/heatmaps/${filename}`;
+        link.download = filename;
+        link.click();
+    }
+    
+    // Delete heatmap snapshot
+    async function deleteHeatmapSnapshot(snapshotId) {
+        if (!confirm('Are you sure you want to delete this snapshot?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/delete_heatmap_snapshot/${snapshotId}`, {
+                method: 'DELETE'
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                loadHeatmapSnapshots();  // Reload the list
+            } else {
+                alert('Error deleting snapshot: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error deleting snapshot:', error);
+            alert('Failed to delete snapshot');
+        }
+    }
+    
+    // Clear old heatmap snapshots (7+ days)
+    async function clearOldHeatmapSnapshots() {
+        if (!confirm('Delete all snapshots older than 7 days?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/clear_old_heatmap_snapshots', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ days: 7 })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                alert(`Deleted ${result.deleted_count} old snapshots`);
+                loadHeatmapSnapshots();
+            } else {
+                alert('Error: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error clearing old heatmap snapshots:', error);
+        }
+    }
+    
+    // Capture manual heatmap snapshot
+    async function captureHeatmapSnapshot() {
+        const selector = document.getElementById('hm-channel-selector');
+        const channelId = selector.value;
+        
+        if (!channelId) {
+            alert('Please select a channel first');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/capture_heatmap_snapshot', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    channel_id: channelId
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                alert('Snapshot captured successfully!');
+                // Switch to snapshots tab and reload
+                openTab({target: document.querySelector('[onclick*="HeatmapSnapshots"]')}, 'HeatmapSnapshots');
+                loadHeatmapSnapshots();
+            } else {
+                alert('Error capturing snapshot: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error capturing snapshot:', error);
+            alert('Failed to capture snapshot');
+        }
+    }
+    
+    // Save heatmap settings
+    async function saveHeatmapSettings() {
+        const settings = {
+            decay_rate: parseFloat(document.getElementById('hm-decay-rate').value),
+            snapshot_interval: parseInt(document.getElementById('hm-snapshot-interval').value),
+            intensity: parseFloat(document.getElementById('hm-intensity').value)
+        };
+        
+        const selector = document.getElementById('hm-channel-selector');
+        const channelId = selector.value;
+        
+        if (!channelId) {
+            alert('Please select a channel first');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/set_heatmap_settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    channel_id: channelId,
+                    ...settings
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                alert('Settings saved successfully!');
+            } else {
+                alert('Error saving settings: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            alert('Failed to save settings');
+        }
+    }
+
+    // Listen for real-time alert GIF creation
+    socket.on('alert_gif_created', (data) => {
+        console.log('New alert GIF created:', data);
+        
+        // Show notification
+        if (Notification.permission === 'granted') {
+            new Notification('Alert Recording Created', {
+                body: `New alert GIF created for channel ${data.channel_id}`,
+                icon: '/static/icon.png'
+            });
+        }
+        
+        // Refresh alert GIFs if on the alerts tab
+        const alertsTab = document.getElementById('QueueMonitorReports');
+        if (alertsTab && alertsTab.classList.contains('active')) {
+            loadAlertGifs();
+        }
+    });
+
+    // Unified function to start analysis modules
+    async function startAnalysisModule(appName) {
+        const selectorId = appName === 'PeopleCounter' ? 'pc-channel-selector' : 
+                          appName === 'QueueMonitor' ? 'qm-channel-selector' :
+                          appName === 'Heatmap' ? 'hm-channel-selector' :
+                          'bd-channel-selector';
+        const selector = document.getElementById(selectorId);
+        const channelId = selector.value;
+        
+        if (!channelId) {
+            alert('Please select a channel first');
+            return;
+        }
+
+        // Get the selected option to determine source type and path
+        const selectedOption = selector.options[selector.selectedIndex];
+        const sourceType = selectedOption.dataset.type;
+        const rtspUrl = selectedOption.dataset.rtspUrl;
+        const videoPath = selectedOption.dataset.videoPath;
+
+        try {
+            const requestBody = {
+                app_name: appName,
+                channel_id: channelId
+            };
+
+            // Add appropriate source based on type
+            if (sourceType === 'rtsp' && rtspUrl) {
+                requestBody.rtsp_url = rtspUrl;
+            } else if (sourceType === 'video' && videoPath) {
+                requestBody.video_path = videoPath;
+            } else {
+                // Fallback for backward compatibility
+                requestBody.video_path = `videos/${channelId}.mp4`;
+            }
+
+            const response = await fetch('/api/start_channel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Check if this is a shared channel
+                if (result.shared) {
+                    sharedChannels[channelId] = result.active_modules || [];
+                    showSharedChannelNotification(channelId, appName, result.active_modules);
+                }
+                
+                addVideoStream(appName, channelId, result.shared, result.active_modules);
+                activeChannels[appName][channelId] = { 
+                    status: 'online', 
+                    shared: result.shared,
+                    active_modules: result.active_modules || [appName],
+                    source_type: result.source_type || sourceType,
+                    video_source: result.video_source || (rtspUrl || videoPath)
+                };
+                
+                console.log(`Started ${appName} on ${sourceType} source:`, result.video_source);
+                
+                // Apply saved configurations after channel starts
+                // Give it a moment for the video processing to initialize
+                setTimeout(() => {
+                    applySavedConfigurations(channelId, appName);
+                }, 1000);
+                
+            } else {
+                alert(`Failed to start ${appName}: ${result.error}`);
+            }
+        } catch (error) {
+            console.error(`Error starting ${appName}:`, error);
+            alert(`Failed to start ${appName}`);
+        }
+    }
+
+    // Unified function to stop analysis modules
+    async function stopAnalysisModule(appName) {
+        const selectorId = appName === 'PeopleCounter' ? 'pc-channel-selector' : 'qm-channel-selector';
+        const selector = document.getElementById(selectorId);
+        const channelId = selector.value;
+        
+        if (!channelId) return;
+
+        try {
+            const response = await fetch('/api/stop_channel', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    app_name: appName,
+                    channel_id: channelId
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                removeVideoStream(appName, channelId);
+                delete activeChannels[appName][channelId];
+                
+                // Update shared channel info
+                if (channelId in sharedChannels) {
+                    sharedChannels[channelId] = sharedChannels[channelId].filter(m => m !== appName);
+                    if (sharedChannels[channelId].length === 0) {
+                        delete sharedChannels[channelId];
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`Error stopping ${appName}:`, error);
+        }
+    }
+
+    // Show notification when channel is shared
+    function showSharedChannelNotification(channelId, newModule, activeModules) {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #238636;
+            color: white;
+            padding: 15px;
+            border-radius: 6px;
+            z-index: 10000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            max-width: 300px;
+        `;
+        notification.innerHTML = `
+            <strong>Shared Channel Active!</strong><br>
+            Channel ${channelId} is now running:<br>
+            ${activeModules.join(', ')}<br>
+            <small>Multiple analyses on the same video feed</small>
+            <button onclick="this.parentElement.remove()" style="float: right; background: none; border: none; color: white; font-size: 18px; cursor: pointer;">&times;</button>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 8 seconds
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.remove();
+            }
+        }, 8000);
+    }
+
+    // Video stream management
+    function addVideoStream(appName, channelId, isShared = false, activeModules = []) {
+        const gridId = appName === 'PeopleCounter' ? 'pc-video-grid' : 
+                      appName === 'QueueMonitor' ? 'qm-video-grid' :
+                      appName === 'Heatmap' ? 'hm-video-grid' :
+                      'bd-video-grid';
+        const grid = document.getElementById(gridId);
+        
+        // Check if stream already exists
+        if (document.getElementById(`stream-box-${appName}-${channelId}`)) {
+            return; // Already exists
+        }
+        
+        const streamBox = document.createElement('div');
+        streamBox.className = 'stream-box';
+        streamBox.id = `stream-box-${appName}-${channelId}`;
+        
+        const controls = appName === 'PeopleCounter' 
+            ? `<button class="btn" onclick="openLineEditor('${appName}', '${channelId}')">Edit Counting Line</button>`
+            : appName === 'QueueMonitor'
+            ? `<button class="btn" onclick="openRoiEditor('${appName}', '${channelId}')">Configure Areas</button>`
+            : appName === 'Heatmap'
+            ? `<button class="btn" onclick="captureHeatmapSnapshot()">📸 Capture Snapshot</button>`
+            : ``; // BagDetection doesn't need manual configuration
+        
+        const sharedIndicator = isShared 
+            ? `<span class="status-indicator" style="background: rgba(255, 165, 0, 0.2); color: orange; margin-left: 10px;">
+                 Shared: ${activeModules.join(', ')}
+               </span>`
+            : '';
+        
+        streamBox.innerHTML = `
+            <div class="stream-header">
+                Channel ${channelId} - ${appName}
+                <span class="status-indicator status-online">Live</span>
+                ${sharedIndicator}
+            </div>
+            <div style="position: relative;">
+                <img src="/video_feed/${appName}/${channelId}?t=${Date.now()}" alt="Video Feed" style="width: 100%; height: auto;">
+                <canvas class="roi-canvas" id="roi-canvas-${channelId}"></canvas>
+                <canvas class="line-canvas" id="line-canvas-${channelId}"></canvas>
+            </div>
+            <div class="stream-footer">
+                ${appName === 'PeopleCounter' 
+                    ? `IN: <span id="in-count-${channelId}">0</span> | OUT: <span id="out-count-${channelId}">0</span>`
+                    : appName === 'QueueMonitor'
+                    ? `Queue: <span id="queue-count-${channelId}">0</span> | Counter: <span id="counter-count-${channelId}">0</span>`
+                    : appName === 'Heatmap'
+                    ? `Activity Zones Detected: <span id="activity-zones-${channelId}">0</span>`
+                    : `Bags: <span id="bags-tracked-${channelId}">0</span> | Alerts: <span id="active-alerts-${channelId}">0</span>`
+                }
+            </div>
+            <div style="padding: 10px; border-top: 1px solid var(--border-color);">
+                ${controls}
+                ${isShared ? `<button class="btn" onclick="showChannelStatus('${channelId}')" style="margin-left: 10px;">Show All Analytics</button>` : ''}
+            </div>
+        `;
+        
+        grid.appendChild(streamBox);
+    }
+
+    function removeVideoStream(appName, channelId) {
+        const streamBox = document.getElementById(`stream-box-${appName}-${channelId}`);
+        if (streamBox) {
+            streamBox.remove();
+        }
+    }
+
+    // Show status of all modules on a shared channel
+    async function showChannelStatus(channelId) {
+        try {
+            const response = await fetch(`/api/get_channel_status/${channelId}`);
+            const status = await response.json();
+            
+            if (status.error) {
+                alert(`Error: ${status.error}`);
+                return;
+            }
+            
+            let statusText = `Channel ${channelId} Status:\n\n`;
+            statusText += `Active Modules: ${status.active_modules.join(', ')}\n`;
+            statusText += `Processing: ${status.frames_processed} frames\n`;
+            statusText += `Average FPS: ${status.average_fps.toFixed(2)}\n\n`;
+            
+            if (status.module_info) {
+                for (const [moduleName, moduleData] of Object.entries(status.module_info)) {
+                    statusText += `${moduleName}:\n`;
+                    if (moduleName === 'PeopleCounter') {
+                        statusText += `  IN: ${moduleData.in_count || 0}\n`;
+                        statusText += `  OUT: ${moduleData.out_count || 0}\n`;
+                        statusText += `  Net: ${moduleData.net_count || 0}\n`;
+                    } else if (moduleName === 'QueueMonitor') {
+                        statusText += `  Queue: ${moduleData.queue_count || 0}\n`;
+                        statusText += `  Counter: ${moduleData.counter_count || 0}\n`;
+                        statusText += `  ROI Configured: ${moduleData.roi_configured ? 'Yes' : 'No'}\n`;
+                    }
+                    statusText += '\n';
+                }
+            }
+            
+            alert(statusText);
+            
+        } catch (error) {
+            console.error('Error getting channel status:', error);
+            alert('Failed to get channel status');
+        }
+    }
+
+    // Update displays
+    function updatePeopleCountDisplay(data) {
+        const inCountEl = document.getElementById(`in-count-${data.channel_id}`);
+        const outCountEl = document.getElementById(`out-count-${data.channel_id}`);
+        
+        if (inCountEl) inCountEl.textContent = data.in_count;
+        if (outCountEl) outCountEl.textContent = data.out_count;
+    }
+
+    function updateQueueDisplay(data) {
+        const queueCountEl = document.getElementById(`queue-count-${data.channel_id}`);
+        const counterCountEl = document.getElementById(`counter-count-${data.channel_id}`);
+        
+        if (queueCountEl) queueCountEl.textContent = data.queue_count;
+        if (counterCountEl) counterCountEl.textContent = data.counter_count;
+    }
+
+    function updateBagDetectionDisplay(data) {
+        const bagsTrackedEl = document.getElementById(`bags-tracked-${data.channel_id}`);
+        const activeAlertsEl = document.getElementById(`active-alerts-${data.channel_id}`);
+        
+        if (bagsTrackedEl) bagsTrackedEl.textContent = data.bags_tracked || 0;
+        if (activeAlertsEl) activeAlertsEl.textContent = data.active_alerts || 0;
+    }
+
+    function showQueueAlert(data) {
+        // Show alert notification
+        const alertDiv = document.createElement('div');
+        alertDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #f87171;
+            color: white;
+            padding: 15px;
+            border-radius: 6px;
+            z-index: 10000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        `;
+        alertDiv.innerHTML = `
+            <strong>Queue Alert!</strong><br>
+            ${data.message}
+            <button onclick="this.parentElement.remove()" style="float: right; background: none; border: none; color: white; font-size: 18px; cursor: pointer;">&times;</button>
+        `;
+        
+        document.body.appendChild(alertDiv);
+        
+        // Auto-remove after 10 seconds
+        setTimeout(() => {
+            if (alertDiv.parentElement) {
+                alertDiv.remove();
+            }
+        }, 10000);
+    }
+
+    // Tab functionality
+    function openTab(evt, tabName) {
+        const tabContents = document.querySelectorAll('.tab-content');
+        const tabButtons = document.querySelectorAll('.tab-button');
+        
+        tabContents.forEach(content => content.classList.remove('active'));
+        tabButtons.forEach(button => button.classList.remove('active'));
+        
+        document.getElementById(tabName).classList.add('active');
+        evt.currentTarget.classList.add('active');
+    }
+
+    // ROI Editor functions
+    function openRoiEditor(appName, channelId) {
+        roiState.currentApp = appName;
+        roiState.currentChannel = channelId;
+        roiState.points = { main: [], secondary: [] };
+        roiState.imageLoaded = false;
+        roiState.isDragging = false;
+        roiState.dragPointIndex = -1;
+        roiState.isDrawing = false;
+        
+        const modal = document.getElementById('roiModal');
+        const image = document.getElementById('roiImage');
+        const canvas = document.getElementById('roiCanvas');
+        
+        roiState.canvas = canvas;
+        roiState.ctx = canvas.getContext('2d');
+        
+        // Load existing ROI configuration
+        loadExistingRoiConfig(appName, channelId);
+        
+        // Set up image load handler
+        image.onload = function() {
+            // Set canvas size to match image
+            canvas.width = image.width;
+            canvas.height = image.height;
+            canvas.style.width = image.offsetWidth + 'px';
+            canvas.style.height = image.offsetHeight + 'px';
+            
+            roiState.imageLoaded = true;
+            drawRoi();
+            setupRoiInteraction();
+        };
+        
+        image.src = `/video_feed/${appName}/${channelId}?t=${Date.now()}`;
+        modal.style.display = 'block';
+    }
+
+    async function loadExistingRoiConfig(appName, channelId) {
+        try {
+            // First try to get from running module
+            const response = await fetch(`/api/get_roi/${appName}/${channelId}`);
+            const result = await response.json();
+            
+            if (result.success && result.roi_points) {
+                roiState.points = result.roi_points;
+                console.log('✅ Loaded ROI from running module:', result.roi_points);
+            } else {
+                // If not running, load from database
+                const savedConfig = await loadConfigFromDatabase(channelId, appName, 'roi');
+                if (savedConfig) {
+                    roiState.points = savedConfig;
+                    console.log('✅ Loaded ROI from database:', savedConfig);
+                } else {
+                    roiState.points = { main: [], secondary: [] };
+                    console.log('ℹ️ No saved ROI configuration found');
+                }
+            }
+        } catch (error) {
+            console.error('Error loading ROI configuration:', error);
+            roiState.points = { main: [], secondary: [] };
+        }
+    }
+
+    function setupRoiInteraction() {
+        const canvas = roiState.canvas;
+        
+        // Mouse event handlers
+        canvas.onmousedown = handleRoiMouseDown;
+        canvas.onmousemove = handleRoiMouseMove;
+        canvas.onmouseup = handleRoiMouseUp;
+        canvas.onmouseleave = handleRoiMouseUp;
+        canvas.ondblclick = handleRoiDoubleClick;
+        
+        // Touch event handlers for mobile
+        canvas.ontouchstart = handleRoiTouchStart;
+        canvas.ontouchmove = handleRoiTouchMove;
+        canvas.ontouchend = handleRoiTouchEnd;
+    }
+
+    function getRoiCanvasCoordinates(event) {
+        const canvas = roiState.canvas;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        let clientX, clientY;
+        if (event.touches && event.touches.length > 0) {
+            clientX = event.touches[0].clientX;
+            clientY = event.touches[0].clientY;
+        } else {
+            clientX = event.clientX;
+            clientY = event.clientY;
+        }
+        
+        return {
+            x: (clientX - rect.left) * scaleX / canvas.width,
+            y: (clientY - rect.top) * scaleY / canvas.height
+        };
+    }
+
+    function getDistanceToRoiPoint(mousePos, point) {
+        const canvasPos = {
+            x: point.x * roiState.canvas.width,
+            y: point.y * roiState.canvas.height
+        };
+        const mouseCanvasPos = {
+            x: mousePos.x * roiState.canvas.width,
+            y: mousePos.y * roiState.canvas.height
+        };
+        
+        return Math.sqrt(
+            Math.pow(mouseCanvasPos.x - canvasPos.x, 2) + 
+            Math.pow(mouseCanvasPos.y - canvasPos.y, 2)
+        );
+    }
+
+    function handleRoiMouseDown(event) {
+        event.preventDefault();
+        const mousePos = getRoiCanvasCoordinates(event);
+        
+        // Check if clicking near existing points for dragging
+        let foundPoint = false;
+        ['main', 'secondary'].forEach(mode => {
+            roiState.points[mode].forEach((point, index) => {
+                if (getDistanceToRoiPoint(mousePos, point) < 15) {
+                    roiState.isDragging = true;
+                    roiState.dragPointIndex = index;
+                    roiState.currentMode = mode;
+                    roiState.canvas.style.cursor = 'grabbing';
+                    foundPoint = true;
+                    
+                    // Update mode buttons
+                    updateRoiModeButtons(mode);
+                }
+            });
+        });
+        
+        // If not dragging existing point, start drawing new point
+        if (!foundPoint) {
+            const newPoint = {
+                x: Math.max(0, Math.min(1, mousePos.x)),
+                y: Math.max(0, Math.min(1, mousePos.y))
+            };
+            roiState.points[roiState.currentMode].push(newPoint);
+            roiState.isDrawing = true;
+            drawRoi();
+            updateRoiInfo();
+        }
+    }
+
+    function handleRoiMouseMove(event) {
+        event.preventDefault();
+        const mousePos = getRoiCanvasCoordinates(event);
+        
+        if (roiState.isDragging && roiState.dragPointIndex >= 0) {
+            // Update dragged point position
+            roiState.points[roiState.currentMode][roiState.dragPointIndex] = {
+                x: Math.max(0, Math.min(1, mousePos.x)),
+                y: Math.max(0, Math.min(1, mousePos.y))
+            };
+            drawRoi();
+            updateRoiInfo();
+        } else {
+            // Update cursor based on hover position
+            let cursor = 'crosshair';
+            let hovering = false;
+            
+            ['main', 'secondary'].forEach(mode => {
+                roiState.points[mode].forEach((point, index) => {
+                    if (getDistanceToRoiPoint(mousePos, point) < 15) {
+                        cursor = 'grab';
+                        hovering = true;
+                        roiState.hoverPointIndex = index;
+                        roiState.hoverMode = mode;
+                    }
+                });
+            });
+            
+            if (!hovering) {
+                roiState.hoverPointIndex = -1;
+                roiState.hoverMode = null;
+            }
+            
+            roiState.canvas.style.cursor = cursor;
+        }
+    }
+
+    function handleRoiMouseUp(event) {
+        roiState.isDragging = false;
+        roiState.dragPointIndex = -1;
+        roiState.isDrawing = false;
+        roiState.canvas.style.cursor = 'crosshair';
+    }
+
+    function handleRoiDoubleClick(event) {
+        event.preventDefault();
+        const mousePos = getRoiCanvasCoordinates(event);
+        
+        // Check if double-clicking on a point to delete it
+        ['main', 'secondary'].forEach(mode => {
+            roiState.points[mode].forEach((point, index) => {
+                if (getDistanceToRoiPoint(mousePos, point) < 15) {
+                    roiState.points[mode].splice(index, 1);
+                    drawRoi();
+                    updateRoiInfo();
+                }
+            });
+        });
+    }
+
+    // Touch event handlers
+    function handleRoiTouchStart(event) {
+        event.preventDefault();
+        handleRoiMouseDown(event);
+    }
+
+    function handleRoiTouchMove(event) {
+        event.preventDefault();
+        handleRoiMouseMove(event);
+    }
+
+    function handleRoiTouchEnd(event) {
+        event.preventDefault();
+        handleRoiMouseUp(event);
+    }
+
+    function updateRoiModeButtons(mode) {
+        const buttons = document.querySelectorAll('#roiModal .btn-group .btn');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        if (mode === 'main') {
+            buttons[0]?.classList.add('selected');
+        } else {
+            buttons[1]?.classList.add('selected');
+        }
+    }
+
+    function drawRoi() {
+        if (!roiState.imageLoaded || !roiState.ctx) return;
+        
+        const ctx = roiState.ctx;
+        const canvas = roiState.canvas;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw main ROI (Queue Area) in yellow
+        if (roiState.points.main.length > 0) {
+            drawRoiPolygon(ctx, roiState.points.main, '#ffff00', null, 'Queue Area');
+        }
+        
+        // Draw secondary ROI (Counter Area) in cyan
+        if (roiState.points.secondary.length > 0) {
+            drawRoiPolygon(ctx, roiState.points.secondary, '#00ffff', null, 'Counter Area');
+        }
+        
+        // Update ROI info
+        updateRoiInfo();
+    }
+
+    function drawRoiPolygon(ctx, points, strokeColor, fillColor, label) {
+        if (points.length === 0) return;
+        
+        const canvas = roiState.canvas;
+        
+        // Draw polygon outline only (no fill)
+        if (points.length > 1) {
+            ctx.beginPath();
+            ctx.moveTo(points[0].x * canvas.width, points[0].y * canvas.height);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x * canvas.width, points[i].y * canvas.height);
+            }
+            if (points.length > 2) {
+                ctx.closePath();
+            }
+            
+            // Draw border with shadow for better visibility
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 5;
+            ctx.stroke();
+            
+            // Draw main border
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+        
+        // Draw points
+        points.forEach((point, index) => {
+            const x = point.x * canvas.width;
+            const y = point.y * canvas.height;
+            
+            // Draw point circle with border only
+            ctx.beginPath();
+            ctx.arc(x, y, 10, 0, 2 * Math.PI);
+            ctx.fillStyle = strokeColor;
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            // Draw inner circle
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            
+            // Draw point number
+            ctx.font = 'bold 12px Arial';
+            ctx.fillStyle = '#000000';
+            ctx.fillText((index + 1).toString(), x + 15, y - 8);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText((index + 1).toString(), x + 14, y - 9);
+        });
+        
+        // Draw label if polygon is complete
+        if (points.length > 2) {
+            // Calculate center of polygon for label placement
+            let centerX = 0, centerY = 0;
+            points.forEach(point => {
+                centerX += point.x * canvas.width;
+                centerY += point.y * canvas.height;
+            });
+            centerX /= points.length;
+            centerY /= points.length;
+            
+            // Draw label background
+            ctx.font = 'bold 14px Arial';
+            const textWidth = ctx.measureText(label).width;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(centerX - textWidth/2 - 8, centerY - 22, textWidth + 16, 28);
+            
+            // Draw label border
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(centerX - textWidth/2 - 8, centerY - 22, textWidth + 16, 28);
+            
+            // Draw label text
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(label, centerX - textWidth/2, centerY - 5);
+        }
+    }
+
+    function updateRoiInfo() {
+        // Update info display if element exists
+        const infoElement = document.getElementById('roiInfo');
+        if (infoElement) {
+            const mainPoints = roiState.points.main.length;
+            const secondaryPoints = roiState.points.secondary.length;
+            infoElement.innerHTML = `
+                Queue Area: ${mainPoints} points${mainPoints > 2 ? ' (Complete)' : ''} | 
+                Counter Area: ${secondaryPoints} points${secondaryPoints > 2 ? ' (Complete)' : ''}
+            `;
+        }
+    }
+
+    function closeRoiModal() {
+        document.getElementById('roiModal').style.display = 'none';
+    }
+
+    function setRoiMode(mode) {
+        roiState.currentMode = mode;
+        const buttons = document.querySelectorAll('#roiModal .btn-group .btn');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        event.target.classList.add('selected');
+        
+        // Update instructions based on mode
+        updateRoiInstructions(mode);
+    }
+
+    function updateRoiInstructions(mode) {
+        const instructionElement = document.getElementById('roiInstructions');
+        if (instructionElement) {
+            const modeText = mode === 'main' ? 'Queue Area (Yellow)' : 'Counter Area (Cyan)';
+            instructionElement.innerHTML = `
+                <strong>Drawing ${modeText}:</strong>
+                <ul style="margin: 5px 0 0 20px; font-size: 0.9em;">
+                    <li>Click to add points and create polygon boundaries</li>
+                    <li>Drag existing points to adjust the area shape</li>
+                    <li>Double-click on points to delete them</li>
+                    <li>Need at least 3 points to form a complete area</li>
+                </ul>
+            `;
+        }
+    }
+
+    function clearCurrentRoi() {
+        roiState.points[roiState.currentMode] = [];
+        if (roiState.imageLoaded) {
+            drawRoi();
+        }
+    }
+
+    function clearAllRoi() {
+        roiState.points = { main: [], secondary: [] };
+        if (roiState.imageLoaded) {
+            drawRoi();
+        }
+    }
+
+    function createRectangleRoi() {
+        // Create a rectangular ROI in the center
+        const mode = roiState.currentMode;
+        roiState.points[mode] = [
+            {x: 0.3, y: 0.3},
+            {x: 0.7, y: 0.3},
+            {x: 0.7, y: 0.7},
+            {x: 0.3, y: 0.7}
+        ];
+        if (roiState.imageLoaded) {
+            drawRoi();
+        }
+    }
+
+    function createCircleRoi() {
+        // Create a circular ROI (approximated with many points)
+        const mode = roiState.currentMode;
+        const centerX = 0.5;
+        const centerY = 0.5;
+        const radius = 0.2;
+        const numPoints = 12;
+        
+        roiState.points[mode] = [];
+        for (let i = 0; i < numPoints; i++) {
+            const angle = (i / numPoints) * 2 * Math.PI;
+            roiState.points[mode].push({
+                x: centerX + radius * Math.cos(angle),
+                y: centerY + radius * Math.sin(angle)
+            });
+        }
+        if (roiState.imageLoaded) {
+            drawRoi();
+        }
+    }
+
+    async function saveRoi() {
+        try {
+            // Save to active module (runtime)
+            const response = await fetch('/api/set_roi', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    app_name: roiState.currentApp,
+                    channel_id: roiState.currentChannel,
+                    roi_points: roiState.points
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Save to database for persistence
+                await saveConfigToDatabase(roiState.currentChannel, roiState.currentApp, 'roi', roiState.points);
+                alert('ROI configuration saved successfully!');
+                closeRoiModal();
+            } else {
+                alert(`Error saving ROI: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('Error saving ROI:', error);
+            alert('Failed to save ROI configuration');
+        }
+    }
+
+    // Line Editor functions
+    function openLineEditor(appName, channelId) {
+        lineState.currentApp = appName;
+        lineState.currentChannel = channelId;
+        
+        const modal = document.getElementById('lineModal');
+        const image = document.getElementById('lineImage');
+        const canvas = document.getElementById('lineCanvas');
+        
+        lineState.canvas = canvas;
+        lineState.ctx = canvas.getContext('2d');
+        lineState.imageLoaded = false;
+        
+        // Load existing line configuration
+        loadExistingLineConfig(appName, channelId);
+        
+        // Set up image load handler
+        image.onload = function() {
+            // Set canvas size to match image
+            canvas.width = image.width;
+            canvas.height = image.height;
+            canvas.style.width = image.offsetWidth + 'px';
+            canvas.style.height = image.offsetHeight + 'px';
+            
+            lineState.imageLoaded = true;
+            drawLine();
+            setupLineInteraction();
+        };
+        
+        image.src = `/video_feed/${appName}/${channelId}?t=${Date.now()}`;
+        modal.style.display = 'block';
+    }
+
+    async function loadExistingLineConfig(appName, channelId) {
+        try {
+            // First try to get from running module
+            const response = await fetch(`/api/get_counting_line/${appName}/${channelId}`);
+            const result = await response.json();
+            
+            if (result.success && result.line_config) {
+                const config = result.line_config;
+                lineState.line = {
+                    start: config.start,
+                    end: config.end
+                };
+                lineState.orientation = config.orientation || 'vertical';
+                
+                // Update orientation buttons
+                const buttons = document.querySelectorAll('#lineModal .btn-group .btn');
+                buttons.forEach(btn => btn.classList.remove('selected'));
+                if (lineState.orientation === 'vertical') {
+                    buttons[0]?.classList.add('selected');
+                } else if (lineState.orientation === 'horizontal') {
+                    buttons[1]?.classList.add('selected');
+                } else {
+                    buttons[2]?.classList.add('selected');
+                }
+                
+                console.log('✅ Loaded line from running module:', config);
+            } else {
+                // If not running, load from database
+                const savedConfig = await loadConfigFromDatabase(channelId, appName, 'counting_line');
+                if (savedConfig) {
+                    lineState.line = {
+                        start: savedConfig.start,
+                        end: savedConfig.end
+                    };
+                    lineState.orientation = savedConfig.orientation || 'vertical';
+                    
+                    // Update orientation buttons
+                    const buttons = document.querySelectorAll('#lineModal .btn-group .btn');
+                    buttons.forEach(btn => btn.classList.remove('selected'));
+                    if (lineState.orientation === 'vertical') {
+                        buttons[0]?.classList.add('selected');
+                    } else if (lineState.orientation === 'horizontal') {
+                        buttons[1]?.classList.add('selected');
+                    } else {
+                        buttons[2]?.classList.add('selected');
+                    }
+                    
+                    console.log('✅ Loaded line from database:', savedConfig);
+                } else {
+                    // Use default configuration
+                    lineState.line = { start: {x: 0.5, y: 0.1}, end: {x: 0.5, y: 0.9} };
+                    lineState.orientation = 'vertical';
+                    console.log('ℹ️ No saved line configuration found, using default');
+                }
+            }
+        } catch (error) {
+            console.error('Error loading line configuration:', error);
+            // Use default configuration if loading fails
+            lineState.line = { start: {x: 0.5, y: 0.1}, end: {x: 0.5, y: 0.9} };
+            lineState.orientation = 'vertical';
+        }
+    }
+
+    function setupLineInteraction() {
+        const canvas = lineState.canvas;
+        
+        // Mouse event handlers
+        canvas.onmousedown = handleLineMouseDown;
+        canvas.onmousemove = handleLineMouseMove;
+        canvas.onmouseup = handleLineMouseUp;
+        canvas.onmouseleave = handleLineMouseUp;
+        
+        // Touch event handlers for mobile
+        canvas.ontouchstart = handleLineTouchStart;
+        canvas.ontouchmove = handleLineTouchMove;
+        canvas.ontouchend = handleLineTouchEnd;
+    }
+
+    function getCanvasCoordinates(event) {
+        const canvas = lineState.canvas;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        let clientX, clientY;
+        if (event.touches && event.touches.length > 0) {
+            clientX = event.touches[0].clientX;
+            clientY = event.touches[0].clientY;
+        } else {
+            clientX = event.clientX;
+            clientY = event.clientY;
+        }
+        
+        return {
+            x: (clientX - rect.left) * scaleX / canvas.width,
+            y: (clientY - rect.top) * scaleY / canvas.height
+        };
+    }
+
+    function getDistanceToPoint(mousePos, point) {
+        const canvasPos = {
+            x: point.x * lineState.canvas.width,
+            y: point.y * lineState.canvas.height
+        };
+        const mouseCanvasPos = {
+            x: mousePos.x * lineState.canvas.width,
+            y: mousePos.y * lineState.canvas.height
+        };
+        
+        return Math.sqrt(
+            Math.pow(mouseCanvasPos.x - canvasPos.x, 2) + 
+            Math.pow(mouseCanvasPos.y - canvasPos.y, 2)
+        );
+    }
+
+    function getDistanceToLine(mousePos, line) {
+        const start = {
+            x: line.start.x * lineState.canvas.width,
+            y: line.start.y * lineState.canvas.height
+        };
+        const end = {
+            x: line.end.x * lineState.canvas.width,
+            y: line.end.y * lineState.canvas.height
+        };
+        const mouse = {
+            x: mousePos.x * lineState.canvas.width,
+            y: mousePos.y * lineState.canvas.height
+        };
+        
+        // Calculate distance from point to line segment
+        const A = mouse.x - start.x;
+        const B = mouse.y - start.y;
+        const C = end.x - start.x;
+        const D = end.y - start.y;
+        
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        
+        if (lenSq === 0) return Math.sqrt(A * A + B * B); // start and end are the same point
+        
+        let param = dot / lenSq;
+        
+        let xx, yy;
+        if (param < 0) {
+            xx = start.x;
+            yy = start.y;
+        } else if (param > 1) {
+            xx = end.x;
+            yy = end.y;
+        } else {
+            xx = start.x + param * C;
+            yy = start.y + param * D;
+        }
+        
+        const dx = mouse.x - xx;
+        const dy = mouse.y - yy;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function handleLineMouseDown(event) {
+        event.preventDefault();
+        const mousePos = getCanvasCoordinates(event);
+        
+        // Check if clicking near start point (within 20 pixels for easier grabbing)
+        if (getDistanceToPoint(mousePos, lineState.line.start) < 20 / lineState.canvas.width) {
+            lineState.isDragging = true;
+            lineState.dragPoint = 'start';
+            lineState.canvas.style.cursor = 'grabbing';
+            return;
+        }
+        
+        // Check if clicking near end point (within 20 pixels for easier grabbing)
+        if (getDistanceToPoint(mousePos, lineState.line.end) < 20 / lineState.canvas.width) {
+            lineState.isDragging = true;
+            lineState.dragPoint = 'end';
+            lineState.canvas.style.cursor = 'grabbing';
+            return;
+        }
+        
+        // Check if clicking near the line (within 15 pixels for easier grabbing)
+        if (getDistanceToLine(mousePos, lineState.line) < 15) {
+            lineState.isDragging = true;
+            lineState.dragPoint = 'line';
+            lineState.dragOffset = {
+                x: mousePos.x - lineState.line.start.x,
+                y: mousePos.y - lineState.line.start.y
+            };
+            lineState.canvas.style.cursor = 'grabbing';
+            return;
+        }
+    }
+
+    function handleLineMouseMove(event) {
+        event.preventDefault();
+        const mousePos = getCanvasCoordinates(event);
+        
+        if (lineState.isDragging) {
+            if (lineState.dragPoint === 'start') {
+                // Allow free movement of start point anywhere within canvas
+                lineState.line.start = { 
+                    x: Math.max(0, Math.min(1, mousePos.x)), 
+                    y: Math.max(0, Math.min(1, mousePos.y)) 
+                };
+                // Update orientation based on line angle
+                updateLineOrientation();
+            } else if (lineState.dragPoint === 'end') {
+                // Allow free movement of end point anywhere within canvas
+                lineState.line.end = { 
+                    x: Math.max(0, Math.min(1, mousePos.x)), 
+                    y: Math.max(0, Math.min(1, mousePos.y)) 
+                };
+                // Update orientation based on line angle
+                updateLineOrientation();
+            } else if (lineState.dragPoint === 'line') {
+                // Move entire line while maintaining length and angle
+                const newStartX = mousePos.x - lineState.dragOffset.x;
+                const newStartY = mousePos.y - lineState.dragOffset.y;
+                const deltaX = lineState.line.end.x - lineState.line.start.x;
+                const deltaY = lineState.line.end.y - lineState.line.start.y;
+                
+                // Calculate bounded positions to keep entire line within canvas
+                let boundedStartX = Math.max(0, Math.min(1, newStartX));
+                let boundedStartY = Math.max(0, Math.min(1, newStartY));
+                
+                // Check if end point would go out of bounds and adjust accordingly
+                if (boundedStartX + deltaX > 1) boundedStartX = 1 - deltaX;
+                if (boundedStartX + deltaX < 0) boundedStartX = -deltaX;
+                if (boundedStartY + deltaY > 1) boundedStartY = 1 - deltaY;
+                if (boundedStartY + deltaY < 0) boundedStartY = -deltaY;
+                
+                lineState.line.start = { x: boundedStartX, y: boundedStartY };
+                lineState.line.end = { x: boundedStartX + deltaX, y: boundedStartY + deltaY };
+            }
+            drawLine();
+            updateLineInfo();
+        } else {
+            // Update cursor based on hover position
+            let cursor = 'crosshair';
+            if (getDistanceToPoint(mousePos, lineState.line.start) < 20 / lineState.canvas.width ||
+                getDistanceToPoint(mousePos, lineState.line.end) < 20 / lineState.canvas.width) {
+                cursor = 'grab';
+            } else if (getDistanceToLine(mousePos, lineState.line) < 15) {
+                cursor = 'move';
+            }
+            lineState.canvas.style.cursor = cursor;
+        }
+    }
+
+    function updateLineOrientation() {
+        const deltaX = Math.abs(lineState.line.end.x - lineState.line.start.x);
+        const deltaY = Math.abs(lineState.line.end.y - lineState.line.start.y);
+        
+        // Determine if line is more horizontal or vertical
+        if (deltaX > deltaY) {
+            lineState.orientation = 'horizontal';
+        } else {
+            lineState.orientation = 'vertical';
+        }
+        
+        // Update button selection
+        const buttons = document.querySelectorAll('#lineModal .btn-group .btn');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        if (lineState.orientation === 'vertical') {
+            buttons[0]?.classList.add('selected');
+        } else {
+            buttons[1]?.classList.add('selected');
+        }
+    }
+
+    function updateLineInfo() {
+        // Calculate line length and angle for display
+        const deltaX = lineState.line.end.x - lineState.line.start.x;
+        const deltaY = lineState.line.end.y - lineState.line.start.y;
+        const length = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        const angle = Math.atan2(deltaY, deltaX) * 180 / Math.PI;
+        
+        // Update info display if element exists
+        const infoElement = document.getElementById('lineInfo');
+        if (infoElement) {
+            infoElement.innerHTML = `
+                Length: ${(length * 100).toFixed(1)}% | 
+                Angle: ${angle.toFixed(1)}°
+            `;
+        }
+    }
+
+    function handleLineMouseUp(event) {
+        lineState.isDragging = false;
+        lineState.dragPoint = null;
+        lineState.canvas.style.cursor = 'crosshair';
+    }
+
+    // Touch event handlers
+    function handleLineTouchStart(event) {
+        event.preventDefault();
+        handleLineMouseDown(event);
+    }
+
+    function handleLineTouchMove(event) {
+        event.preventDefault();
+        handleLineMouseMove(event);
+    }
+
+    function handleLineTouchEnd(event) {
+        event.preventDefault();
+        handleLineMouseUp(event);
+    }
+
+    function drawLine() {
+        if (!lineState.imageLoaded || !lineState.ctx) return;
+        
+        const ctx = lineState.ctx;
+        const canvas = lineState.canvas;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Calculate positions
+        const startX = lineState.line.start.x * canvas.width;
+        const startY = lineState.line.start.y * canvas.height;
+        const endX = lineState.line.end.x * canvas.width;
+        const endY = lineState.line.end.y * canvas.height;
+        
+        // Draw line shadow for better visibility
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 5;
+        ctx.stroke();
+        
+        // Draw main line
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        // Draw line direction arrow in the middle
+        const midX = (startX + endX) / 2;
+        const midY = (startY + endY) / 2;
+        const angle = Math.atan2(endY - startY, endX - startX);
+        
+        // Arrow head
+        const arrowLength = 15;
+        const arrowAngle = Math.PI / 6;
+        
+        ctx.beginPath();
+        ctx.moveTo(midX, midY);
+        ctx.lineTo(
+            midX - arrowLength * Math.cos(angle - arrowAngle),
+            midY - arrowLength * Math.sin(angle - arrowAngle)
+        );
+        ctx.moveTo(midX, midY);
+        ctx.lineTo(
+            midX - arrowLength * Math.cos(angle + arrowAngle),
+            midY - arrowLength * Math.sin(angle + arrowAngle)
+        );
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Draw start point (larger for easier grabbing)
+        ctx.beginPath();
+        ctx.arc(startX, startY, 12, 0, 2 * Math.PI);
+        ctx.fillStyle = '#ff0000';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        // Draw inner circle for start point
+        ctx.beginPath();
+        ctx.arc(startX, startY, 6, 0, 2 * Math.PI);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        
+        // Draw end point (larger for easier grabbing)
+        ctx.beginPath();
+        ctx.arc(endX, endY, 12, 0, 2 * Math.PI);
+        ctx.fillStyle = '#0000ff';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        // Draw inner circle for end point
+        ctx.beginPath();
+        ctx.arc(endX, endY, 6, 0, 2 * Math.PI);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        
+        // Add enhanced labels with background
+        ctx.font = 'bold 14px Arial';
+        
+        // Start label
+        const startLabelX = startX + 18;
+        const startLabelY = startY - 8;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(startLabelX - 2, startLabelY - 16, 48, 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('START', startLabelX, startLabelY);
+        
+        // End label
+        const endLabelX = endX + 18;
+        const endLabelY = endY - 8;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(endLabelX - 2, endLabelY - 16, 35, 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('END', endLabelX, endLabelY);
+        
+        // Draw grab indicators (small circles along the line for visual feedback)
+        const numIndicators = 5;
+        for (let i = 1; i < numIndicators; i++) {
+            const t = i / numIndicators;
+            const indicatorX = startX + t * (endX - startX);
+            const indicatorY = startY + t * (endY - startY);
+            
+            ctx.beginPath();
+            ctx.arc(indicatorX, indicatorY, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.fill();
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+        
+        // Update line info
+        updateLineInfo();
+    }
+
+    function closeLineModal() {
+        document.getElementById('lineModal').style.display = 'none';
+    }
+
+    function setLineOrientation(orientation) {
+        lineState.orientation = orientation;
+        const buttons = document.querySelectorAll('#lineModal .btn-group .btn');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        event.target.classList.add('selected');
+        
+        // Update line position based on orientation
+        if (orientation === 'vertical') {
+            lineState.line = { start: {x: 0.5, y: 0.1}, end: {x: 0.5, y: 0.9} };
+        } else if (orientation === 'horizontal') {
+            lineState.line = { start: {x: 0.1, y: 0.5}, end: {x: 0.9, y: 0.5} };
+        }
+        
+        // Redraw the line
+        if (lineState.imageLoaded) {
+            drawLine();
+        }
+    }
+
+    function resetLineToCenter() {
+        if (lineState.orientation === 'vertical') {
+            lineState.line = { start: {x: 0.5, y: 0.1}, end: {x: 0.5, y: 0.9} };
+        } else {
+            lineState.line = { start: {x: 0.1, y: 0.5}, end: {x: 0.9, y: 0.5} };
+        }
+        
+        if (lineState.imageLoaded) {
+            drawLine();
+        }
+    }
+
+    function setLineDiagonal() {
+        // Set diagonal line from top-left to bottom-right
+        lineState.line = { start: {x: 0.2, y: 0.2}, end: {x: 0.8, y: 0.8} };
+        lineState.orientation = 'diagonal';
+        
+        // Update button selection
+        const buttons = document.querySelectorAll('#lineModal .btn-group .btn');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        buttons[2]?.classList.add('selected');
+        
+        if (lineState.imageLoaded) {
+            drawLine();
+        }
+    }
+
+    function flipLineDirection() {
+        // Swap start and end points
+        const temp = lineState.line.start;
+        lineState.line.start = lineState.line.end;
+        lineState.line.end = temp;
+        
+        if (lineState.imageLoaded) {
+            drawLine();
+        }
+    }
+
+    function extendLine() {
+        // Extend line by 20% while keeping the center position
+        const centerX = (lineState.line.start.x + lineState.line.end.x) / 2;
+        const centerY = (lineState.line.start.y + lineState.line.end.y) / 2;
+        const deltaX = lineState.line.end.x - lineState.line.start.x;
+        const deltaY = lineState.line.end.y - lineState.line.start.y;
+        
+        // Extend by 20%
+        const extendedDeltaX = deltaX * 1.2;
+        const extendedDeltaY = deltaY * 1.2;
+        
+        // Calculate new positions
+        const newStartX = Math.max(0, Math.min(1, centerX - extendedDeltaX / 2));
+        const newStartY = Math.max(0, Math.min(1, centerY - extendedDeltaY / 2));
+        const newEndX = Math.max(0, Math.min(1, centerX + extendedDeltaX / 2));
+        const newEndY = Math.max(0, Math.min(1, centerY + extendedDeltaY / 2));
+        
+        lineState.line.start = {x: newStartX, y: newStartY};
+        lineState.line.end = {x: newEndX, y: newEndY};
+        
+        if (lineState.imageLoaded) {
+            drawLine();
+        }
+    }
+
+    function shortenLine() {
+        // Shorten line by 20% while keeping the center position
+        const centerX = (lineState.line.start.x + lineState.line.end.x) / 2;
+        const centerY = (lineState.line.start.y + lineState.line.end.y) / 2;
+        const deltaX = lineState.line.end.x - lineState.line.start.x;
+        const deltaY = lineState.line.end.y - lineState.line.start.y;
+        
+        // Shorten by 20%
+        const shortenedDeltaX = deltaX * 0.8;
+        const shortenedDeltaY = deltaY * 0.8;
+        
+        lineState.line.start = {
+            x: centerX - shortenedDeltaX / 2,
+            y: centerY - shortenedDeltaY / 2
+        };
+        lineState.line.end = {
+            x: centerX + shortenedDeltaX / 2,
+            y: centerY + shortenedDeltaY / 2
+        };
+        
+        if (lineState.imageLoaded) {
+            drawLine();
+        }
+    }
+
+    async function saveLine() {
+        try {
+            const lineConfig = {
+                start: lineState.line.start,
+                end: lineState.line.end,
+                orientation: lineState.orientation
+            };
+            
+            // Save to active module (runtime)
+            const response = await fetch('/api/set_counting_line', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    app_name: lineState.currentApp,
+                    channel_id: lineState.currentChannel,
+                    line_config: lineConfig
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Save to database for persistence
+                await saveConfigToDatabase(lineState.currentChannel, lineState.currentApp, 'counting_line', lineConfig);
+                alert('Counting line saved successfully!');
+                closeLineModal();
+            } else {
+                alert(`Error saving line: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('Error saving line:', error);
+            alert('Failed to save counting line');
+        }
+    }
+
+    // ============= Configuration Persistence Functions =============
+    
+    /**
+     * Save configuration to database for persistence across restarts
+     */
+    async function saveConfigToDatabase(channelId, appName, configType, configData) {
+        try {
+            const response = await fetch('/api/save_config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    channel_id: channelId,
+                    app_name: appName,
+                    config_type: configType,
+                    config_data: configData
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                console.log(`✅ ${configType} saved to database for ${appName}/${channelId}`);
+            } else {
+                console.error(`❌ Failed to save ${configType} to database:`, result.error);
+            }
+        } catch (error) {
+            console.error(`Error saving ${configType} to database:`, error);
+        }
+    }
+
+    /**
+     * Load saved configuration from database
+     */
+    async function loadConfigFromDatabase(channelId, appName, configType) {
+        try {
+            const response = await fetch(`/api/get_config/${channelId}/${appName}/${configType}`);
+            const result = await response.json();
+            
+            if (result.success && result.config) {
+                console.log(`✅ Loaded ${configType} from database for ${appName}/${channelId}`);
+                return result.config;
+            } else {
+                console.log(`ℹ️ No saved ${configType} found for ${appName}/${channelId}`);
+                return null;
+            }
+        } catch (error) {
+            console.error(`Error loading ${configType} from database:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * Load all configurations for a channel and app
+     */
+    async function loadAllConfigs(channelId, appName) {
+        try {
+            const response = await fetch(`/api/get_all_configs/${channelId}/${appName}`);
+            const result = await response.json();
+            
+            if (result.success) {
+                console.log(`✅ Loaded all configs for ${appName}/${channelId}:`, result.configs);
+                return result.configs;
+            } else {
+                console.log(`ℹ️ No saved configs found for ${appName}/${channelId}`);
+                return { roi: null, counting_line: null };
+            }
+        } catch (error) {
+            console.error(`Error loading configs from database:`, error);
+            return { roi: null, counting_line: null };
+        }
+    }
+
+    /**
+     * Apply saved configurations when starting a channel
+     */
+    async function applySavedConfigurations(channelId, appName) {
+        console.log(`🔄 Loading saved configurations for ${appName}/${channelId}...`);
+        
+        const configs = await loadAllConfigs(channelId, appName);
+        
+        // Apply ROI configuration
+        if (configs.roi) {
+            try {
+                const response = await fetch('/api/set_roi', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        app_name: appName,
+                        channel_id: channelId,
+                        roi_points: configs.roi
+                    })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    console.log(`✅ Applied saved ROI configuration`);
+                } else {
+                    console.warn(`⚠️ Failed to apply ROI:`, result.error);
+                }
+            } catch (error) {
+                console.error(`Error applying saved ROI:`, error);
+            }
+        }
+        
+        // Apply counting line configuration
+        if (configs.counting_line) {
+            try {
+                const response = await fetch('/api/set_counting_line', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        app_name: appName,
+                        channel_id: channelId,
+                        line_config: configs.counting_line
+                    })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    console.log(`✅ Applied saved counting line configuration`);
+                } else {
+                    console.warn(`⚠️ Failed to apply counting line:`, result.error);
+                }
+            } catch (error) {
+                console.error(`Error applying saved counting line:`, error);
+            }
+        }
+        
+        if (configs.roi || configs.counting_line) {
+            console.log(`✅ All saved configurations applied for ${appName}/${channelId}`);
+        } else {
+            console.log(`ℹ️ No saved configurations found for ${appName}/${channelId}`);
+        }
+    }
+
+</script>
+</body>
+</html>
