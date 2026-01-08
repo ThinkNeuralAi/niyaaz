@@ -1,0 +1,17 @@
+# Virtual environment
+venv/
+.env/
+myenv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Static files (images)
+static/
+media/
+videos/
+
+# OS files
+.DS_Store
+Thumbs.db

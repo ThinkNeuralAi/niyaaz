@@ -1,0 +1,1460 @@
+{
+  "channels": [
+    {
+      "channel_id": "camera_1",
+      "channel_name": "Take Away Counter",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=1&stream=0",
+      "video_file": "",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "QueueMonitor",
+          "config": {
+            "queue_roi": {
+              "points": [
+                {
+                  "x": 0.31781005859375,
+                  "y": 0.8971217105263158
+                },
+                {
+                  "x": 0.36468505859375,
+                  "y": 0.036595394736842105
+                },
+                {
+                  "x": 0.16702880859375,
+                  "y": 0.026069078947368422
+                },
+                {
+                  "x": 0,
+                  "y": 0.526
+                },
+                {
+                  "x": -0.008,
+                  "y": 1.009
+                },
+                {
+                  "x": 0.2,
+                  "y": 0.995
+                }
+              ]
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.40791015625,
+                  "y": 0.05911183608205695
+                },
+                {
+                  "x": 0.99984130859375,
+                  "y": 0.04975328947368421
+                },
+                {
+                  "x": 0.99359130859375,
+                  "y": 0.9984375
+                },
+                {
+                  "x": 0.54697265625,
+                  "y": 0.9983223764519943
+                },
+                {
+                  "x": 0.44931640625,
+                  "y": 0.9956907975046259
+                }
+              ]
+            },
+            "settings": {
+              "dwell_time_threshold": 120,
+              "queue_alert_threshold": 3,
+              "counter_threshold": 1,
+              "alert_cooldown": 60
+            }
+          }
+        },
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.40791015625,
+                  "y": 0.05911183608205695
+                },
+                {
+                  "x": 0.99984130859375,
+                  "y": 0.04975328947368421
+                },
+                {
+                  "x": 0.99359130859375,
+                  "y": 0.9984375
+                },
+                {
+                  "x": 0.54697265625,
+                  "y": 0.9983223764519943
+                },
+                {
+                  "x": 0.44931640625,
+                  "y": 0.9956907975046259
+                }
+              ]
+            },
+            "allowed_uniforms": {
+              "counter": [
+                "Uniform_grey",
+                "Uniform_black",
+                "Uniform_cream"
+              ]
+            }
+          }
+        },
+        {
+          "type": "CashDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 10.0,
+            "detection_duration_threshold": 1.0
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_2",
+      "channel_name": "Deluxe Counter",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=2&stream=0",
+      "video_file": "videos/channel2.avi",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "QueueMonitor",
+          "config": {
+            "queue_roi": {
+              "points": [
+                {
+                  "x": 0.255,
+                  "y": 0.356
+                },
+                {
+                  "x": 0.837,
+                  "y": 0.643
+                },
+                {
+                  "x": 0.653,
+                  "y": 0.995
+                },
+                {
+                  "x": 0.999,
+                  "y": 0.983
+                },
+                {
+                  "x": 0.998,
+                  "y": 0.346
+                },
+                {
+                  "x": 0.22,
+                  "y": 0.119
+                },
+                {
+                  "x": -0.004,
+                  "y": 0.25
+                },
+                {
+                  "x": 0.002,
+                  "y": 0.517
+                },
+                {
+                  "x": 0.15062255859375,
+                  "y": 0.4115953947368421
+                }
+              ]
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.00843505859375,
+                  "y": 0.5089638157894737
+                },
+                {
+                  "x": 0.26259765625,
+                  "y": 0.37595395539936266
+                },
+                {
+                  "x": 0.83577880859375,
+                  "y": 0.6629111842105263
+                },
+                {
+                  "x": 0.65765380859375,
+                  "y": 0.9997532894736842
+                },
+                {
+                  "x": 0,
+                  "y": 0.9944901315789474
+                }
+              ]
+            },
+            "settings": {
+              "dwell_time_threshold": 120,
+              "queue_alert_threshold": 3,
+              "counter_threshold": 1,
+              "alert_cooldown": 60
+            }
+          }
+        },
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.00843505859375,
+                  "y": 0.5089638157894737
+                },
+                {
+                  "x": 0.26259765625,
+                  "y": 0.37595395539936266
+                },
+                {
+                  "x": 0.83577880859375,
+                  "y": 0.6629111842105263
+                },
+                {
+                  "x": 0.65765380859375,
+                  "y": 0.9997532894736842
+                },
+                {
+                  "x": 0,
+                  "y": 0.9944901315789474
+                }
+              ]
+            },
+            "allowed_uniforms": {
+              "counter": [
+                "Uniform_grey"
+              ]
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "CashDetection",
+          "config": {
+            "conf_threshold": 0.6,
+            "alert_cooldown": 10.0,
+            "detection_duration_threshold": 1.0
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_3",
+      "channel_name": "AC3",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=3&stream=0",
+      "video_file": "videos/channel3.avi",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 5.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.52509765625,
+                    "y": 0.43267360263400606
+                  },
+                  {
+                    "x": 0.99541015625,
+                    "y": 0.5307291666666667
+                  },
+                  {
+                    "x": 0.98369140625,
+                    "y": 0.2737847222222222
+                  },
+                  {
+                    "x": 0.68212890625,
+                    "y": 0.22239583333333332
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_4",
+      "channel_name": "AC Entrance",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=4&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 5.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.74541015625,
+                    "y": 0.27711805767483183
+                  },
+                  {
+                    "x": 0.96572265625,
+                    "y": 0.2882291687859429
+                  },
+                  {
+                    "x": 0.52978515625,
+                    "y": 0.23378469679090713
+                  },
+                  {
+                    "x": 0.76884765625,
+                    "y": 0.24489580790201823
+                  }
+                ]
+              },
+              "table_2": {
+                "points": [
+                  {
+                    "x": 0.53212890625,
+                    "y": 0.2265625
+                  },
+                  {
+                    "x": 0.60400390625,
+                    "y": 0.1779513888888889
+                  },
+                  {
+                    "x": 0.77119140625,
+                    "y": 0.23489583333333333
+                  },
+                  {
+                    "x": 0.70869140625,
+                    "y": 0.3079513973659939
+                  },
+                  {
+                    "x": 0.73759765625,
+                    "y": 0.3029513888888889
+                  },
+                  {
+                    "x": 0.78212890625,
+                    "y": 0.2265625
+                  },
+                  {
+                    "x": 0.95634765625,
+                    "y": 0.2904513888888889
+                  },
+                  {
+                    "x": 0.94541015625,
+                    "y": 0.3848958333333333
+                  },
+                  {
+                    "x": 0.73759765625,
+                    "y": 0.3029513888888889
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_5",
+      "channel_name": "General 1",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=5&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 5.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.4690331995487213,
+                    "y": 0.2191145896911621
+                  },
+                  {
+                    "x": 0.88525390625,
+                    "y": 0.24461805555555555
+                  },
+                  {
+                    "x": 0.99384765625,
+                    "y": 0.5779513888888889
+                  },
+                  {
+                    "x": 0.4448144495487213,
+                    "y": 0.6677257008022732
+                  },
+                  {
+                    "x": 0.4690331995487213,
+                    "y": 0.2191145896911621
+                  },
+                  {
+                    "x": 0.4448144495487213,
+                    "y": 0.6677257008022732
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_6",
+      "channel_name": "General 3",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=6&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 5.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.21025390625,
+                    "y": 0.37434027989705404
+                  },
+                  {
+                    "x": 0.46025390625,
+                    "y": 0.33961805767483183
+                  },
+                  {
+                    "x": 0.59384765625,
+                    "y": 0.5654513888888889
+                  },
+                  {
+                    "x": 0.24150390625,
+                    "y": 0.7335069444444444
+                  },
+                  {
+                    "x": 0.24384765625,
+                    "y": 0.7348958333333333
+                  },
+                  {
+                    "x": 0.24384765625,
+                    "y": 0.7348958333333333
+                  },
+                  {
+                    "x": 0.20869140625,
+                    "y": 0.3862847222222222
+                  },
+                  {
+                    "x": 0.49150390625,
+                    "y": 0.3307291666666667
+                  },
+                  {
+                    "x": 0.61025390625,
+                    "y": 0.6085069444444444
+                  },
+                  {
+                    "x": 0.24619140625,
+                    "y": 0.7335069444444444
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_7",
+      "channel_name": "Deluxe 1",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=7&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 5.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.38134765625,
+                    "y": 0.5868402779102325
+                  },
+                  {
+                    "x": 0.70791015625,
+                    "y": 0.5048958334657881
+                  },
+                  {
+                    "x": 0.96962890625,
+                    "y": 0.9904513888888888
+                  },
+                  {
+                    "x": 0.49384765625,
+                    "y": 0.9932291666666667
+                  },
+                  {
+                    "x": 0.24619140625,
+                    "y": 0.5335069444444445
+                  },
+                  {
+                    "x": 0.81337890625,
+                    "y": 0.4404513888888889
+                  },
+                  {
+                    "x": 0.99931640625,
+                    "y": 0.8279513888888889
+                  },
+                  {
+                    "x": 0.32353515625,
+                    "y": 0.9932291666666667
+                  },
+                  {
+                    "x": 0.32353515625,
+                    "y": 0.9932291666666667
+                  },
+                  {
+                    "x": 0.24619140625,
+                    "y": 0.5335069444444445
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_8",
+      "channel_name": "Deluxe 2",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=8&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 5.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.23759765625,
+                    "y": 0.7182291666666667
+                  },
+                  {
+                    "x": 0.51806640625,
+                    "y": 0.4612847222222222
+                  },
+                  {
+                    "x": 0.25087890625,
+                    "y": 0.7293402777777778
+                  },
+                  {
+                    "x": 0.87509765625,
+                    "y": 0.9960069444444445
+                  },
+                  {
+                    "x": 0.48525390625,
+                    "y": 0.9973958333333334
+                  },
+                  {
+                    "x": 0.25087890625,
+                    "y": 0.7293402777777778
+                  },
+                  {
+                    "x": 0.58369140625,
+                    "y": 0.40850694444444446
+                  },
+                  {
+                    "x": 0.95947265625,
+                    "y": 0.7640625
+                  },
+                  {
+                    "x": 0.87509765625,
+                    "y": 0.9960069444444445
+                  },
+                  {
+                    "x": 0.48212890625,
+                    "y": 0.9946180555555556
+                  }
+                ]
+              },
+              "table_2": {
+                "points": [
+                  {
+                    "x": 0.5252831995487213,
+                    "y": 0.4105034722222222
+                  },
+                  {
+                    "x": 0.7057519495487213,
+                    "y": 0.20772569444444444
+                  },
+                  {
+                    "x": 0.91416015625,
+                    "y": 0.9987847222222223
+                  },
+                  {
+                    "x": 0.92978515625,
+                    "y": 0.7937847230169508
+                  },
+                  {
+                    "x": 0.92978515625,
+                    "y": 0.7937847230169508
+                  },
+                  {
+                    "x": 0.53291015625,
+                    "y": 0.4626736111111111
+                  },
+                  {
+                    "x": 0.73681640625,
+                    "y": 0.3043402777777778
+                  },
+                  {
+                    "x": 0.99150390625,
+                    "y": 0.5071180555555556
+                  },
+                  {
+                    "x": 0.91962890625,
+                    "y": 0.7751736111111112
+                  },
+                  {
+                    "x": 0.53291015625,
+                    "y": 0.4626736111111111
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_9",
+      "channel_name": "Kitchen",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=9&stream=0",
+      "video_file": "videos/channel9.avi",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "PPEMonitoring",
+          "config": {
+            "required_items": {
+              "apron": true,
+              "gloves": false,
+              "hairnet": true
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_10",
+      "channel_name": "Kitchen 2",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=10&stream=0",
+      "video_file": "videos/channel10.avi",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "PPEMonitoring",
+          "config": {
+            "required_items": {
+              "apron": true,
+              "gloves": false,
+              "hairnet": true
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_11",
+      "channel_name": "Kitchen 3",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=11&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_12",
+      "channel_name": "Kitchen 4",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=12&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 30.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_13",
+      "channel_name": "Chinese Section",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=13&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "UnauthorizedEntryMonitor",
+          "config": {
+            "alert_cooldown": 10.0,
+            "conf_threshold": 0.5
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_14",
+      "channel_name": "Parking Space",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=14&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "CrowdDetection",
+          "config": {
+            "roi": {
+              "points": []
+            },
+            "settings": {
+              "crowd_threshold": 5,
+              "alert_cooldown": 60,
+              "dwell_time_threshold": 120
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_15",
+      "channel_name": "Store Entrance (Weighing Area)",
+      "rtsp_url": "rtsp://115.247.213.246:554/user=admin&password=NIVPL@5566&channel=15&stream=0",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        },
+        {
+          "type": "MaterialTheftMonitor",
+          "config": {
+            "roi_points": [
+              [
+                1292,
+                357
+              ],
+              [
+                1077,
+                264
+              ],
+              [
+                923,
+                364
+              ],
+              [
+                1269,
+                535
+              ]
+            ],
+            "min_area": 1000,
+            "still_frames_required": 15,
+            "alert_cooldown": 15.0,
+            "background_reset_frames": 600
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "PersonSmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 30.0,
+            "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    }
+  ]
+}
