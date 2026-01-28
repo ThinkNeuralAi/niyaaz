@@ -2801,9 +2801,50 @@ def get_module_analytics(module_name):
             }
         
         else:
+            # Default case: Return basic analytics for any module not explicitly handled
+            # This ensures the dashboard can display all modules even if analytics aren't fully implemented
+            active_channels = []
+            
+            # Check if module is configured in any channel
+            for channel_id, processor in shared_video_processors.items():
+                if processor.is_running and module_name in processor.get_active_modules():
+                    active_channels.append(channel_id)
+            
+            # Also check configured modules (even if processor not running)
+            for channel_id, modules_dict in channel_modules.items():
+                if module_name in modules_dict and channel_id not in active_channels:
+                    active_channels.append(channel_id)
+            
+            # Try to get alert count from database
+            total_alerts = 0
+            try:
+                with app.app_context():
+                    # Try common alert type names
+                    alert_type_map = {
+                        'DressCodeMonitoring': 'dress_code_violation',
+                        'PPEMonitoring': 'ppe_alert',
+                        'TableServiceMonitor': 'table_cleanliness_violation',
+                        'ServiceDisciplineMonitor': 'service_discipline_alert',
+                        'UnauthorizedEntryMonitor': 'unauthorized_entry_alert',
+                        'MaterialTheftMonitor': 'material_theft_alert',
+                        'FallDetection': 'fall_alert',
+                        'SmokingDetection': 'smoke_alert',
+                        'PersonSmokingDetection': 'person_smoking_alert',
+                        'CrowdDetection': 'crowd_alert'
+                    }
+                    
+                    alert_type = alert_type_map.get(module_name)
+                    if alert_type:
+                        alert_count = db_manager.get_alert_count(alert_type, days=7)
+                        total_alerts = alert_count if alert_count is not None else 0
+            except Exception as e:
+                logger.debug(f"Could not get alert count for {module_name}: {e}")
+            
             analytics = {
                 'module': module_name,
-                'error': 'Module not found'
+                'total_alerts_7days': total_alerts,
+                'active_channels': len(active_channels),
+                'channels': active_channels
             }
         
         return jsonify({'success': True, 'analytics': analytics})

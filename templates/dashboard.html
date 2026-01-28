@@ -2374,16 +2374,25 @@
         try {
             const cardsHTML = [];
             
+            console.log(`🔄 Loading analytics for ${modules.length} modules...`);
+            
             for (const module of modules) {
                 try {
+                    console.log(`📡 Fetching analytics for ${module.name}...`);
                     const response = await fetch(`/api/get_module_analytics/${module.name}`);
-                    const data = await response.json();
                     
+                    if (!response.ok) {
+                        console.error(`❌ HTTP error for ${module.name}: ${response.status} ${response.statusText}`);
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
                     console.log(`📊 ${module.name} analytics response:`, data);
                     
                     if (data.success && data.analytics) {
                         const card = createAnalyticsCard(module, data.analytics);
                         cardsHTML.push(card);
+                        console.log(`✅ ${module.name} card created successfully`);
                     } else {
                         console.warn(`⚠️ ${module.name} analytics failed or missing:`, data);
                         // Still create a card with default/empty values so module is visible
@@ -2395,6 +2404,7 @@
                         };
                         const card = createAnalyticsCard(module, defaultAnalytics);
                         cardsHTML.push(card);
+                        console.log(`✅ ${module.name} card created with default values`);
                     }
                 } catch (err) {
                     console.error(`❌ Error loading ${module.name}:`, err);
@@ -2408,15 +2418,22 @@
                     };
                     const card = createAnalyticsCard(module, errorAnalytics);
                     cardsHTML.push(card);
+                    console.log(`✅ ${module.name} card created with error state`);
                 }
             }
             
+            console.log(`📋 Total cards created: ${cardsHTML.length}`);
             analyticsContainer.innerHTML = cardsHTML.join('');
+            
+            if (cardsHTML.length === 0) {
+                console.error('❌ No cards were created!');
+                analyticsContainer.innerHTML = '<div class="loading-spinner">⚠️ No modules found. Please check the console for errors.</div>';
+            }
             
             // Update refresh status
             updateRefreshStatus();
         } catch (error) {
-            console.error('Error loading analytics cards:', error);
+            console.error('❌ Error loading analytics cards:', error);
             console.error('Error stack:', error.stack);
             if (analyticsContainer) {
                 analyticsContainer.innerHTML = '<div class="loading-spinner">❌ Error loading analytics: ' + (error.message || 'Unknown error') + '</div>';
@@ -5012,10 +5029,41 @@
             return;
         }
         
-        grid.innerHTML = snapshots.map(snapshot => `
+        grid.innerHTML = snapshots.map(snapshot => {
+            // Handle snapshot path - support both GIFs (from static/alerts/) and old snapshots (from static/cash_snapshots/)
+            let snapshotUrl = null;
+            if (snapshot.snapshot_path) {
+                // Normalize path separators (Windows backslashes to forward slashes)
+                let normalizedPath = snapshot.snapshot_path.replace(/\\/g, '/');
+                
+                // Handle different path formats:
+                // - Absolute paths: /static/alerts/alert_xxx.gif
+                // - Relative paths starting with static/: static/alerts/alert_xxx.gif -> /static/alerts/alert_xxx.gif
+                // - Just filenames: alert_xxx.gif -> /static/alerts/alert_xxx.gif (if .gif) or /static/cash_snapshots/ (if .jpg)
+                if (normalizedPath.startsWith('/') || normalizedPath.startsWith('http')) {
+                    snapshotUrl = normalizedPath;
+                } else if (normalizedPath.startsWith('static/')) {
+                    snapshotUrl = '/' + normalizedPath;
+                } else if (normalizedPath.endsWith('.gif')) {
+                    // GIF files go in alerts directory
+                    snapshotUrl = '/static/alerts/' + normalizedPath;
+                } else {
+                    // Other files (old snapshots) go in cash_snapshots directory
+                    snapshotUrl = '/static/cash_snapshots/' + normalizedPath;
+                }
+            } else if (snapshot.snapshot_filename) {
+                // Fallback to old path format for backwards compatibility
+                if (snapshot.snapshot_filename.endsWith('.gif')) {
+                    snapshotUrl = `/static/alerts/${snapshot.snapshot_filename}`;
+                } else {
+                    snapshotUrl = `/static/cash_snapshots/${snapshot.snapshot_filename}`;
+                }
+            }
+            
+            return `
             <div class="alert-gif-card">
                 <div class="gif-preview">
-                    <img src="/static/cash_snapshots/${snapshot.snapshot_filename}" alt="Cash Detection" loading="lazy" style="width: 100%; border-radius: 4px; cursor: pointer;" onclick="openLightboxFromImage(this)">
+                    ${snapshotUrl ? `<img src="${snapshotUrl}" alt="Cash Detection" loading="lazy" style="width: 100%; border-radius: 4px; cursor: pointer;" onclick="openLightboxFromImage(this)" onerror="this.src='/static/icon.png'; this.onerror=null;">` : '<div style="padding: 40px; text-align: center; color: var(--text-secondary);">No snapshot</div>'}
                 </div>
                 <div class="gif-info">
                     <div class="gif-channel">
@@ -5029,18 +5077,24 @@
                     </div>
                 </div>
                 <div class="gif-actions">
-                    <button class="btn btn-sm" onclick="downloadCashSnapshot('${snapshot.snapshot_filename}')">📥 Download</button>
+                    ${snapshotUrl ? `<button class="btn btn-sm" onclick="downloadCashSnapshot('${snapshot.snapshot_path || snapshot.snapshot_filename}')">📥 Download</button>` : ''}
                     <button class="btn btn-sm btn-danger" onclick="deleteCashSnapshot(${snapshot.id})">🗑️ Delete</button>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
     }
     
     // Download cash snapshot
-    function downloadCashSnapshot(filename) {
+    function downloadCashSnapshot(snapshotPath) {
         const link = document.createElement('a');
-        link.href = `/static/cash_snapshots/${filename}`;
-        link.download = filename;
+        // Handle both full paths and just filenames
+        if (snapshotPath.startsWith('/') || snapshotPath.startsWith('static/')) {
+            link.href = snapshotPath.startsWith('/') ? snapshotPath : '/' + snapshotPath;
+        } else {
+            link.href = `/static/cash_snapshots/${snapshotPath}`;
+        }
+        link.download = snapshotPath.split('/').pop() || snapshotPath;
         link.click();
     }
     

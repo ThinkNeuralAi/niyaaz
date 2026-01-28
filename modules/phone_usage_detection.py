@@ -13,6 +13,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from .gif_alert_helper import GifAlertHelper
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,9 +82,20 @@ class PhoneUsageDetection:
         self.fps = 0
         self.last_fps_time = time.time()
         
-        # Snapshot directory
+        # Snapshot directory (kept for compatibility, but we use GIFs now)
         self.snapshot_dir = Path('static/phone_snapshots')
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize GIF alert helper for violation GIFs
+        self.gif_helper = GifAlertHelper(channel_id, db_manager, app, socketio)
+        self.gif_helper.initialize_gif_recorder(
+            buffer_size=90,  # 3 seconds at 30fps
+            gif_duration=3.0,  # 3 second GIFs
+            fps=30
+        )
+        
+        # Track pending database saves for when GIF completes
+        self._pending_db_save = None
         
         logger.info(f"PhoneUsageDetection initialized for channel {channel_id}")
         logger.info(f"  - Confidence threshold: {self.confidence_threshold}")
@@ -113,6 +126,9 @@ class PhoneUsageDetection:
                 'metadata': additional information
             }
         """
+        # Add frame to GIF buffer (for pre-alert context)
+        self.gif_helper.add_frame_to_buffer(frame)
+        
         self.frame_count += 1
         current_time = time.time()
         
@@ -193,6 +209,37 @@ class PhoneUsageDetection:
             'detections': phone_detections
         }
         
+        # Continue GIF recording if in progress
+        if self.gif_helper.is_recording():
+            self.gif_helper.add_alert_frame(frame)
+            # Check if recording completed
+            if self.gif_helper.is_recording_complete():
+                gif_info = self.gif_helper.get_completed_gif()
+                if gif_info and self._pending_db_save:
+                    gif_path = self.gif_helper.get_snapshot_path_for_violation(gif_info)
+                    if gif_path:
+                        # Save to database with GIF path
+                        pending = self._pending_db_save
+                        try:
+                            if self.db_manager and self.app:
+                                with self.app.app_context():
+                                    snapshot_id = self.db_manager.save_phone_snapshot(
+                                        channel_id=self.channel_id,
+                                        snapshot_filename=os.path.basename(gif_path),
+                                        snapshot_path=gif_path,
+                                        alert_message=pending["alert_message"],
+                                        alert_data=pending["alert_data"],
+                                        file_size=os.path.getsize(gif_path) if os.path.exists(gif_path) else 0,
+                                        detection_count=pending["detection_count"],
+                                        detection_time=pending["timestamp"]
+                                    )
+                                    if snapshot_id:
+                                        logger.info(f"Phone GIF saved to database with ID: {snapshot_id}")
+                        except Exception as e:
+                            logger.error(f"Error saving phone GIF to database: {e}")
+                        finally:
+                            self._pending_db_save = None
+        
         return {
             'frame': annotated_frame,
             'status': status,
@@ -201,7 +248,7 @@ class PhoneUsageDetection:
     
     def _trigger_phone_alert(self, frame, detections, duration):
         """
-        Trigger alert for phone usage detection
+        Trigger alert for phone usage detection with GIF recording
         
         Args:
             frame: Current video frame
@@ -211,88 +258,56 @@ class PhoneUsageDetection:
         self.total_alerts += 1
         timestamp = datetime.now()
         
-        # Generate snapshot filename
-        snapshot_filename = f"phone_{self.channel_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
-        snapshot_path = self.snapshot_dir / snapshot_filename
-        
-        # Create annotated snapshot
-        snapshot = frame.copy()
-        
-        # Add alert header
-        cv2.rectangle(snapshot, (0, 0), (snapshot.shape[1], 60), (0, 0, 255), -1)
-        cv2.putText(snapshot, "MOBILE PHONE USAGE DETECTED", (10, 40),
-                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
-        
-        # Draw detection boxes
-        for detection in detections:
-            bbox = detection['bbox']
-            conf = detection['confidence']
-            x1, y1, x2, y2 = bbox
+        try:
+            if frame is None or frame.size == 0:
+                logger.error(f"[{self.channel_id}] ❌ Cannot start GIF recording: frame is None or empty")
+                return
+
+            logger.info(f"[{self.channel_id}] 📸 Starting GIF recording for phone usage alert")
+
+            # Prepare alert data
+            alert_message = f"Phone usage detected ({len(detections)} instance{'s' if len(detections) > 1 else ''})"
+            alert_data = {
+                'channel_id': self.channel_id,
+                'detection_count': len(detections),
+                'duration': round(duration, 2),
+                'timestamp': timestamp.isoformat(),
+                'detections': detections
+            }
             
-            # Draw red box
-            cv2.rectangle(snapshot, (x1, y1), (x2, y2), (0, 0, 255), 3)
-            
-            # Add label
-            label = f"Phone {conf:.2f}"
-            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            cv2.rectangle(snapshot, (x1, y1 - label_size[1] - 10), 
-                         (x1 + label_size[0], y1), (0, 0, 255), -1)
-            cv2.putText(snapshot, label, (x1, y1 - 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            # Start GIF recording
+            self.gif_helper.start_alert_recording(
+                alert_type='phone_usage_alert',
+                alert_message=alert_message,
+                frame=frame,
+                alert_data=alert_data
+            )
+
+            # Store alert data for database save when GIF completes
+            self._pending_db_save = {
+                "alert_message": alert_message,
+                "alert_data": alert_data,
+                "timestamp": timestamp,
+                "detection_count": len(detections)
+            }
+
+            logger.info(f"Phone usage alert triggered for {self.channel_id}")
+            logger.info(f"  - Detection count: {len(detections)}")
+            logger.info(f"  - Duration: {duration:.2f}s")
+            logger.info(f"  - GIF recording started")
         
-        # Add timestamp
-        timestamp_text = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-        cv2.putText(snapshot, timestamp_text, (10, snapshot.shape[0] - 20),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        except Exception as e:
+            logger.error(f"Error starting GIF recording for phone alert: {e}")
         
-        # Save snapshot
-        cv2.imwrite(str(snapshot_path), snapshot)
-        file_size = snapshot_path.stat().st_size
-        
-        logger.info(f"Phone usage alert triggered for {self.channel_id}")
-        logger.info(f"  - Detection count: {len(detections)}")
-        logger.info(f"  - Duration: {duration:.2f}s")
-        logger.info(f"  - Snapshot saved: {snapshot_filename}")
-        
-        # Prepare alert data
-        alert_data = {
-            'channel_id': self.channel_id,
-            'detection_count': len(detections),
-            'duration': round(duration, 2),
-            'timestamp': timestamp.isoformat(),
-            'detections': detections
-        }
-        
-        # Save to database
-        if self.db_manager and self.app:
-            try:
-                with self.app.app_context():
-                    snapshot_id = self.db_manager.save_phone_snapshot(
-                        channel_id=self.channel_id,
-                        snapshot_filename=snapshot_filename,
-                        snapshot_path=str(snapshot_path),
-                        alert_message=f"Phone usage detected ({len(detections)} instance{'s' if len(detections) > 1 else ''})",
-                        alert_data=alert_data,
-                        file_size=file_size,
-                        detection_count=len(detections),
-                        detection_time=timestamp
-                    )
-                    
-                    if snapshot_id:
-                        logger.info(f"Phone snapshot saved to database with ID: {snapshot_id}")
-                    
-            except Exception as e:
-                logger.error(f"Error saving phone snapshot to database: {e}")
-        
-        # Send SocketIO alert
+        # Send SocketIO alert immediately
         if self.socketio:
             try:
                 self.socketio.emit('phone_alert', {
                     'channel_id': self.channel_id,
                     'message': f'Phone usage detected in {self.channel_id}',
-                    'snapshot': f'/static/phone_snapshots/{snapshot_filename}',
+                    'snapshot': 'recording',  # Will be updated when GIF completes
                     'detection_count': len(detections),
-                    'timestamp': timestamp_text,
+                    'timestamp': timestamp.strftime('%Y-%m-%d %H:%M:%S'),
                     'alert_data': alert_data
                 }, namespace='/')
                 

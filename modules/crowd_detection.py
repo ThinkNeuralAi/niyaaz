@@ -43,7 +43,7 @@ class CrowdDetection:
         # Initialize GIF recorder for alerts
         self.gif_recorder = AlertGifRecorder(
             buffer_size=90,  # 3 seconds at 30fps
-            gif_duration=4.0,  # 4 second GIFs
+            gif_duration=3.0,  # 3 second GIFs
             fps=30
         )
         

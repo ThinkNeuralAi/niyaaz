@@ -35,6 +35,7 @@ except ImportError:
 
 from .model_manager import get_shared_model
 from .yolo_detector import YOLODetector
+from .gif_alert_helper import GifAlertHelper
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,17 @@ class ServiceDisciplineMonitor:
         self.frame_count = 0
         self.total_alerts = 0
         self.last_update_time = time.time()
+
+        # Initialize GIF alert helper for violation GIFs
+        self.gif_helper = GifAlertHelper(channel_id, db_manager, app, socketio)
+        self.gif_helper.initialize_gif_recorder(
+            buffer_size=90,  # 3 seconds at 30fps
+            gif_duration=3.0,  # 3 second GIFs
+            fps=30
+        )
+        
+        # Track pending database saves for when GIF completes
+        self._pending_db_save = None
 
         self.load_configuration()
 
@@ -652,7 +664,8 @@ class ServiceDisciplineMonitor:
                         f"[{self.channel_id}] ⚠️ Table {table_id}: Customer waiting {waiting_time:.1f}s "
                         f"(threshold: {wait_threshold}s, cooldown: {cooldown}s, last alert: {time_since_last_alert:.1f}s ago)"
                     )
-                    self._trigger_violation_alert(table_id, cust, waiting_time, current_time, frame)
+                    # Use the new GIF-based alert method instead
+                    self._trigger_violation_alert_new(table_id, cust, waiting_time, current_time, frame)
                     tracking["last_alert_time"] = now_ts
                 else:
                     logger.debug(
@@ -671,93 +684,22 @@ class ServiceDisciplineMonitor:
                     )
 
     def _trigger_violation_alert(self, table_id, customer_track, waiting_time, current_time, frame=None):
-        logger.warning(
-            f"[{self.channel_id}] Service discipline violation: Table {table_id} "
-            f"waiting {waiting_time:.1f}s (threshold {self.settings['wait_time_threshold']}s)"
-        )
-
-        snapshot_path = self._save_snapshot(table_id, customer_track, waiting_time, current_time, frame)
-
-        if self.socketio:
-            self.socketio.emit("service_discipline_alert", {
-                "channel_id": self.channel_id,
-                "table_id": table_id,
-                "waiting_time": round(waiting_time, 1),
-                "threshold": self.settings["wait_time_threshold"],
-                "timestamp": current_time.isoformat(),
-                "snapshot_path": snapshot_path
-            })
-
-        if self.db_manager:
-            try:
-                # Save to table_service_violations table
-                # Wrap in app context to avoid "Working outside of application context" error
-                if self.app:
-                    with self.app.app_context():
-                        self.db_manager.add_table_service_violation(
-                            channel_id=self.channel_id,
-                            table_id=table_id,
-                            waiting_time=waiting_time,
-                            snapshot_path=snapshot_path,
-                            timestamp=current_time,
-                            alert_data={"violation_type": "service_discipline", "waiting_time": waiting_time}
-                        )
-                else:
-                    logger.warning(f"[{self.channel_id}] ⚠️ Cannot save violation: Flask app context not available")
-                
-                # Also log to general alerts table for consistency with other modules
-                alert_message = f"Service discipline violation: Table {table_id} waiting {waiting_time:.1f}s"
-                if self.app:
-                    with self.app.app_context():
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'service_discipline_alert',
-                            alert_message,
-                            alert_data={
-                                "violation_type": "service_discipline",
-                                "table_id": table_id,
-                                "waiting_time": waiting_time,
-                                "threshold": self.settings.get("wait_time_threshold", 300.0),
-                                "snapshot_path": snapshot_path
-                            }
-                        )
-                else:
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        'service_discipline_alert',
-                        alert_message,
-                        alert_data={
-                            "violation_type": "service_discipline",
-                            "table_id": table_id,
-                            "waiting_time": waiting_time,
-                            "threshold": self.settings.get("wait_time_threshold", 300.0),
-                            "snapshot_path": snapshot_path
-                        }
-                    )
-                logger.info(f"Service discipline alert logged to general alerts table: {alert_message}")
-            except Exception as e:
-                logger.error(f"Failed to save service discipline violation: {e}")
+        """
+        DEPRECATED: This method is no longer used. Use _trigger_violation_alert_new instead.
+        Redirects to the new GIF-based method.
+        """
+        logger.warning(f"[{self.channel_id}] ⚠️ _trigger_violation_alert called but deprecated - redirecting to _trigger_violation_alert_new")
+        # Redirect to the new method
+        self._trigger_violation_alert_new(table_id, customer_track, waiting_time, current_time, frame)
 
     def _save_snapshot(self, table_id, customer_track, waiting_time, current_time, frame=None):
-        try:
-            snapshot_dir = Path("static/service_discipline")
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
-            ts = current_time.strftime("%Y%m%d_%H%M%S")
-            filename = f"service_table_{table_id}_{self.channel_id}_{ts}.jpg"
-            snapshot_path = snapshot_dir / filename
-            if frame is not None:
-                annotated = frame.copy()
-                center = customer_track.get("center", [0, 0])
-                cv2.circle(annotated, (int(center[0]), int(center[1])), 20, (0, 0, 255), -1)
-                cv2.putText(annotated, f"Table {table_id}: {waiting_time:.1f}s",
-                            (int(center[0]) - 120, int(center[1]) - 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                cv2.imwrite(str(snapshot_path), annotated)
-                logger.info(f"Service discipline snapshot saved: {snapshot_path}")
-            return str(snapshot_path.relative_to("static"))
-        except Exception as e:
-            logger.error(f"Failed to save service discipline snapshot: {e}")
-            return None
+        """
+        DEPRECATED: This method is no longer used. Snapshots are now saved as GIFs via GifAlertHelper.
+        Kept for compatibility but should not save snapshots.
+        """
+        logger.warning(f"[{self.channel_id}] ⚠️ _save_snapshot called but deprecated - using GIF recording instead")
+        # Return None to indicate no snapshot was saved
+        return None
 
     # --- Main frame processing ---
     def process_frame(self, frame):
@@ -767,6 +709,9 @@ class ServiceDisciplineMonitor:
         
         if frame is None or frame.size == 0:
             return frame
+
+        # Add frame to GIF buffer (for pre-alert context)
+        self.gif_helper.add_frame_to_buffer(frame)
 
         try:
             # Save a clean copy of the original frame for snapshots
@@ -863,6 +808,69 @@ class ServiceDisciplineMonitor:
             
             # Draw annotations
             annotated = self._draw_annotations_new(frame, current_time)
+            # Continue GIF recording if in progress
+            if self.gif_helper.is_recording():
+                self.gif_helper.add_alert_frame(frame)
+                # Check if recording completed
+                if self.gif_helper.is_recording_complete():
+                    gif_info = self.gif_helper.get_completed_gif()
+                    if gif_info and self._pending_db_save:
+                        gif_path = self.gif_helper.get_snapshot_path_for_violation(gif_info)
+                        if gif_path:
+                            # Save to database with GIF path
+                            pending = self._pending_db_save
+                            try:
+                                logger.info(f"[{self.channel_id}] 💾 Saving violation to database with GIF: Table {pending['table_id']}, {pending['violation_type']} = {pending['waiting_time']:.1f}s")
+                                
+                                if self.app:
+                                    with self.app.app_context():
+                                        result = self.db_manager.add_table_service_violation(
+                                            channel_id=self.channel_id,
+                                            table_id=pending["table_id"],
+                                            waiting_time=pending["waiting_time"],
+                                            snapshot_path=gif_path,
+                                            timestamp=pending["timestamp"],
+                                            alert_data={
+                                                "violation_type": pending["violation_type"],
+                                                "wait_time": pending["waiting_time"],
+                                                "T_seated": pending["customer"].get("T_seated"),
+                                                "T_order_start": pending["customer"].get("T_order_start"),
+                                                "T_order_end": pending["customer"].get("T_order_end"),
+                                                "T_food_served": pending["customer"].get("T_food_served"),
+                                                "order_wait_time": pending["order_wait_time"],
+                                                "service_wait_time": pending["service_wait_time"]
+                                            }
+                                        )
+                                        if result:
+                                            logger.info(f"[{self.channel_id}] ✅ Violation saved to table_service_violations with GIF: ID={result}")
+                                        
+                                        # Also log to general alerts table
+                                        self.db_manager.log_alert(
+                                            self.channel_id,
+                                            'service_discipline_alert',
+                                            pending["alert_message"],
+                                            alert_data={
+                                                "violation_type": pending["violation_type"],
+                                                "table_id": pending["table_id"],
+                                                "wait_time": pending["waiting_time"],
+                                                "threshold": pending["threshold"],
+                                                "snapshot_path": gif_path,
+                                                "T_seated": pending["customer"].get("T_seated"),
+                                                "T_order_start": pending["customer"].get("T_order_start"),
+                                                "T_order_end": pending["customer"].get("T_order_end"),
+                                                "T_food_served": pending["customer"].get("T_food_served"),
+                                                "order_wait_time": pending["order_wait_time"],
+                                                "service_wait_time": pending["service_wait_time"]
+                                            }
+                                        )
+                                        logger.info(f"[{self.channel_id}] ✅ Alert logged to general alerts table with GIF")
+                                else:
+                                    logger.warning(f"[{self.channel_id}] ⚠️ Cannot save violation: Flask app context not available")
+                            except Exception as e:
+                                logger.error(f"[{self.channel_id}] ❌ Failed to save service discipline violation with GIF: {e}", exc_info=True)
+                            finally:
+                                self._pending_db_save = None
+            
             return annotated
             
         except Exception as e:
@@ -1335,13 +1343,13 @@ class ServiceDisciplineMonitor:
         
         if not snapshot_path:
             logger.error(
-                f"[{self.channel_id}] ❌ Failed to save snapshot for table {table_id} - snapshot_path is None. "
+                f"[{self.channel_id}] ❌ Failed to start GIF recording for table {table_id} - snapshot_path is None. "
                 f"Alert will NOT be saved to database. Frame: {'valid' if frame is not None and frame.size > 0 else 'invalid'}"
             )
-            # Don't save alert if snapshot failed - similar to material theft monitor
+            # Don't save alert if GIF recording failed
             return
         
-        logger.info(f"[{self.channel_id}] ✅ Snapshot saved successfully: {snapshot_path}")
+        logger.info(f"[{self.channel_id}] ✅ GIF recording started successfully")
         
         # Calculate order_wait_time and service_wait_time at violation time
         # These might not be set in customer dict yet if violation happens before events occur
@@ -1399,217 +1407,74 @@ class ServiceDisciplineMonitor:
                 "violation_type": violation_type,
                 "wait_time": round(wait_time, 1),
                 "timestamp": current_time.isoformat(),
-                "snapshot_path": snapshot_path,
+                "snapshot_path": snapshot_path,  # Will be updated when GIF completes
                 "alert_data": alert_data
             })
         
-        if self.db_manager:
-            try:
-                logger.info(f"[{self.channel_id}] 💾 Saving violation to database: Table {table_id}, {violation_type} = {wait_time:.1f}s")
-                
-                # Save to table_service_violations table
-                # Wrap in app context to avoid "Working outside of application context" error
-                if self.app:
-                    with self.app.app_context():
-                        result = self.db_manager.add_table_service_violation(
-                            channel_id=self.channel_id,
-                            table_id=table_id,
-                            waiting_time=wait_time,
-                            snapshot_path=snapshot_path,
-                            timestamp=current_time,
-                            alert_data={
-                                "violation_type": violation_type,
-                                "wait_time": wait_time,
-                                "T_seated": customer.get("T_seated"),
-                                "T_order_start": customer.get("T_order_start"),
-                                "T_order_end": customer.get("T_order_end"),
-                                "T_food_served": customer.get("T_food_served"),
-                                "order_wait_time": order_wait_time,  # Use calculated value
-                                "service_wait_time": service_wait_time  # Use calculated value
-                            }
-                        )
-                        if result:
-                            logger.info(f"[{self.channel_id}] ✅ Violation saved to table_service_violations: ID={result}, order_wait={order_wait_time}, service_wait={service_wait_time}")
-                        else:
-                            logger.error(f"[{self.channel_id}] ❌ Failed to save violation: add_table_service_violation returned None")
-                else:
-                    logger.warning(f"[{self.channel_id}] ⚠️ Cannot save violation: Flask app context not available")
-                    result = None
-                
-                # Also log to general alerts table for consistency with other modules
-                # Determine the correct threshold based on violation type
-                if violation_type == "order_wait":
-                    threshold = self.settings.get("order_wait_threshold", 120.0)
-                elif violation_type == "service_wait":
-                    threshold = self.settings.get("service_wait_threshold", 300.0)
-                else:
-                    threshold = self.settings.get("wait_time_threshold", 120.0)
-                
-                alert_message = f"Service discipline violation: Table {table_id} {violation_type} = {wait_time:.1f}s (threshold: {threshold}s)"
-                
-                try:
-                    if self.app:
-                        with self.app.app_context():
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                'service_discipline_alert',
-                                alert_message,
-                                alert_data={
-                                    "violation_type": violation_type,
-                                    "table_id": table_id,
-                                    "wait_time": wait_time,
-                                    "threshold": threshold,
-                                    "snapshot_path": snapshot_path,
-                                    "T_seated": customer.get("T_seated"),
-                                    "T_order_start": customer.get("T_order_start"),
-                                    "T_order_end": customer.get("T_order_end"),
-                                    "T_food_served": customer.get("T_food_served"),
-                                    "order_wait_time": order_wait_time,  # Use calculated value, not customer dict
-                                    "service_wait_time": service_wait_time  # Use calculated value, not customer dict
-                                }
-                            )
-                    else:
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'service_discipline_alert',
-                            alert_message,
-                            alert_data={
-                                "violation_type": violation_type,
-                                "table_id": table_id,
-                                "wait_time": wait_time,
-                                "threshold": threshold,
-                                "snapshot_path": snapshot_path,
-                                "T_seated": customer.get("T_seated"),
-                                "T_order_start": customer.get("T_order_start"),
-                                "T_order_end": customer.get("T_order_end"),
-                                "T_food_served": customer.get("T_food_served"),
-                                "order_wait_time": order_wait_time,  # Use calculated value, not customer dict
-                                "service_wait_time": service_wait_time  # Use calculated value, not customer dict
-                            }
-                        )
-                    logger.info(f"[{self.channel_id}] ✅ Alert logged to general alerts table: {alert_message}")
-                except Exception as e2:
-                    logger.error(f"[{self.channel_id}] ❌ Failed to log to general alerts table: {e2}", exc_info=True)
-                    
-            except Exception as e:
-                logger.error(f"[{self.channel_id}] ❌ Failed to save service discipline violation: {e}", exc_info=True)
+        # Store alert data for database save when GIF completes
+        # Determine the correct threshold based on violation type
+        if violation_type == "order_wait":
+            threshold = self.settings.get("order_wait_threshold", 120.0)
+        elif violation_type == "service_wait":
+            threshold = self.settings.get("service_wait_threshold", 300.0)
         else:
-            logger.warning(f"[{self.channel_id}] ⚠️ db_manager is None - cannot save violation to database")
+            threshold = self.settings.get("wait_time_threshold", 120.0)
+        
+        alert_message = f"Service discipline violation: Table {table_id} {violation_type} = {wait_time:.1f}s (threshold: {threshold}s)"
+        
+        self._pending_db_save = {
+            "table_id": table_id,
+            "waiting_time": wait_time,
+            "violation_type": violation_type,
+            "order_wait_time": order_wait_time,
+            "service_wait_time": service_wait_time,
+            "alert_message": alert_message,
+            "threshold": threshold,
+            "customer": customer,
+            "timestamp": current_time,
+            "alert_data": alert_data
+        }
     
     def _save_snapshot_new(self, table_id, customer, violation_type, wait_time, current_time, frame=None):
-        """Save snapshot with event information"""
+        """Start GIF recording for service discipline violation (replaces static snapshot)"""
         try:
             # Validate frame first
             if frame is None:
-                logger.error(f"[{self.channel_id}] ❌ Cannot save snapshot: frame is None for table {table_id}, violation_type={violation_type}")
+                logger.error(f"[{self.channel_id}] ❌ Cannot start GIF recording: frame is None for table {table_id}, violation_type={violation_type}")
                 return None
             
             if not hasattr(frame, 'size') or frame.size == 0:
-                logger.error(f"[{self.channel_id}] ❌ Cannot save snapshot: frame is empty or invalid for table {table_id}, violation_type={violation_type}, frame type={type(frame)}")
+                logger.error(f"[{self.channel_id}] ❌ Cannot start GIF recording: frame is empty or invalid for table {table_id}, violation_type={violation_type}")
                 return None
             
-            snapshot_dir = Path("static/service_discipline")
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
-            ts = current_time.strftime("%Y%m%d_%H%M%S")
-            filename = f"service_{violation_type}_{table_id}_{self.channel_id}_{ts}.jpg"
-            snapshot_path = snapshot_dir / filename
+            logger.info(f"[{self.channel_id}] 📸 Starting GIF recording: table={table_id}, violation={violation_type}, frame shape={frame.shape}")
             
-            logger.info(f"[{self.channel_id}] 📸 Attempting to save snapshot: {snapshot_path}, frame shape={frame.shape if hasattr(frame, 'shape') else 'unknown'}")
+            # Prepare alert message and data
+            alert_message = f"Service discipline violation: {violation_type} for table {table_id} (wait time: {wait_time:.1f}s)"
+            alert_data = {
+                "violation_type": violation_type,
+                "table_id": table_id,
+                "wait_time": wait_time,
+                "customer_id": customer.get("track_id"),
+                "T_seated": customer.get("T_seated"),
+                "T_order_start": customer.get("T_order_start"),
+                "T_order_end": customer.get("T_order_end"),
+                "T_food_served": customer.get("T_food_served")
+            }
             
-            annotated = frame.copy()
-            center = customer.get("center", [0, 0])
+            # Start GIF recording
+            self.gif_helper.start_alert_recording(
+                alert_type='service_discipline_alert',
+                alert_message=alert_message,
+                frame=frame,
+                alert_data=alert_data
+            )
             
-            # Draw customer center point
-            if center and len(center) >= 2:
-                cv2.circle(annotated, (int(center[0]), int(center[1])), 20, (0, 0, 255), -1)
-            
-            # Draw event timeline
-            info_y = 30
-            cv2.putText(annotated, f"Table {table_id}: {violation_type}", (10, info_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            info_y += 30
-            cv2.putText(annotated, f"Wait time: {wait_time:.1f}s", (10, info_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            
-            if customer.get("T_seated"):
-                info_y += 25
-                seated_ago = current_time.timestamp() - customer['T_seated']
-                cv2.putText(annotated, f"T_seated: {seated_ago:.1f}s ago", (10, info_y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            if customer.get("T_order_start"):
-                info_y += 25
-                order_start_ago = current_time.timestamp() - customer['T_order_start']
-                cv2.putText(annotated, f"T_order_start: {order_start_ago:.1f}s ago", (10, info_y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            if customer.get("T_order_end"):
-                info_y += 25
-                order_end_ago = current_time.timestamp() - customer['T_order_end']
-                cv2.putText(annotated, f"T_order_end: {order_end_ago:.1f}s ago", (10, info_y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            if customer.get("T_food_served"):
-                info_y += 25
-                food_served_ago = current_time.timestamp() - customer['T_food_served']
-                cv2.putText(annotated, f"T_food_served: {food_served_ago:.1f}s ago", (10, info_y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            # Calculate and show both wait times (use calculated values if available, otherwise calculate from timestamps)
-            now_ts = current_time.timestamp()
-            order_wait_display = None
-            service_wait_display = None
-            
-            # Calculate order wait time
-            if customer.get("T_seated"):
-                if customer.get("T_order_start"):
-                    order_wait_display = customer["T_order_start"] - customer["T_seated"]
-                else:
-                    order_wait_display = now_ts - customer["T_seated"]
-            
-            # Calculate service wait time
-            if customer.get("T_order_start"):
-                if customer.get("T_food_served"):
-                    service_wait_display = customer["T_food_served"] - customer["T_order_start"]
-                elif customer.get("T_order_end"):
-                    service_wait_display = now_ts - customer["T_order_end"]
-                else:
-                    service_wait_display = now_ts - customer["T_order_start"]
-            
-            # Display calculated wait times
-            if order_wait_display is not None:
-                info_y += 25
-                cv2.putText(annotated, f"Order wait: {order_wait_display:.1f}s", (10, info_y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-            if service_wait_display is not None:
-                info_y += 25
-                cv2.putText(annotated, f"Service wait: {service_wait_display:.1f}s", (10, info_y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-            
-            # Save snapshot
-            success = cv2.imwrite(str(snapshot_path), annotated)
-            if not success:
-                logger.error(f"[{self.channel_id}] ❌ cv2.imwrite() failed to write snapshot file: {snapshot_path}")
-                return None
-            
-            # Verify file was actually created and is not empty
-            if not snapshot_path.exists():
-                logger.error(f"[{self.channel_id}] ❌ Snapshot file does not exist after cv2.imwrite(): {snapshot_path}")
-                return None
-            
-            file_size = os.path.getsize(snapshot_path)
-            if file_size == 0:
-                logger.error(f"[{self.channel_id}] ❌ Snapshot file is empty (0 bytes): {snapshot_path}")
-                try:
-                    snapshot_path.unlink()  # Delete empty file
-                except:
-                    pass
-                return None
-            
-            logger.info(f"[{self.channel_id}] ✅ Service discipline snapshot saved: {snapshot_path} ({file_size} bytes)")
-            # Return relative path from static/
-            relative_path = str(snapshot_path.relative_to("static"))
-            logger.info(f"[{self.channel_id}] 📸 Snapshot relative path: {relative_path}")
-            return relative_path
+            # Return placeholder - actual path set when GIF completes
+            return "recording"
             
         except Exception as e:
-            logger.error(f"[{self.channel_id}] ❌ Failed to save service discipline snapshot: {e}", exc_info=True)
+            logger.error(f"[{self.channel_id}] ❌ Failed to start GIF recording: {e}", exc_info=True)
             return None
     
     def _save_wait_time_snapshot(self, table_id, customer_id, wait_type, wait_time, current_time, frame=None, is_violation=False):

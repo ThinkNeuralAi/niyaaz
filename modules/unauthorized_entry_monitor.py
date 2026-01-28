@@ -404,39 +404,10 @@ class UnauthorizedEntryMonitor:
             
             logger.warning(f"[{self.channel_id}] {alert_message}")
             
-            # Save snapshot immediately (as fallback if GIF fails)
-            snapshot_path = None
-            try:
-                timestamp = current_time.strftime("%Y%m%d_%H%M%S")
-                snapshot_filename = f"unauthorized_entry_{self.channel_id}_{timestamp}.jpg"
-                snapshot_path = os.path.join(self.snapshot_dir, snapshot_filename)
-                
-                # Draw annotations on snapshot
-                annotated_frame = self._draw_annotations(frame.copy(), detections, True)
-                
-                # Save snapshot with robust error checking
-                success = cv2.imwrite(snapshot_path, annotated_frame)
-                if success:
-                    # Verify file was created and is not empty
-                    if os.path.exists(snapshot_path):
-                        file_size = os.path.getsize(snapshot_path)
-                        if file_size > 0:
-                            # Convert to relative path for database storage
-                            relative_path = os.path.relpath(snapshot_path, "static")
-                            self._last_snapshot_path = relative_path
-                            logger.info(f"✅ Snapshot saved: {relative_path} ({file_size} bytes)")
-                        else:
-                            logger.warning(f"⚠️ Snapshot file is empty: {snapshot_path}")
-                            self._last_snapshot_path = None
-                    else:
-                        logger.warning(f"⚠️ Snapshot file not found after save: {snapshot_path}")
-                        self._last_snapshot_path = None
-                else:
-                    logger.warning(f"⚠️ cv2.imwrite() returned False for snapshot: {snapshot_path}")
-                    self._last_snapshot_path = None
-            except Exception as e:
-                logger.error(f"❌ Failed to save snapshot: {e}")
-                self._last_snapshot_path = None
+            # DEPRECATED: Snapshots are now saved as GIFs only via AlertGifRecorder
+            # No fallback snapshot saving - only GIFs are used
+            logger.info(f"[{self.channel_id}] Starting GIF recording for unauthorized entry alert")
+            self._last_snapshot_path = None
             
             # Start GIF recording
             alert_info = {

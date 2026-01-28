@@ -31,6 +31,7 @@ from pathlib import Path
 from ultralytics import YOLO
 from .model_manager import get_shared_model, release_shared_model
 from .gif_recorder import AlertGifRecorder
+from .gif_alert_helper import GifAlertHelper
 from .yolo_detector import YOLODetector
 
 logger = logging.getLogger(__name__)
@@ -126,13 +127,19 @@ class TableServiceMonitor:
         #         }}
         self.table_tracking = {}
 
-        # Initialize GIF recorder for violation snapshots
-        self.gif_recorder = AlertGifRecorder(buffer_size=90, gif_duration=3.0, fps=5)
+        # Initialize GIF alert helper for violation GIFs
+        self.gif_helper = GifAlertHelper(channel_id, db_manager, app, socketio)
+        self.gif_helper.initialize_gif_recorder(
+            buffer_size=90,  # 3 seconds at 30fps
+            gif_duration=3.0,  # 3 second GIFs
+            fps=30
+        )
         
         # Track recording state for GIF management
         self._was_recording_alert = False
         self._last_alert_message = None
         self._last_alert_data = None
+        self._pending_db_save = None  # Store alert data for database save when GIF completes
         
         # Track current violations for frame display (matching script behavior)
         self._current_wrong_uniforms = []
@@ -642,7 +649,7 @@ class TableServiceMonitor:
             f"Table has been unclean for {unclean_duration:.1f}s"
         )
 
-        # Save snapshot
+        # Start GIF recording (replaces snapshot)
         snapshot_path = self._save_unclean_snapshot(table_id, unclean_duration, current_time, frame)
 
         # Emit socket event
@@ -653,112 +660,71 @@ class TableServiceMonitor:
                 "table_id": table_id,
                 "unclean_duration": round(unclean_duration, 1),
                 "timestamp": current_time.isoformat(),
-                "snapshot_path": snapshot_path,
+                "snapshot_path": snapshot_path,  # Will be updated when GIF completes
                 "message": alert_message
             })
 
-        # Save to database (NEW: table_cleanliness_violations table)
-        if self.db_manager:
-            try:
-                payload = {
-                    "violation_type": "unclean_table",
-                    "unclean_duration": unclean_duration,
-                    "message": alert_message,
-                }
-
-                if self.app:
-                    with self.app.app_context():
-                        self.db_manager.add_table_cleanliness_violation(
-                            channel_id=self.channel_id,
-                            table_id=table_id,
-                            violation_type="unclean_table",
-                            snapshot_path=snapshot_path,
-                            timestamp=current_time,
-                            alert_data=payload,
-                        )
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            "table_cleanliness_alert",
-                            alert_message,
-                            alert_data={
-                                "violation_type": "unclean_table",
-                                "table_id": table_id,
-                                "unclean_duration": unclean_duration,
-                            },
-                        )
-                else:
-                    self.db_manager.add_table_cleanliness_violation(
-                        channel_id=self.channel_id,
-                        table_id=table_id,
-                        violation_type="unclean_table",
-                        snapshot_path=snapshot_path,
-                        timestamp=current_time,
-                        alert_data=payload,
-                    )
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        "table_cleanliness_alert",
-                        alert_message,
-                        alert_data={
-                            "violation_type": "unclean_table",
-                            "table_id": table_id,
-                            "unclean_duration": unclean_duration,
-                        },
-                    )
-
-                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: unclean_table for {table_id}")
-            except Exception as e:
-                logger.error(f"Failed to save table cleanliness (unclean_table): {e}", exc_info=True)
+        # Store alert data for database save when GIF completes
+        # Database save will happen in process_frame when GIF recording completes
+        self._pending_db_save = {
+            "type": "unclean_table",
+            "table_id": table_id,
+            "violation_type": "unclean_table",
+            "alert_message": alert_message,
+            "payload": {
+                "violation_type": "unclean_table",
+                "unclean_duration": unclean_duration,
+                "message": alert_message,
+            },
+            "timestamp": current_time
+        }
 
         tracking["last_unclean_alert_time"] = now_ts
         self.total_alerts += 1
 
     def _save_unclean_snapshot(self, table_id, unclean_duration, current_time, frame=None):
         """
-        Save a snapshot of the unclean table violation
+        Start GIF recording for unclean table violation (replaces static snapshot)
 
         Args:
             table_id: Table identifier
             unclean_duration: Duration table has been unclean
             current_time: Current timestamp
-            frame: Optional frame to save
+            frame: Current frame to start recording with
 
         Returns:
-            str: Path to saved snapshot (relative to static/)
+            str: Path to GIF (will be set when recording completes) or None
         """
         try:
-            snapshot_dir = Path("static/table_service_violations")
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
-
-            timestamp_str = current_time.strftime("%Y%m%d_%H%M%S")
-            filename = f"unclean_table_{table_id}_{self.channel_id}_{timestamp_str}.jpg"
-            snapshot_path = snapshot_dir / filename
-
-            # Save frame if provided
-            if frame is not None:
-                annotated = frame.copy()
-                
-                # Draw bounding box if available
-                tracking = self.table_tracking.get(table_id, {})
-                bbox = tracking.get("last_detection_bbox")
-                if bbox is not None and len(bbox) == 4:
-                    x1, y1, x2, y2 = bbox
-                    cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 3)
-                    cv2.putText(annotated, "UNCLEAN TABLE", (int(x1), int(y1) - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                
-                # Draw text annotation
-                cv2.putText(annotated, f"Table {table_id}: UNCLEAN ({unclean_duration:.1f}s)",
-                           (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
-                cv2.putText(annotated, "VIOLATION: Unclean table detected",
-                           (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-
-                cv2.imwrite(str(snapshot_path), annotated)
-                logger.info(f"Unclean table violation snapshot saved: {snapshot_path}")
-
-            return str(snapshot_path.relative_to("static"))
+            if frame is None:
+                return None
+            
+            alert_message = f"Unclean table {table_id} detected (unclean for {unclean_duration:.1f}s)"
+            alert_data = {
+                "violation_type": "unclean_table",
+                "table_id": table_id,
+                "unclean_duration": unclean_duration
+            }
+            
+            # Start GIF recording
+            self.gif_helper.start_alert_recording(
+                alert_type='table_cleanliness_alert',
+                alert_message=alert_message,
+                frame=frame,
+                alert_data=alert_data
+            )
+            
+            # Store alert info for when GIF completes
+            self._last_alert_message = alert_message
+            self._last_alert_data = alert_data.copy()
+            self._last_alert_data['table_id'] = table_id
+            
+            # Return placeholder path - will be updated when GIF completes
+            # The actual GIF path will be saved when recording completes
+            return "recording"  # Placeholder - actual path set when GIF completes
+            
         except Exception as e:
-            logger.error(f"Failed to save unclean snapshot: {e}")
+            logger.error(f"Failed to start GIF recording for unclean table: {e}")
             return None
 
     def _check_slow_reset_violation(self, table_id, tracking, reset_duration, current_time, frame=None):
@@ -797,7 +763,7 @@ class TableServiceMonitor:
             f"Table not cleaned within {reset_duration:.1f}s after customers left"
         )
 
-        # Save snapshot
+        # Start GIF recording (replaces snapshot)
         snapshot_path = self._save_slow_reset_snapshot(table_id, reset_duration, current_time, frame)
 
         # Emit socket event
@@ -808,184 +774,89 @@ class TableServiceMonitor:
                 "table_id": table_id,
                 "reset_duration": round(reset_duration, 1),
                 "timestamp": current_time.isoformat(),
-                "snapshot_path": snapshot_path,
+                "snapshot_path": snapshot_path,  # Will be updated when GIF completes
                 "message": alert_message
             })
 
-        # Save to database (NEW: table_cleanliness_violations table)
-        if self.db_manager:
-            try:
-                payload = {
-                    "violation_type": "slow_reset",
-                    "reset_duration": reset_duration,
-                    "message": alert_message,
-                }
-                if self.app:
-                    with self.app.app_context():
-                        self.db_manager.add_table_cleanliness_violation(
-                            channel_id=self.channel_id,
-                            table_id=table_id,
-                            violation_type="slow_reset",
-                            snapshot_path=snapshot_path,
-                            timestamp=current_time,
-                            alert_data=payload,
-                        )
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            "table_cleanliness_alert",
-                            alert_message,
-                            alert_data={
-                                "violation_type": "slow_reset",
-                                "table_id": table_id,
-                                "reset_duration": reset_duration,
-                            },
-                        )
-                else:
-                    self.db_manager.add_table_cleanliness_violation(
-                        channel_id=self.channel_id,
-                        table_id=table_id,
-                        violation_type="slow_reset",
-                        snapshot_path=snapshot_path,
-                        timestamp=current_time,
-                        alert_data=payload,
-                    )
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        "table_cleanliness_alert",
-                        alert_message,
-                        alert_data={
-                            "violation_type": "slow_reset",
-                            "table_id": table_id,
-                            "reset_duration": reset_duration,
-                        },
-                    )
-                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: slow_reset for {table_id}")
-            except Exception as e:
-                logger.error(f"Failed to save table cleanliness (slow_reset): {e}", exc_info=True)
+        # Store alert data for database save when GIF completes
+        self._pending_db_save = {
+            "type": "slow_reset",
+            "table_id": table_id,
+            "violation_type": "slow_reset",
+            "alert_message": alert_message,
+            "payload": {
+                "violation_type": "slow_reset",
+                "reset_duration": reset_duration,
+                "message": alert_message,
+            },
+            "timestamp": current_time
+        }
 
         tracking["last_slow_reset_alert_time"] = now_ts
 
     def _save_slow_reset_snapshot(self, table_id, reset_duration, current_time, frame=None):
         """
-        Save a snapshot of the slow reset violation
+        Start GIF recording for slow reset violation (replaces static snapshot)
 
         Args:
             table_id: Table identifier
             reset_duration: Duration table has been unclean since customers left
             current_time: Current timestamp
-            frame: Optional frame to save
+            frame: Current frame to start recording with
 
         Returns:
-            str: Path to saved snapshot (relative to static/)
+            str: Path to GIF (will be set when recording completes) or None
         """
         try:
-            snapshot_dir = Path("static/table_service_violations")
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
-
-            timestamp_str = current_time.strftime("%Y%m%d_%H%M%S")
-            filename = f"slow_reset_{table_id}_{self.channel_id}_{timestamp_str}.jpg"
-            snapshot_path = snapshot_dir / filename
-
-            # Save frame if provided
-            if frame is not None:
-                annotated = frame.copy()
-                # Draw text annotation
-                cv2.putText(annotated, f"Table {table_id}: SLOW RESET ({reset_duration:.1f}s)",
-                           (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 3)
-                cv2.putText(annotated, "VIOLATION: Table not cleaned after customers left",
-                           (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
-
-                cv2.imwrite(str(snapshot_path), annotated)
-                logger.info(f"Slow reset violation snapshot saved: {snapshot_path}")
-
-            return str(snapshot_path.relative_to("static"))
+            if frame is None:
+                return None
+            
+            alert_message = f"Slow reset: Table {table_id} not cleaned within {reset_duration:.1f}s after customers left"
+            alert_data = {
+                "violation_type": "slow_reset",
+                "table_id": table_id,
+                "reset_duration": reset_duration
+            }
+            
+            # Start GIF recording
+            self.gif_helper.start_alert_recording(
+                alert_type='table_cleanliness_alert',
+                alert_message=alert_message,
+                frame=frame,
+                alert_data=alert_data
+            )
+            
+            # Store alert info for when GIF completes
+            self._last_alert_message = alert_message
+            self._last_alert_data = alert_data.copy()
+            self._last_alert_data['table_id'] = table_id
+            
+            return "recording"  # Placeholder - actual path set when GIF completes
+            
         except Exception as e:
-            logger.error(f"Failed to save slow reset snapshot: {e}")
+            logger.error(f"Failed to start GIF recording for slow reset: {e}")
             return None
 
     def _trigger_violation_alert(self, table_id, customer_track, waiting_time, current_time, frame=None):
         """
-        DEPRECATED: This method is no longer used (wait time tracking removed)
-        Kept for compatibility but should not be called
-
-        Args:
-            table_id: Table identifier
-            customer_track: Customer track data
-            waiting_time: Waiting time in seconds
-            current_time: Current timestamp
-            frame: Optional frame for snapshot saving
+        DEPRECATED: This method is no longer used. Snapshots are now saved as GIFs via GifAlertHelper.
+        Kept for compatibility but should not be called.
         """
-        logger.warning(
-            f"[{self.channel_id}] Table {table_id} violation: Customer waiting {waiting_time:.1f}s "
-            f"(threshold: {self.settings['wait_time_threshold']}s)"
-        )
-
-        # Save snapshot
-        snapshot_path = self._save_violation_snapshot(table_id, customer_track, waiting_time, current_time, frame)
-
-        # Emit socket event
-        if self.socketio:
-            self.socketio.emit("table_service_alert", {
-                "channel_id": self.channel_id,
-                "table_id": table_id,
-                "waiting_time": round(waiting_time, 1),
-                "threshold": self.settings["wait_time_threshold"],
-                "timestamp": current_time.isoformat(),
-                "snapshot_path": snapshot_path
-            })
-
-        # Save to database
-        if self.db_manager:
-            try:
-                self.db_manager.add_table_service_violation(
-                    channel_id=self.channel_id,
-                    table_id=table_id,
-                    waiting_time=waiting_time,
-                    snapshot_path=snapshot_path,
-                    timestamp=current_time
-                )
-            except Exception as e:
-                logger.error(f"Failed to save table service violation to database: {e}")
+        logger.warning(f"[{self.channel_id}] ⚠️ _trigger_violation_alert called but deprecated - no action taken")
+        # Do nothing - this method should not be used anymore
+        return
 
     def _save_violation_snapshot(self, table_id, customer_track, waiting_time, current_time, frame=None):
         """
-        Save a snapshot of the violation
-
-        Args:
-            table_id: Table identifier
-            customer_track: Customer track data
-            waiting_time: Waiting time in seconds
-            current_time: Current timestamp
-            frame: Optional frame to save (if None, just return path)
-
+        DEPRECATED: This method is no longer used. Snapshots are now saved as GIFs via GifAlertHelper.
+        Kept for compatibility but should not save snapshots.
+        
         Returns:
-            str: Path to saved snapshot (relative to static/)
+            None: No snapshot is saved (GIFs are used instead)
         """
-        try:
-            snapshot_dir = Path("static/table_service_violations")
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
-
-            timestamp_str = current_time.strftime("%Y%m%d_%H%M%S")
-            filename = f"table_{table_id}_{self.channel_id}_{timestamp_str}.jpg"
-            snapshot_path = snapshot_dir / filename
-
-            # Save frame if provided
-            if frame is not None:
-                # Draw annotation on frame
-                annotated = frame.copy()
-                center = customer_track.get("center", [0, 0])
-                cv2.circle(annotated, (int(center[0]), int(center[1])), 20, (0, 0, 255), -1)
-                cv2.putText(annotated, f"Table {table_id}: {waiting_time:.1f}s", 
-                           (int(center[0]) - 100, int(center[1]) - 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                
-                cv2.imwrite(str(snapshot_path), annotated)
-                logger.info(f"Table service violation snapshot saved: {snapshot_path}")
-
-            return str(snapshot_path.relative_to("static"))
-        except Exception as e:
-            logger.error(f"Failed to save snapshot: {e}")
-            return None
+        logger.warning(f"[{self.channel_id}] ⚠️ _save_violation_snapshot called but deprecated - using GIF recording instead")
+        # Return None to indicate no snapshot was saved
+        return None
 
     def process_frame(self, frame):
         """
@@ -1002,6 +873,9 @@ class TableServiceMonitor:
 
         if frame is None or frame.size == 0:
             return frame
+
+        # Add frame to GIF buffer (for pre-alert context)
+        self.gif_helper.add_frame_to_buffer(frame)
 
         h, w = frame.shape[:2]
 
@@ -1097,6 +971,99 @@ class TableServiceMonitor:
             table_id for table_id, data in table_detections.items()
             if data.get("cleanliness") == "unclean"
         ]
+
+        # Continue GIF recording if in progress
+        if self.gif_helper.is_recording():
+            self.gif_helper.add_alert_frame(frame)
+            # Check if recording completed
+            if self.gif_helper.is_recording_complete():
+                gif_info = self.gif_helper.get_completed_gif()
+                if gif_info:
+                    gif_path = self.gif_helper.get_snapshot_path_for_violation(gif_info)
+                    if gif_path and self._pending_db_save:
+                        # Save to database with GIF path
+                        pending = self._pending_db_save
+                        try:
+                            if pending["type"] == "uniform_violation":
+                                # Save to table_service_violations table
+                                if self.app:
+                                    with self.app.app_context():
+                                        self.db_manager.add_table_service_violation(
+                                            channel_id=self.channel_id,
+                                            table_id=pending["table_id"],
+                                            waiting_time=pending.get("waiting_time", 0.0),
+                                            snapshot_path=gif_path,
+                                            timestamp=pending["timestamp"],
+                                            alert_data=pending["payload"],
+                                        )
+                                        self.db_manager.log_alert(
+                                            self.channel_id,
+                                            'table_service_alert',
+                                            pending["alert_message"],
+                                            alert_data=pending["payload"]
+                                        )
+                                else:
+                                    self.db_manager.add_table_service_violation(
+                                        channel_id=self.channel_id,
+                                        table_id=pending["table_id"],
+                                        waiting_time=pending.get("waiting_time", 0.0),
+                                        snapshot_path=gif_path,
+                                        timestamp=pending["timestamp"],
+                                        alert_data=pending["payload"],
+                                    )
+                                    self.db_manager.log_alert(
+                                        self.channel_id,
+                                        'table_service_alert',
+                                        pending["alert_message"],
+                                        alert_data=pending["payload"]
+                                    )
+                                logger.info(f"[{self.channel_id}] ✅ Uniform violation saved with GIF")
+                            else:
+                                # Save to table_cleanliness_violations table
+                                if self.app:
+                                    with self.app.app_context():
+                                        self.db_manager.add_table_cleanliness_violation(
+                                            channel_id=self.channel_id,
+                                            table_id=pending["table_id"],
+                                            violation_type=pending["violation_type"],
+                                            snapshot_path=gif_path,
+                                            timestamp=pending["timestamp"],
+                                            alert_data=pending["payload"],
+                                        )
+                                        self.db_manager.log_alert(
+                                            self.channel_id,
+                                            "table_cleanliness_alert",
+                                            pending["alert_message"],
+                                            alert_data={
+                                                "violation_type": pending["violation_type"],
+                                                "table_id": pending["table_id"],
+                                                **pending["payload"]
+                                            },
+                                        )
+                                else:
+                                    self.db_manager.add_table_cleanliness_violation(
+                                        channel_id=self.channel_id,
+                                        table_id=pending["table_id"],
+                                        violation_type=pending["violation_type"],
+                                        snapshot_path=gif_path,
+                                        timestamp=pending["timestamp"],
+                                        alert_data=pending["payload"],
+                                    )
+                                    self.db_manager.log_alert(
+                                        self.channel_id,
+                                        "table_cleanliness_alert",
+                                        pending["alert_message"],
+                                        alert_data={
+                                            "violation_type": pending["violation_type"],
+                                            "table_id": pending["table_id"],
+                                            **pending["payload"]
+                                        },
+                                    )
+                                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved with GIF: {pending['violation_type']} for {pending['table_id']}")
+                        except Exception as e:
+                            logger.error(f"Failed to save violation with GIF: {e}", exc_info=True)
+                        finally:
+                            self._pending_db_save = None
 
         # Draw annotations (always draw for smooth visualization)
         annotated_frame = self._draw_annotations(frame, table_detections, current_time)
@@ -1303,7 +1270,7 @@ class TableServiceMonitor:
             f"[{self.channel_id}] Wrong uniform violation: {uniform_names}"
         )
         
-        # Save snapshot
+        # Start GIF recording (replaces snapshot)
         snapshot_path = self._save_uniform_violation_snapshot(wrong_uniforms, current_time, frame)
         
         # Emit socket event
@@ -1312,108 +1279,67 @@ class TableServiceMonitor:
                 "channel_id": self.channel_id,
                 "wrong_uniforms": wrong_uniforms,
                 "timestamp": current_time.isoformat(),
-                "snapshot_path": snapshot_path,
+                "snapshot_path": snapshot_path,  # Will be updated when GIF completes
                 "message": alert_message
             })
         
-        # Save to database
-        if self.db_manager:
-            try:
-                if self.app:
-                    with self.app.app_context():
-                        self.db_manager.add_table_service_violation(
-                            channel_id=self.channel_id,
-                            table_id="N/A",  # Uniform violation is not table-specific
-                            waiting_time=0.0,  # Uniform violation doesn't have waiting time
-                            snapshot_path=snapshot_path,
-                            timestamp=current_time,
-                            alert_data={
-                                "violation_type": "wrong_uniform",
-                                "wrong_uniforms": wrong_uniforms,
-                                "message": alert_message
-                            }
-                        )
-                        # Also log to general alerts table
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'table_service_alert',
-                            alert_message,
-                            alert_data={
-                                "violation_type": "wrong_uniform",
-                                "wrong_uniforms": wrong_uniforms
-                            }
-                        )
-                        logger.info(f"[{self.channel_id}] ✅ Uniform violation alert saved to database: {uniform_names}")
-                else:
-                    self.db_manager.add_table_service_violation(
-                        channel_id=self.channel_id,
-                        table_id="N/A",  # Uniform violation is not table-specific
-                        waiting_time=0.0,  # Uniform violation doesn't have waiting time
-                        snapshot_path=snapshot_path,
-                        timestamp=current_time,
-                        alert_data={
-                            "violation_type": "wrong_uniform",
-                            "wrong_uniforms": wrong_uniforms,
-                            "message": alert_message
-                        }
-                    )
-                    # Also log to general alerts table
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        'table_service_alert',
-                        alert_message,
-                        alert_data={
-                            "violation_type": "wrong_uniform",
-                            "wrong_uniforms": wrong_uniforms
-                        }
-                    )
-                    logger.info(f"[{self.channel_id}] ✅ Uniform violation alert saved to database: {uniform_names}")
-            except Exception as e:
-                logger.error(f"Failed to save uniform violation to database: {e}", exc_info=True)
+        # Store alert data for database save when GIF completes
+        self._pending_db_save = {
+            "type": "uniform_violation",
+            "table_id": "N/A",
+            "violation_type": "wrong_uniform",
+            "alert_message": alert_message,
+            "payload": {
+                "violation_type": "wrong_uniform",
+                "wrong_uniforms": wrong_uniforms,
+                "message": alert_message
+            },
+            "timestamp": current_time,
+            "waiting_time": 0.0
+        }
         
         self.total_alerts += 1
     
     def _save_uniform_violation_snapshot(self, wrong_uniforms, current_time, frame=None):
         """
-        Save a snapshot of the wrong uniform violation
+        Start GIF recording for wrong uniform violation (replaces static snapshot)
         
         Args:
             wrong_uniforms: List of wrong uniform class names
             current_time: Current timestamp
-            frame: Optional frame to save
+            frame: Current frame to start recording with
             
         Returns:
-            str: Path to saved snapshot (relative to static/)
+            str: Path to GIF (will be set when recording completes) or None
         """
         try:
-            snapshot_dir = Path("static/table_service_violations")
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            if frame is None:
+                return None
             
-            timestamp_str = current_time.strftime("%Y%m%d_%H%M%S")
-            uniform_str = "_".join(wrong_uniforms)
-            filename = f"wrong_uniform_{self.channel_id}_{uniform_str}_{timestamp_str}.jpg"
-            snapshot_path = snapshot_dir / filename
+            uniform_names = ", ".join([u.upper() for u in wrong_uniforms])
+            alert_message = f"Wrong uniform detected: {uniform_names}"
+            alert_data = {
+                "violation_type": "wrong_uniform",
+                "wrong_uniforms": wrong_uniforms
+            }
             
-            # Save frame if provided
-            if frame is not None:
-                annotated = frame.copy()
-                
-                # Draw alert text (matching script style)
-                alert_text = f"⚠ WRONG UNIFORM DETECTED!"
-                cv2.putText(annotated, alert_text, (20, 40),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
-                
-                # Add uniform names
-                uniform_names = ", ".join([u.upper() for u in wrong_uniforms])
-                cv2.putText(annotated, uniform_names, (20, 90),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
-                
-                cv2.imwrite(str(snapshot_path), annotated)
-                logger.info(f"Wrong uniform violation snapshot saved: {snapshot_path}")
+            # Start GIF recording
+            self.gif_helper.start_alert_recording(
+                alert_type='table_service_alert',
+                alert_message=alert_message,
+                frame=frame,
+                alert_data=alert_data
+            )
             
-            return str(snapshot_path.relative_to("static"))
+            # Store alert info for when GIF completes
+            self._last_alert_message = alert_message
+            self._last_alert_data = alert_data.copy()
+            self._last_alert_data['wrong_uniforms'] = wrong_uniforms
+            
+            return "recording"  # Placeholder - actual path set when GIF completes
+            
         except Exception as e:
-            logger.error(f"Failed to save uniform violation snapshot: {e}")
+            logger.error(f"Failed to start GIF recording for uniform violation: {e}")
             return None
 
     def get_status(self):

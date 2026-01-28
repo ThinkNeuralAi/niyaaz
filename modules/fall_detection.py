@@ -20,6 +20,7 @@ from collections import deque
 from ultralytics import YOLO
 from pathlib import Path
 from .model_manager import get_shared_model, release_shared_model
+from .gif_alert_helper import GifAlertHelper
 
 logger = logging.getLogger(__name__)
 
@@ -232,9 +233,20 @@ class FallDetection:
             max_misses=self.max_misses
         )
         
-        # Snapshot directory
+        # Snapshot directory (kept for compatibility, but we use GIFs now)
         self.snapshot_dir = Path("static/fall_snapshots")
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize GIF alert helper for violation GIFs
+        self.gif_helper = GifAlertHelper(channel_id, db_manager, app, socketio)
+        self.gif_helper.initialize_gif_recorder(
+            buffer_size=90,  # 3 seconds at 30fps
+            gif_duration=3.0,  # 3 second GIFs
+            fps=30
+        )
+        
+        # Track pending database saves for when GIF completes
+        self._pending_db_save = None
         
         # State storage
         self.frame_index = 0
@@ -270,6 +282,9 @@ class FallDetection:
         """
         if frame is None:
             return None
+        
+        # Add frame to GIF buffer (for pre-alert context)
+        self.gif_helper.add_frame_to_buffer(frame)
         
         self.frame_count += 1
         self.frame_index += 1
@@ -436,6 +451,50 @@ class FallDetection:
         cv2.putText(annotated_frame, f"Falls Detected: {len(fallen_tracks)}", (10, stats_y + 35),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255) if fallen_tracks else (0, 255, 0), 2)
         
+        # Continue GIF recording if in progress
+        if self.gif_helper.is_recording():
+            self.gif_helper.add_alert_frame(frame)
+            # Check if recording completed
+            if self.gif_helper.is_recording_complete():
+                gif_info = self.gif_helper.get_completed_gif()
+                if gif_info and self._pending_db_save:
+                    gif_path = self.gif_helper.get_snapshot_path_for_violation(gif_info)
+                    if gif_path:
+                        # Save to database with GIF path
+                        pending = self._pending_db_save
+                        try:
+                            if self.db_manager and self.app:
+                                with self.app.app_context():
+                                    # Use relative path for database
+                                    relative_path = str(Path(gif_path).relative_to("static")) if gif_path.startswith("static/") else gif_path
+                                    snapshot_id = self.db_manager.save_fall_snapshot(
+                                        channel_id=self.channel_id,
+                                        snapshot_filename=os.path.basename(gif_path),
+                                        snapshot_path=relative_path,
+                                        alert_message=pending["alert_message"],
+                                        alert_data=pending["alert_data"],
+                                        file_size=os.path.getsize(gif_path) if os.path.exists(gif_path) else 0,
+                                        fall_duration=0.0
+                                    )
+                                    logger.info(f"Fall GIF saved to database: ID {snapshot_id}")
+                                    
+                                    # Emit real-time notification
+                                    self.socketio.emit('fall_detected', {
+                                        'snapshot_id': snapshot_id,
+                                        'channel_id': self.channel_id,
+                                        'track_id': pending["track_id"],
+                                        'snapshot_filename': os.path.basename(gif_path),
+                                        'snapshot_url': f"/static/{relative_path}",
+                                        'alert_message': pending["alert_message"],
+                                        'timestamp': pending["dt"].isoformat()
+                                    })
+                        except Exception as e:
+                            logger.error(f"Error saving fall GIF to database: {e}")
+                            import traceback
+                            logger.error(traceback.format_exc())
+                        finally:
+                            self._pending_db_save = None
+        
         # Send real-time updates
         if t_now - self.last_update_time >= 1.0:
             self._send_realtime_update()
@@ -458,34 +517,17 @@ class FallDetection:
         }
     
     def _trigger_fall_alert(self, frame, track_id, bbox, timestamp):
-        """Trigger fall detection alert with snapshot"""
+        """Trigger fall detection alert with GIF recording"""
         self.total_alerts += 1
         
-        # Generate filename
-        dt = datetime.fromtimestamp(timestamp)
-        timestamp_str = dt.strftime("%Y%m%d_%H%M%S")
-        folder = self.snapshot_dir / f"fall_{track_id}_{timestamp_str}"
-        folder.mkdir(parents=True, exist_ok=True)
-        
-        filename = f"trigger_frame.jpg"
-        filepath = folder / filename
-        
-        # Save snapshot
         try:
-            # Draw bounding box on snapshot
-            snapshot = frame.copy()
-            x1, y1, x2, y2 = bbox
-            cv2.rectangle(snapshot, (x1, y1), (x2, y2), (0, 0, 255), 3)
-            cv2.putText(snapshot, f"FALL ID:{track_id}",
-                       (x1, y1 - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                       (0, 0, 255), 2)
-            
-            cv2.imwrite(str(filepath), snapshot)
-            file_size = os.path.getsize(filepath)
-            
-            logger.warning(f"[ALERT] FALL: Track {track_id} saved → {folder}")
-            
+            if frame is None or frame.size == 0:
+                logger.error(f"[{self.channel_id}] ❌ Cannot start GIF recording: frame is None or empty")
+                return
+
+            dt = datetime.fromtimestamp(timestamp)
+            logger.info(f"[{self.channel_id}] 📸 Starting GIF recording for fall alert: track_id={track_id}")
+
             # Prepare alert data
             alert_message = f"Person fall detected - Track ID: {track_id}"
             alert_data = {
@@ -494,52 +536,38 @@ class FallDetection:
                 'channel_id': self.channel_id
             }
             
-            # Save to database
-            if self.db_manager and self.app:
-                try:
-                    with self.app.app_context():
-                        # Use relative path for database
-                        relative_path = str(filepath.relative_to("static"))
-                        snapshot_id = self.db_manager.save_fall_snapshot(
-                            channel_id=self.channel_id,
-                            snapshot_filename=filename,
-                            snapshot_path=relative_path,
-                            alert_message=alert_message,
-                            alert_data=alert_data,
-                            file_size=file_size,
-                            fall_duration=0.0  # Not applicable with new logic
-                        )
-                        
-                        logger.info(f"Fall snapshot saved to database: ID {snapshot_id}")
-                        
-                        # Emit real-time notification
-                        self.socketio.emit('fall_detected', {
-                            'snapshot_id': snapshot_id,
-                            'channel_id': self.channel_id,
-                            'track_id': track_id,
-                            'snapshot_filename': filename,
-                            'snapshot_url': f"/static/{relative_path}",
-                            'alert_message': alert_message,
-                            'timestamp': dt.isoformat()
-                        })
-                        
-                except Exception as e:
-                    logger.error(f"Error saving fall snapshot to database: {e}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-            
-            # Emit Socket.IO alert
+            # Start GIF recording
+            self.gif_helper.start_alert_recording(
+                alert_type='fall_detection_alert',
+                alert_message=alert_message,
+                frame=frame,
+                alert_data=alert_data
+            )
+
+            # Store alert data for database save when GIF completes
+            self._pending_db_save = {
+                "track_id": track_id,
+                "bbox": bbox,
+                "alert_message": alert_message,
+                "alert_data": alert_data,
+                "timestamp": timestamp,
+                "dt": dt
+            }
+
+            # Emit Socket.IO alert immediately
             self.socketio.emit('fall_alert', {
                 'channel_id': self.channel_id,
                 'track_id': track_id,
                 'alert_message': alert_message,
-                'snapshot_filename': filename,
-                'snapshot_url': f"/static/{filepath.relative_to('static')}",
+                'snapshot_filename': "recording",  # Will be updated when GIF completes
+                'snapshot_url': "recording",
                 'timestamp': dt.isoformat()
             })
             
+            logger.warning(f"[ALERT] FALL: Track {track_id} - GIF recording started")
+            
         except Exception as e:
-            logger.error(f"Error saving fall snapshot: {e}")
+            logger.error(f"Error starting GIF recording for fall alert: {e}")
             import traceback
             logger.error(traceback.format_exc())
     

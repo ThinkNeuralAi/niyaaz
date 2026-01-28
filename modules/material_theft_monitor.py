@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .model_manager import get_shared_model, release_shared_model  # kept for consistency; not used here
 from .yolo_detector import YOLODetector
+from .gif_alert_helper import GifAlertHelper
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,17 @@ class MaterialTheftMonitor:
         self.prev_detected = False  # Track previous detection state (for edge detection)
         self.frame_count = 0
         self._persons_near_roi = []  # Store detected persons near ROI for visualization
+
+        # Initialize GIF alert helper for violation GIFs
+        self.gif_helper = GifAlertHelper(channel_id, db_manager, app, socketio)
+        self.gif_helper.initialize_gif_recorder(
+            buffer_size=90,  # 3 seconds at 30fps
+            gif_duration=3.0,  # 3 second GIFs
+            fps=30
+        )
+        
+        # Track pending database saves for when GIF completes
+        self._pending_db_save = None
 
         logger.info(f"[{self.channel_id}] MaterialTheftMonitor initialized")
 
@@ -148,6 +160,9 @@ class MaterialTheftMonitor:
         if frame is None or frame.size == 0:
             logger.warning(f"[{self.channel_id}] MaterialTheftMonitor: Received empty frame")
             return {'frame': frame, 'object_present': False, 'still_counter': 0, 'persons_near_roi': 0}
+
+        # Add frame to GIF buffer (for pre-alert context)
+        self.gif_helper.add_frame_to_buffer(frame)
 
         self.frame_count += 1
         
@@ -377,6 +392,57 @@ class MaterialTheftMonitor:
         cv2.putText(annotated, channel_info, (annotated.shape[1] - text_width - 10, 25), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
+        # Continue GIF recording if in progress
+        if self.gif_helper.is_recording():
+            self.gif_helper.add_alert_frame(frame)
+            # Check if recording completed
+            if self.gif_helper.is_recording_complete():
+                gif_info = self.gif_helper.get_completed_gif()
+                if gif_info and self._pending_db_save:
+                    gif_path = self.gif_helper.get_snapshot_path_for_violation(gif_info)
+                    if gif_path:
+                        # Save to database with GIF path
+                        pending = self._pending_db_save
+                        try:
+                            if self.db_manager:
+                                if self.app:
+                                    with self.app.app_context():
+                                        # Log alert to database
+                                        self.db_manager.log_alert(
+                                            self.channel_id,
+                                            'material_theft_alert',
+                                            pending["alert_message"],
+                                            alert_data=pending["alert_data"]
+                                        )
+                                        # Save GIF to alert_gifs table
+                                        self.db_manager.save_alert_gif(
+                                            self.channel_id,
+                                            'material_theft_alert',
+                                            gif_info,
+                                            alert_message=pending["alert_message"],
+                                            alert_data=pending["alert_data"]
+                                        )
+                                        logger.info(f"[{self.channel_id}] ✅ Material theft alert saved to database with GIF")
+                                else:
+                                    self.db_manager.log_alert(
+                                        self.channel_id,
+                                        'material_theft_alert',
+                                        pending["alert_message"],
+                                        alert_data=pending["alert_data"]
+                                    )
+                                    self.db_manager.save_alert_gif(
+                                        self.channel_id,
+                                        'material_theft_alert',
+                                        gif_info,
+                                        alert_message=pending["alert_message"],
+                                        alert_data=pending["alert_data"]
+                                    )
+                                    logger.info(f"[{self.channel_id}] ✅ Material theft alert saved to database with GIF")
+                        except Exception as e:
+                            logger.error(f"[{self.channel_id}] ❌ Failed to save material theft alert with GIF: {e}", exc_info=True)
+                        finally:
+                            self._pending_db_save = None
+
         # Return result in the format expected by SharedMultiModuleVideoProcessor
         return {
             'frame': annotated,
@@ -425,18 +491,11 @@ class MaterialTheftMonitor:
         filename = f"material_theft_{self.channel_id}_{ts}.jpg"
         filepath = self.snapshot_dir / filename
         try:
-            # Save snapshot and verify it was created
-            success = cv2.imwrite(str(filepath), frame)
-            if not success:
-                raise Exception(f"cv2.imwrite returned False - snapshot file was not created")
-            
-            # Verify file exists and has content
-            if not filepath.exists():
-                raise Exception(f"Snapshot file does not exist after cv2.imwrite: {filepath}")
-            
-            file_size = os.path.getsize(filepath)
-            if file_size == 0:
-                raise Exception(f"Snapshot file is empty (0 bytes): {filepath}")
+            if frame is None or frame.size == 0:
+                logger.error(f"[{self.channel_id}] ❌ Cannot start GIF recording: frame is None or empty")
+                return
+
+            logger.info(f"[{self.channel_id}] 📸 Starting GIF recording for material theft alert: type={alert_type}")
 
             if alert_type == "person_near":
                 alert_message = f"👤 Person detected near weighing machine (count: {person_count})"
@@ -444,10 +503,8 @@ class MaterialTheftMonitor:
                     "channel_id": self.channel_id,
                     "person_count": person_count,
                     "alert_type": "person_near",
-                    "snapshot_path": str(filepath),
                     "timestamp": current_time.isoformat()
                 }
-                logger.info(f"[{self.channel_id}] ✅ Setting person alert message: {alert_message}")
             else:  # object_placed
                 alert_message = f"📦 Object detected on weighing machine"
                 alert_data = {
@@ -455,59 +512,34 @@ class MaterialTheftMonitor:
                     "detection_count": detection_count,
                     "alert_type": "object_placed",
                     "target_class": self.target_class,
-                    "snapshot_path": str(filepath),
                     "timestamp": current_time.isoformat()
                 }
-                logger.info(f"[{self.channel_id}] ✅ Setting object alert message: {alert_message}")
 
-            # Save alert to database (snapshot-based alerts only, no GIF)
-            if self.db_manager:
-                try:
-                    if self.app:
-                        with self.app.app_context():
-                            # Log alert to database
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                'material_theft_alert',
-                                alert_message,
-                                alert_data=alert_data
-                            )
-                            # Save snapshot to alert_gifs table (for dashboard display - using snapshot, not GIF)
-                            self.db_manager.save_alert_gif(
-                                self.channel_id,
-                                'material_theft_alert',
-                                {'gif_filename': filename, 'gif_path': str(filepath), 'frame_count': 0, 'duration': 0.0},
-                                alert_message=alert_message,
-                                alert_data=alert_data
-                            )
-                            logger.info(f"[{self.channel_id}] Material theft alert snapshot saved to database: {alert_message}")
-                    else:
-                        # Log alert to database
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'material_theft_alert',
-                            alert_message,
-                            alert_data=alert_data
-                        )
-                        # Save snapshot to alert_gifs table (for dashboard display - using snapshot, not GIF)
-                        self.db_manager.save_alert_gif(
-                            self.channel_id,
-                            'material_theft_alert',
-                            {'gif_filename': filename, 'gif_path': str(filepath), 'frame_count': 0, 'duration': 0.0},
-                            alert_message=alert_message,
-                            alert_data=alert_data
-                        )
-                        logger.info(f"[{self.channel_id}] Material theft alert snapshot saved to database: {alert_message}")
-                except Exception as db_error:
-                    logger.error(f"[{self.channel_id}] Error saving material theft alert to database: {db_error}", exc_info=True)
+            # Start GIF recording
+            self.gif_helper.start_alert_recording(
+                alert_type='material_theft_alert',
+                alert_message=alert_message,
+                frame=frame,
+                alert_data=alert_data
+            )
 
-            # Emit socket event
+            # Store alert data for database save when GIF completes
+            self._pending_db_save = {
+                "alert_type": alert_type,
+                "alert_message": alert_message,
+                "alert_data": alert_data,
+                "current_time": current_time,
+                "person_count": person_count if alert_type == "person_near" else None,
+                "detection_count": detection_count if alert_type == "object_placed" else None
+            }
+
+            # Emit Socket.IO event immediately
             if self.socketio:
                 emit_data = {
                     'channel_id': self.channel_id,
                     'message': alert_message,
                     'timestamp': current_time.isoformat(),
-                    'snapshot_url': f"/static/material_theft_snapshots/{filename}",
+                    'snapshot_url': "recording",  # Will be updated when GIF completes
                     'alert_type': alert_type
                 }
                 if alert_type == "person_near":
@@ -516,11 +548,10 @@ class MaterialTheftMonitor:
                     emit_data['detection_count'] = detection_count
                 self.socketio.emit('material_theft_alert', emit_data)
 
-            logger.warning(f"[{self.channel_id}] Material theft alert triggered, snapshot: {filename} ({file_size} bytes)")
+            logger.warning(f"[{self.channel_id}] Material theft alert triggered, GIF recording started")
                 
         except Exception as e:
-            logger.error(f"[{self.channel_id}] ❌ Error saving material theft snapshot: {e}. Alert NOT saved to database.", exc_info=True)
-            # Don't save to database if snapshot creation failed
+            logger.error(f"[{self.channel_id}] ❌ Error starting GIF recording for material theft alert: {e}", exc_info=True)
             return
 
     def get_status(self):

@@ -25,6 +25,7 @@ import os
 import requests
 
 from .yolo_detector import YOLODetector
+from .gif_alert_helper import GifAlertHelper
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,17 @@ class QueueMonitor:
         self.roi_cache = {"main": None, "secondary": None}
         self.roi_cache_frame_size = None
 
+        # Initialize GIF alert helper for violation GIFs
+        self.gif_helper = GifAlertHelper(channel_id, db_manager, app, socketio)
+        self.gif_helper.initialize_gif_recorder(
+            buffer_size=90,  # 3 seconds at 30fps
+            gif_duration=3.0,  # 3 second GIFs
+            fps=30
+        )
+        
+        # Track pending database saves for when GIF completes
+        self._pending_db_saves = []
+        
         # Performance
         self.frame_count = 0
         
@@ -700,7 +712,7 @@ class QueueMonitor:
     # Violation saving
     # ------------------------------------------------------------------ #
 
-    def _save_violation_snapshot(self, frame, violation_type, violation_message, queue_count=None, counter_count=None):
+    def _save_violation_snapshot(self, frame, violation_type, violation_message, queue_count=None, counter_count=None, wait_time_seconds=0.0, alert_info=None):
         """
         Save a snapshot of a queue violation
         
@@ -866,27 +878,39 @@ class QueueMonitor:
             # Log what we're saving to verify
             logger.info(f"[{self.channel_id}] Saving snapshot with violation_type={violation_type}, message='{violation_message}', queue={q_count}, counter={c_count}")
             
-            # Save the image
-            success = cv2.imwrite(str(snapshot_path), annotated)
-            if not success:
-                logger.error(f"Failed to write snapshot image to {snapshot_path}")
+            # Start GIF recording instead of saving snapshot
+            logger.info(f"[{self.channel_id}] 📸 Starting GIF recording for queue violation: {violation_type}")
+            
+            try:
+                # Start GIF recording
+                self.gif_helper.start_alert_recording(
+                    alert_type='queue_violation',
+                    alert_message=violation_message,
+                    frame=frame,
+                    alert_data={
+                        'violation_type': violation_type,
+                        'queue_count': q_count,
+                        'counter_count': c_count,
+                        'channel_id': self.channel_id
+                    }
+                )
+                
+                # Store alert data for database save when GIF completes
+                # Include all necessary data for database save
+                self._pending_db_saves.append({
+                    'violation_type': violation_type,
+                    'violation_message': violation_message,
+                    'queue_count': q_count,
+                    'counter_count': c_count,
+                    'wait_time_seconds': wait_time_seconds if wait_time_seconds is not None else 0.0,
+                    'alert_data': alert_info if alert_info is not None else {}
+                })
+                
+                # Return placeholder - actual GIF path will be available when recording completes
+                return "recording"
+            except Exception as e:
+                logger.error(f"[{self.channel_id}] ❌ Failed to start GIF recording: {e}")
                 return None
-            
-            # Verify file was created and has content
-            import os
-            if not os.path.exists(snapshot_path):
-                logger.error(f"Snapshot file was not created: {snapshot_path}")
-                return None
-            
-            file_size = os.path.getsize(snapshot_path)
-            if file_size == 0:
-                logger.error(f"Snapshot file is empty: {snapshot_path}")
-                return None
-            
-            logger.info(f"Queue violation snapshot saved: {snapshot_path} ({file_size} bytes) with message: {violation_message}")
-            
-            # Return full path for database storage (use forward slashes for web compatibility)
-            return str(snapshot_path).replace('\\', '/')
         except Exception as e:
             logger.error(f"Failed to save violation snapshot: {e}")
             return None
@@ -943,76 +967,96 @@ class QueueMonitor:
         
         for violation_type, violation_message in violations:
             try:
-                # Save snapshot with specific violation message and counts from alert time
+                # Start GIF recording (will save to database when GIF completes)
                 snapshot_path = self._save_violation_snapshot(
                     frame, 
                     violation_type, 
                     violation_message,
                     queue_count=alert_queue_count,
-                    counter_count=alert_counter_count
+                    counter_count=alert_counter_count,
+                    wait_time_seconds=alert_info.get("max_wait_seconds", 0.0),
+                    alert_info=alert_info
                 )
                 
-                # Verify snapshot was saved successfully
-                if not snapshot_path:
-                    logger.error(f"[{self.channel_id}] ❌ Failed to save snapshot for violation: {violation_message}")
-                    logger.error(f"[{self.channel_id}] Snapshot path is None - snapshot saving failed!")
+                # Store violation info for database save when GIF completes
+                # The GIF completion handler in process_frame will save to database
+                if snapshot_path == "recording":
+                    # GIF recording started - violation will be saved when GIF completes
+                    logger.info(f"[{self.channel_id}] ✅ GIF recording started for violation: {violation_message}")
+                elif snapshot_path:
+                    # If snapshot_path is returned (shouldn't happen with GIFs), save immediately
+                    # This is a fallback
+                    self._save_violation_to_db(
+                        violation_type,
+                        violation_message,
+                        alert_queue_count,
+                        alert_counter_count,
+                        alert_info.get("max_wait_seconds", 0.0),
+                        snapshot_path,
+                        alert_info
+                    )
                 else:
-                    import os
-                    # Normalize path for checking (handle both forward and backslashes)
-                    check_path = snapshot_path.replace('\\', '/')
-                    if not os.path.exists(snapshot_path):
-                        logger.error(f"[{self.channel_id}] ❌ Snapshot path does not exist: {snapshot_path}")
-                        logger.error(f"[{self.channel_id}] Attempted to check: {os.path.abspath(snapshot_path)}")
-                        snapshot_path = None  # Set to None so database doesn't store invalid path
-                    else:
-                        file_size = os.path.getsize(snapshot_path)
-                        logger.info(f"[{self.channel_id}] ✅ Snapshot verified: {snapshot_path} ({file_size} bytes)")
+                    logger.error(f"[{self.channel_id}] ❌ Failed to start GIF recording for violation: {violation_message}")
                 
-                # Save to database (with proper app context handling)
-                violation_id = None
-                if self.app:
-                    from flask import has_app_context
-                    if has_app_context():
-                        violation_id = self.db_manager.add_queue_violation(
-                            channel_id=self.channel_id,
-                            violation_type=violation_type,
-                            violation_message=violation_message,
-                            queue_count=self.queue_count,
-                            counter_count=self.counter_count,
-                            wait_time_seconds=alert_info.get("max_wait_seconds", 0.0),
-                            snapshot_path=snapshot_path,
-                            alert_data=alert_info
-                        )
-                    else:
-                        with self.app.app_context():
-                            violation_id = self.db_manager.add_queue_violation(
-                                channel_id=self.channel_id,
-                                violation_type=violation_type,
-                                violation_message=violation_message,
-                                queue_count=self.queue_count,
-                                counter_count=self.counter_count,
-                                wait_time_seconds=alert_info.get("max_wait_seconds", 0.0),
-                                snapshot_path=snapshot_path,
-                                alert_data=alert_info
-                            )
-                else:
+                # Note: Database save will happen when GIF completes (handled in process_frame)
+                # Don't save to database here - wait for GIF to complete
+            except Exception as e:
+                logger.error(f"[{self.channel_id}] ❌ Error processing violation {violation_type}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+    def _save_violation_to_db(self, violation_type, violation_message, queue_count, counter_count, wait_time_seconds, snapshot_path, alert_data):
+        """Helper method to save violation to database"""
+        try:
+            violation_id = None
+            if self.app:
+                from flask import has_app_context
+                if has_app_context():
                     violation_id = self.db_manager.add_queue_violation(
                         channel_id=self.channel_id,
                         violation_type=violation_type,
                         violation_message=violation_message,
-                        queue_count=self.queue_count,
-                        counter_count=self.counter_count,
-                        wait_time_seconds=alert_info.get("max_wait_seconds", 0.0),
+                        queue_count=queue_count,
+                        counter_count=counter_count,
+                        wait_time_seconds=wait_time_seconds,
                         snapshot_path=snapshot_path,
-                        alert_data=alert_info
+                        alert_data=alert_data
                     )
-                
-                if violation_id:
-                    logger.info(f"[{self.channel_id}] ✅ Queue violation saved to database: ID {violation_id}, type: {violation_type}, message: {violation_message}")
                 else:
-                    logger.error(f"[{self.channel_id}] ❌ Failed to save queue violation (returned None)")
-            except Exception as e:
-                logger.error(f"[{self.channel_id}] ❌ Failed to save queue violation to database: {e}", exc_info=True)
+                    with self.app.app_context():
+                        violation_id = self.db_manager.add_queue_violation(
+                            channel_id=self.channel_id,
+                            violation_type=violation_type,
+                            violation_message=violation_message,
+                            queue_count=queue_count,
+                            counter_count=counter_count,
+                            wait_time_seconds=wait_time_seconds,
+                            snapshot_path=snapshot_path,
+                            alert_data=alert_data
+                        )
+            else:
+                if self.db_manager:
+                    violation_id = self.db_manager.add_queue_violation(
+                        channel_id=self.channel_id,
+                        violation_type=violation_type,
+                        violation_message=violation_message,
+                        queue_count=queue_count,
+                        counter_count=counter_count,
+                        wait_time_seconds=wait_time_seconds,
+                        snapshot_path=snapshot_path,
+                        alert_data=alert_data
+                    )
+            
+            if violation_id:
+                logger.info(f"[{self.channel_id}] ✅ Queue violation saved to database: ID {violation_id}, type: {violation_type}")
+            else:
+                logger.warning(f"[{self.channel_id}] ⚠️ Queue violation save returned None (may have failed silently)")
+            return violation_id
+        except Exception as e:
+            logger.error(f"[{self.channel_id}] ❌ Failed to save queue violation to database: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
 
     # ------------------------------------------------------------------ #
     # Alert logic
@@ -1157,6 +1201,9 @@ class QueueMonitor:
         Returns:
             Processed frame (with overlays).
         """
+        # Add frame to GIF buffer (for pre-alert context)
+        self.gif_helper.add_frame_to_buffer(frame)
+        
         self.frame_count += 1
 
         original_frame = frame.copy()
@@ -1468,6 +1515,63 @@ class QueueMonitor:
                 },
             )
 
+        # Continue GIF recording if in progress
+        was_recording = self.gif_helper.is_recording()
+        if was_recording:
+            self.gif_helper.add_alert_frame(frame)
+        
+        # Check if recording just completed (check AFTER adding frame, as stop_alert_recording might have been called)
+        if was_recording and not self.gif_helper.is_recording():
+            # Recording just finished - process completed GIF
+            logger.info(f"[{self.channel_id}] 📸 GIF recording just completed, processing {len(self._pending_db_saves)} pending violation(s)")
+            
+            # Force check for completion to ensure gif_info is set
+            if self.gif_helper.is_recording_complete():
+                logger.info(f"[{self.channel_id}] ✅ is_recording_complete() confirmed")
+            
+            # Get completed GIF info
+            gif_info = self.gif_helper.get_completed_gif()
+            logger.info(f"[{self.channel_id}] 📸 Retrieved gif_info: {gif_info is not None}, pending violations: {len(self._pending_db_saves)}")
+            
+            if gif_info and self._pending_db_saves:
+                gif_path = self.gif_helper.get_snapshot_path_for_violation(gif_info)
+                logger.info(f"[{self.channel_id}] 📸 GIF path: {gif_path}, pending violations: {len(self._pending_db_saves)}")
+                if gif_path:
+                    # Save to database with GIF path for each pending violation
+                    # Process all pending violations that were recorded in this GIF
+                    saved_count = 0
+                    while self._pending_db_saves:
+                        pending = self._pending_db_saves.pop(0)  # Get first pending violation
+                        logger.info(f"[{self.channel_id}] 💾 Saving violation to database: {pending['violation_type']} - {pending['violation_message']}")
+                        try:
+                            if self.db_manager:
+                                # Use the helper method to save with all required fields
+                                violation_id = self._save_violation_to_db(
+                                    pending['violation_type'],
+                                    pending['violation_message'],
+                                    pending['queue_count'],
+                                    pending['counter_count'],
+                                    pending.get('wait_time_seconds', 0.0),
+                                    gif_path,
+                                    pending.get('alert_data', {})
+                                )
+                                if violation_id:
+                                    saved_count += 1
+                                    logger.info(f"[{self.channel_id}] ✅ Queue violation GIF saved to database: {pending['violation_type']} (ID: {violation_id})")
+                                else:
+                                    logger.warning(f"[{self.channel_id}] ⚠️ Queue violation save returned None for: {pending['violation_type']}")
+                        except Exception as e:
+                            logger.error(f"[{self.channel_id}] ❌ Failed to save queue violation GIF: {e}")
+                            import traceback
+                            logger.error(traceback.format_exc())
+                    logger.info(f"[{self.channel_id}] ✅ Saved {saved_count} violation(s) to database with GIF")
+                else:
+                    logger.error(f"[{self.channel_id}] ❌ GIF path is None or empty, cannot save to database. gif_info: {gif_info}")
+            elif not gif_info:
+                logger.warning(f"[{self.channel_id}] ⚠️ GIF recording completed but gif_info is None")
+            elif not self._pending_db_saves:
+                logger.warning(f"[{self.channel_id}] ⚠️ GIF recording completed but no pending violations to save")
+        
         return original_frame
 
     # ------------------------------------------------------------------ #
