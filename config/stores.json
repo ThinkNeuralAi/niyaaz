@@ -1,0 +1,21 @@
+{
+  "stores": [
+    {
+      "store_id": "store_1",
+      "store_name": "Niyaaz_Biryani",
+      "location": "Belgaum",
+      "description": "Primary location with all monitoring modules",
+      "enabled": true,
+      "default": true
+    },
+    {
+      "store_id": "store_2",
+      "store_name": "Niyaaz_Biryani",
+      "location": "Goa",
+      "description": "Secondary location with different modules from main store",
+      "enabled": true,
+      "default": false,
+      "excluded_modules": ["CashDetection", "SmokingDetection"]
+    }
+  ]
+}

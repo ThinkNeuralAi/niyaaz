@@ -194,6 +194,34 @@ app_configs = {
 # Database manager
 db_manager = DatabaseManager(db)
 
+# ============= Helper Functions for Store/Channel Mapping =============
+def get_channel_to_store_mapping():
+    """
+    Build a mapping of channel_id to store_id from channels.json
+    Returns: {channel_id: store_id}
+    """
+    channel_store_map = {}
+    try:
+        config_path = Path('config/channels.json')
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            for channel in config.get('channels', []):
+                channel_id = channel.get('channel_id')
+                store_id = channel.get('store_id', 'store_1')
+                if channel_id:
+                    channel_store_map[channel_id] = store_id
+    except Exception as e:
+        logger.error(f"Error building channel to store mapping: {e}")
+    return channel_store_map
+
+def filter_channels_by_store(channel_ids, store_id):
+    """
+    Filter a list of channel IDs to only those belonging to the given store
+    """
+    channel_store_map = get_channel_to_store_mapping()
+    return [ch for ch in channel_ids if channel_store_map.get(ch) == store_id]
+
 # ============= Channel Auto-Loader from Configuration =============
 def load_channels_from_config(config_file='config/channels.json'):
     """
@@ -853,15 +881,28 @@ def get_channels(app_name):
 
 @app.route('/api/get_active_channels')
 def get_active_channels():
-    """Get all currently active channels with their running modules"""
+    """Get all currently active channels with their running modules, optionally filtered by store"""
     try:
+        # Get optional store_id parameter
+        store_id = request.args.get('store_id', None)
+        
         active_channels = []
         
         logger.info(f"📊 get_active_channels: shared_video_processors has {len(shared_video_processors)} entries")
         logger.info(f"📊 get_active_channels: channel_modules has {len(channel_modules)} entries")
+        if store_id:
+            logger.info(f"📊 get_active_channels: Filtering for store_id={store_id}")
+        
+        # Get channel to store mapping for filtering
+        channel_store_map = get_channel_to_store_mapping()
         
         # Only get channels from processors that are actually running and can provide frames
         for channel_id, processor in shared_video_processors.items():
+            # If store_id is specified, filter channels by store
+            if store_id and channel_store_map.get(channel_id) != store_id:
+                logger.debug(f"📊 Channel {channel_id}: Skipped - belongs to {channel_store_map.get(channel_id)}, not {store_id}")
+                continue
+            
             # Check if processor is actually running
             is_running = getattr(processor, 'is_running', False)
             
@@ -902,7 +943,7 @@ def get_active_channels():
         # Don't include channels that are just configured but not running
         # (They will appear when the processor actually starts)
         
-        logger.info(f"📊 Returning {len(active_channels)} ACTIVE channels (only running with valid frames)")
+        logger.info(f"📊 Returning {len(active_channels)} ACTIVE channels (only running with valid frames){'for store ' + store_id if store_id else ''}")
         
         return jsonify({
             'success': True,
@@ -915,7 +956,77 @@ def get_active_channels():
 
 @app.route('/api/get_configured_channels')
 def get_configured_channels():
-    """Get all configured channels from channels.json (for fallback when active channels aren't loaded yet)"""
+    """Get all configured channels from channels.json (for fallback when active channels aren't loaded yet), optionally filtered by store"""
+    try:
+        # Get optional store_id parameter
+        store_id = request.args.get('store_id', None)
+        
+        config_path = Path('config/channels.json')
+        if not config_path.exists():
+            return jsonify({'success': False, 'error': 'channels.json not found'})
+        
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        channels = config.get('channels', [])
+        
+        # Get channel to store mapping for filtering
+        channel_store_map = get_channel_to_store_mapping()
+        
+        # Return channels with their module types
+        configured_channels = []
+        for ch in channels:
+            channel_id = ch.get('channel_id')
+            # If store_id is specified, filter channels by store
+            if store_id and channel_store_map.get(channel_id) != store_id:
+                continue
+            
+            if ch.get('enabled', False):
+                modules = ch.get('modules', [])
+                module_types = [m.get('type') for m in modules if isinstance(m, dict) and m.get('type')]
+                configured_channels.append({
+                    'channel_id': channel_id,
+                    'channel_name': ch.get('channel_name'),
+                    'modules': module_types,
+                    'enabled': ch.get('enabled', True)
+                })
+        
+        return jsonify({
+            'success': True,
+            'channels': configured_channels,
+            'count': len(configured_channels),
+            'store_id': store_id
+        })
+    except Exception as e:
+        logger.error(f"Error getting configured channels: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/get_stores')
+def get_stores():
+    """Get all available stores"""
+    try:
+        config_path = Path('config/stores.json')
+        if not config_path.exists():
+            return jsonify({'success': False, 'error': 'stores.json not found'})
+        
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        stores = config.get('stores', [])
+        enabled_stores = [s for s in stores if s.get('enabled', True)]
+        
+        return jsonify({
+            'success': True,
+            'stores': enabled_stores,
+            'count': len(enabled_stores)
+        })
+    except Exception as e:
+        logger.error(f"Error getting stores: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/get_channels_by_store/<store_id>')
+def get_channels_by_store(store_id):
+    """Get channels configured for a specific store"""
     try:
         config_path = Path('config/channels.json')
         if not config_path.exists():
@@ -925,26 +1036,83 @@ def get_configured_channels():
             config = json.load(f)
         
         channels = config.get('channels', [])
-        # Return channels with their module types
-        configured_channels = []
+        # Filter channels by store_id
+        store_channels = [
+            {
+                'channel_id': ch.get('channel_id'),
+                'channel_name': ch.get('channel_name'),
+                'store_id': ch.get('store_id', 'store_1'),
+                'modules': [m.get('type') for m in ch.get('modules', []) if isinstance(m, dict) and m.get('type')],
+                'enabled': ch.get('enabled', True)
+            }
+            for ch in channels 
+            if ch.get('store_id', 'store_1') == store_id and ch.get('enabled', False)
+        ]
+        
+        return jsonify({
+            'success': True,
+            'store_id': store_id,
+            'channels': store_channels,
+            'count': len(store_channels)
+        })
+    except Exception as e:
+        logger.error(f"Error getting channels for store {store_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/get_modules_by_store/<store_id>')
+def get_modules_by_store(store_id):
+    """Get unique modules/usecases available for a specific store"""
+    try:
+        # First, load the stores config to check for excluded modules
+        excluded_modules = []
+        stores_path = Path('config/stores.json')
+        if stores_path.exists():
+            with open(stores_path, 'r') as f:
+                stores_config = json.load(f)
+                for store in stores_config.get('stores', []):
+                    if store.get('store_id') == store_id:
+                        excluded_modules = store.get('excluded_modules', [])
+                        break
+        
+        config_path = Path('config/channels.json')
+        if not config_path.exists():
+            return jsonify({'success': False, 'error': 'channels.json not found'})
+        
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        channels = config.get('channels', [])
+        # Collect unique module types for the store
+        modules_set = set()
         for ch in channels:
-            if ch.get('enabled', False):
-                modules = ch.get('modules', [])
-                module_types = [m.get('type') for m in modules if isinstance(m, dict) and m.get('type')]
-                configured_channels.append({
-                    'channel_id': ch.get('channel_id'),
-                    'channel_name': ch.get('channel_name'),
-                    'modules': module_types,
-                    'enabled': ch.get('enabled', True)
+            if ch.get('store_id', 'store_1') == store_id and ch.get('enabled', False):
+                for module in ch.get('modules', []):
+                    if isinstance(module, dict) and module.get('type'):
+                        module_type = module.get('type')
+                        # Skip excluded modules
+                        if module_type not in excluded_modules:
+                            modules_set.add(module_type)
+        
+        # Map modules to their display info from app_configs
+        modules_list = []
+        for module_type in sorted(modules_set):
+            if module_type in app_configs:
+                config = app_configs[module_type]
+                modules_list.append({
+                    'type': module_type,
+                    'name': config.get('name'),
+                    'description': config.get('description'),
+                    'status': config.get('status', 'online')
                 })
         
         return jsonify({
             'success': True,
-            'channels': configured_channels,
-            'count': len(configured_channels)
+            'store_id': store_id,
+            'modules': modules_list,
+            'count': len(modules_list)
         })
     except Exception as e:
-        logger.error(f"Error getting configured channels: {e}", exc_info=True)
+        logger.error(f"Error getting modules for store {store_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/add_rtsp_channel', methods=['POST'])
@@ -1485,6 +1653,8 @@ def get_channel_status(channel_id):
 def get_module_analytics(module_name):
     """Get analytics summary for a specific module"""
     try:
+        # Get store_id from query parameters
+        store_id = request.args.get('store_id', 'store_1')
         analytics = {}
         
         if module_name == 'PeopleCounter':
@@ -1495,9 +1665,13 @@ def get_module_analytics(module_name):
             daily_data = []
             
             # Get list of active channels
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'PeopleCounter' in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
             
             # Get today's counts from database
             try:
@@ -1571,15 +1745,22 @@ def get_module_analytics(module_name):
             current_counter_total = 0
             active_channels = []
             
+            # Get all active channels first
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'QueueMonitor' in processor.get_active_modules():
-                    active_channels.append(channel_id)
-                    if channel_id in channel_modules and 'QueueMonitor' in channel_modules[channel_id]:
-                        module = channel_modules[channel_id]['QueueMonitor']
-                        status = module.get_status() if hasattr(module, 'get_status') else {}
-                        # Get queue and counter counts from status
-                        current_queue_total += status.get('queue_count', 0)
-                        current_counter_total += status.get('counter_count', 0)
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            
+            for channel_id in active_channels:
+                if channel_id in channel_modules and 'QueueMonitor' in channel_modules[channel_id]:
+                    module = channel_modules[channel_id]['QueueMonitor']
+                    status = module.get_status() if hasattr(module, 'get_status') else {}
+                    # Get queue and counter counts from status
+                    current_queue_total += status.get('queue_count', 0)
+                    current_counter_total += status.get('counter_count', 0)
             
             # Get alert count from database (queue_alert type)
             try:
@@ -1619,23 +1800,29 @@ def get_module_analytics(module_name):
             current_unattended = 0
             
             # Get real-time data from active processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'BagDetection' in processor.get_active_modules():
-                    active_channels.append(channel_id)
-                    if channel_id in channel_modules and 'BagDetection' in channel_modules[channel_id]:
-                        module = channel_modules[channel_id]['BagDetection']
-                        stats = module.get_statistics() if hasattr(module, 'get_statistics') else {}
-                        current_bags_tracked += stats.get('bags_tracked', 0)
-                        current_unattended += stats.get('current_unattended_bags', 0)
-                        
-                        channel_details.append({
-                            'channel_id': channel_id,
-                            'bags_tracked': stats.get('bags_tracked', 0),
-                            'active_alerts': stats.get('active_alerts', 0),
-                            'total_alerts': stats.get('total_alerts_triggered', 0),
-                            'longest_unattended': stats.get('longest_unattended_time', 0),
-                            'peak_bags': stats.get('peak_bags_count', 0)
-                        })
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            
+            for channel_id in active_channels:
+                if channel_id in channel_modules and 'BagDetection' in channel_modules[channel_id]:
+                    module = channel_modules[channel_id]['BagDetection']
+                    stats = module.get_statistics() if hasattr(module, 'get_statistics') else {}
+                    current_bags_tracked += stats.get('bags_tracked', 0)
+                    current_unattended += stats.get('current_unattended_bags', 0)
+                    
+                    channel_details.append({
+                        'channel_id': channel_id,
+                        'bags_tracked': stats.get('bags_tracked', 0),
+                        'active_alerts': stats.get('active_alerts', 0),
+                        'total_alerts': stats.get('total_alerts_triggered', 0),
+                        'longest_unattended': stats.get('longest_unattended_time', 0),
+                        'peak_bags': stats.get('peak_bags_count', 0)
+                    })
             
             # Get historical analytics from database
             db_analytics = {}
@@ -1677,16 +1864,22 @@ def get_module_analytics(module_name):
             channel_details = []
             
             # Get real-time data from active processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'HeatmapProcessor' in processor.get_active_modules():
-                    active_channels.append(channel_id)
-                    if channel_id in channel_modules and 'HeatmapProcessor' in channel_modules[channel_id]:
-                        module = channel_modules[channel_id]['HeatmapProcessor']
-                        status = module.get_status() if hasattr(module, 'get_status') else {}
-                        current_hotspots = status.get('hotspot_count', 0)
-                        total_hotspots += current_hotspots
-                        
-                        channel_details.append({
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            
+            for channel_id in active_channels:
+                if channel_id in channel_modules and 'HeatmapProcessor' in channel_modules[channel_id]:
+                    module = channel_modules[channel_id]['HeatmapProcessor']
+                    status = module.get_status() if hasattr(module, 'get_status') else {}
+                    current_hotspots = status.get('hotspot_count', 0)
+                    total_hotspots += current_hotspots
+                    
+                    channel_details.append({
                             'channel_id': channel_id,
                             'current_hotspots': current_hotspots,
                             'peak_hotspots': status.get('peak_hotspot_count', 0),
@@ -1733,24 +1926,30 @@ def get_module_analytics(module_name):
             current_detections_total = 0
             
             # Get real-time data from active processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'CashDetection' in processor.get_active_modules():
-                    active_channels.append(channel_id)
-                    if channel_id in channel_modules and 'CashDetection' in channel_modules[channel_id]:
-                        module = channel_modules[channel_id]['CashDetection']
-                        stats = module.get_statistics() if hasattr(module, 'get_statistics') else {}
-                        current_detections_total += stats.get('current_detections', 0)
-                        
-                        channel_details.append({
-                            'channel_id': channel_id,
-                            'current_detections': stats.get('current_detections', 0),
-                            'total_alerts': stats.get('total_alerts', 0),
-                            'total_detections': stats.get('total_detections', 0),
-                            'peak_detections': stats.get('peak_detections', 0),
-                            'detection_sessions': stats.get('detection_sessions', 0),
-                            'avg_confidence': stats.get('avg_confidence', 0),
-                            'highest_confidence': stats.get('highest_confidence', 0)
-                        })
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            
+            for channel_id in active_channels:
+                if channel_id in channel_modules and 'CashDetection' in channel_modules[channel_id]:
+                    module = channel_modules[channel_id]['CashDetection']
+                    stats = module.get_statistics() if hasattr(module, 'get_statistics') else {}
+                    current_detections_total += stats.get('current_detections', 0)
+                    
+                    channel_details.append({
+                        'channel_id': channel_id,
+                        'current_detections': stats.get('current_detections', 0),
+                        'total_alerts': stats.get('total_alerts', 0),
+                        'total_detections': stats.get('total_detections', 0),
+                        'peak_detections': stats.get('peak_detections', 0),
+                        'detection_sessions': stats.get('detection_sessions', 0),
+                        'avg_confidence': stats.get('avg_confidence', 0),
+                        'highest_confidence': stats.get('highest_confidence', 0)
+                    })
             
             # Get historical analytics from database
             db_analytics = {}
@@ -1794,9 +1993,10 @@ def get_module_analytics(module_name):
             current_falls = 0
             persons_tracked = 0
             
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'FallDetection' in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
                     # Get current statistics from module if available
                     if channel_id in channel_modules and 'FallDetection' in channel_modules[channel_id]:
                         module = channel_modules[channel_id]['FallDetection']
@@ -1804,10 +2004,16 @@ def get_module_analytics(module_name):
                         current_falls += stats.get('current_falls', 0)
                         persons_tracked += stats.get('persons_tracked', 0)
             
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            
             # Also check configured channels (even if processor not running)
+            configured_channels = []
             for channel_id, modules_dict in channel_modules.items():
-                if 'FallDetection' in modules_dict and channel_id not in active_channels:
-                    active_channels.append(channel_id)
+                if 'FallDetection' in modules_dict and channel_id not in all_active_channels:
+                    configured_channels.append(channel_id)
+            configured_channels = filter_channels_by_store(configured_channels, store_id)
+            active_channels.extend(configured_channels)
             
             # Get comprehensive analytics from database
             db_analytics = {}
@@ -1855,26 +2061,32 @@ def get_module_analytics(module_name):
             current_detections_total = 0
             
             # Get real-time data from active processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'MoppingDetection' in processor.get_active_modules():
-                    active_channels.append(channel_id)
-                    if channel_id in channel_modules and 'MoppingDetection' in channel_modules[channel_id]:
-                        module = channel_modules[channel_id]['MoppingDetection']
-                        current_detections = getattr(module, 'detection_count', 0)
-                        current_detections_total += current_detections
-                        
-                        # Get channel-specific stats from database
-                        try:
-                            with app.app_context():
-                                ch_stats = db_manager.get_mopping_statistics(channel_id=channel_id, days=7)
-                                channel_details.append({
-                                    'channel_id': channel_id,
-                                    'total_alerts': ch_stats.get('total_alerts', 0),
-                                    'total_detections': ch_stats.get('total_detections', 0),
-                                    'current_detections': current_detections
-                                })
-                        except Exception as e:
-                            logger.error(f"Error getting channel stats for {channel_id}: {e}")
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            
+            for channel_id in active_channels:
+                if channel_id in channel_modules and 'MoppingDetection' in channel_modules[channel_id]:
+                    module = channel_modules[channel_id]['MoppingDetection']
+                    current_detections = getattr(module, 'detection_count', 0)
+                    current_detections_total += current_detections
+                    
+                    # Get channel-specific stats from database
+                    try:
+                        with app.app_context():
+                            ch_stats = db_manager.get_mopping_statistics(channel_id=channel_id, days=7)
+                            channel_details.append({
+                                'channel_id': channel_id,
+                                'total_alerts': ch_stats.get('total_alerts', 0),
+                                'total_detections': ch_stats.get('total_detections', 0),
+                                'current_detections': current_detections
+                            })
+                    except Exception as e:
+                        logger.error(f"Error getting channel stats for {channel_id}: {e}")
             
             # Get comprehensive analytics from database
             db_stats = {}
@@ -1927,26 +2139,32 @@ def get_module_analytics(module_name):
             current_detections_total = 0
             
             # Get real-time data from active processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'SmokingDetection' in processor.get_active_modules():
-                    active_channels.append(channel_id)
-                    if channel_id in channel_modules and 'SmokingDetection' in channel_modules[channel_id]:
-                        module = channel_modules[channel_id]['SmokingDetection']
-                        current_detections = getattr(module, 'detection_count', 0)
-                        current_detections_total += current_detections
-                        
-                        # Get channel-specific stats from database
-                        try:
-                            with app.app_context():
-                                ch_stats = db_manager.get_smoking_statistics(channel_id=channel_id, days=7)
-                                channel_details.append({
-                                    'channel_id': channel_id,
-                                    'total_alerts': ch_stats.get('total_alerts', 0),
-                                    'total_detections': ch_stats.get('total_detections', 0),
-                                    'current_detections': current_detections
-                                })
-                        except Exception as e:
-                            logger.error(f"Error getting channel stats for {channel_id}: {e}")
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            
+            for channel_id in active_channels:
+                if channel_id in channel_modules and 'SmokingDetection' in channel_modules[channel_id]:
+                    module = channel_modules[channel_id]['SmokingDetection']
+                    current_detections = getattr(module, 'detection_count', 0)
+                    current_detections_total += current_detections
+                    
+                    # Get channel-specific stats from database
+                    try:
+                        with app.app_context():
+                            ch_stats = db_manager.get_smoking_statistics(channel_id=channel_id, days=7)
+                            channel_details.append({
+                                'channel_id': channel_id,
+                                'total_alerts': ch_stats.get('total_alerts', 0),
+                                'total_detections': ch_stats.get('total_detections', 0),
+                                'current_detections': current_detections
+                            })
+                    except Exception as e:
+                        logger.error(f"Error getting channel stats for {channel_id}: {e}")
             
             # Get comprehensive analytics from database
             db_stats = {}
@@ -1999,25 +2217,31 @@ def get_module_analytics(module_name):
             current_detections_total = 0
             
             # Get real-time data from active processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'PersonSmokingDetection' in processor.get_active_modules():
-                    active_channels.append(channel_id)
-                    if channel_id in channel_modules and 'PersonSmokingDetection' in channel_modules[channel_id]:
-                        module = channel_modules[channel_id]['PersonSmokingDetection']
-                        current_detections = getattr(module, 'detection_count', 0)
-                        current_detections_total += current_detections
-                        
-                        # Get channel-specific stats from database
-                        try:
-                            with app.app_context():
-                                alert_count = db_manager.get_alert_count('person_smoking_alert', days=7, channel_id=channel_id)
-                                channel_details.append({
-                                    'channel_id': channel_id,
-                                    'total_alerts': alert_count if alert_count is not None else 0,
-                                    'current_detections': current_detections
-                                })
-                        except Exception as e:
-                            logger.error(f"Error getting channel stats for {channel_id}: {e}")
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            
+            for channel_id in active_channels:
+                if channel_id in channel_modules and 'PersonSmokingDetection' in channel_modules[channel_id]:
+                    module = channel_modules[channel_id]['PersonSmokingDetection']
+                    current_detections = getattr(module, 'detection_count', 0)
+                    current_detections_total += current_detections
+                    
+                    # Get channel-specific stats from database
+                    try:
+                        with app.app_context():
+                            alert_count = db_manager.get_alert_count('person_smoking_alert', days=7, channel_id=channel_id)
+                            channel_details.append({
+                                'channel_id': channel_id,
+                                'total_alerts': alert_count if alert_count is not None else 0,
+                                'current_detections': current_detections
+                            })
+                    except Exception as e:
+                        logger.error(f"Error getting channel stats for {channel_id}: {e}")
             
             # Get alert count from database
             total_alerts = 0
@@ -2137,9 +2361,10 @@ def get_module_analytics(module_name):
             current_violations_total = 0
             
             # Get real-time data from active processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'RestrictedAreaMonitor' in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
                     if channel_id in channel_modules and 'RestrictedAreaMonitor' in channel_modules[channel_id]:
                         module = channel_modules[channel_id]['RestrictedAreaMonitor']
                         current_violations = module.stats.get('total_violations', 0)
@@ -2157,6 +2382,11 @@ def get_module_analytics(module_name):
                                 })
                         except Exception as e:
                             logger.error(f"Error getting restricted area stats for {channel_id}: {e}")
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            # Also filter channel_details by store_id
+            channel_details = [ch for ch in channel_details if filter_channels_by_store([ch['channel_id']], store_id)]
             
             # Get aggregated database statistics
             db_stats = {}
@@ -2209,9 +2439,10 @@ def get_module_analytics(module_name):
             total_alerts = 0
             
             # Get real-time data from active processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'UnauthorizedEntryMonitor' in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
                     if channel_id in channel_modules and 'UnauthorizedEntryMonitor' in channel_modules[channel_id]:
                         module = channel_modules[channel_id]['UnauthorizedEntryMonitor']
                         status = module.get_status() if hasattr(module, 'get_status') else {}
@@ -2226,6 +2457,11 @@ def get_module_analytics(module_name):
                             'peak_detections': status.get('peak_detections', 0),
                             'detection_sessions': status.get('detection_sessions', 0)
                         })
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            # Also filter channel_details by store_id
+            channel_details = [ch for ch in channel_details if filter_channels_by_store([ch['channel_id']], store_id)]
             
             # Get alert count from database
             try:
@@ -2271,7 +2507,8 @@ def get_module_analytics(module_name):
             channel_details = []
             total_alerts = 0
             today_alerts = 0
-
+            
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 # Check if MaterialTheftMonitor is in active modules
                 if 'MaterialTheftMonitor' not in processor.get_active_modules():
@@ -2292,7 +2529,7 @@ def get_module_analytics(module_name):
                     is_working = thread_alive or has_recent_frame
                 
                 if is_working:
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
                     if channel_id in channel_modules and 'MaterialTheftMonitor' in channel_modules[channel_id]:
                         module = channel_modules[channel_id]['MaterialTheftMonitor']
                         status = module.get_status() if hasattr(module, 'get_status') else {}
@@ -2302,6 +2539,11 @@ def get_module_analytics(module_name):
                             'still_counter': status.get('still_counter', 0),
                             'frame_count': status.get('frame_count', 0)
                         })
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+            # Also filter channel_details by store_id
+            channel_details = [ch for ch in channel_details if filter_channels_by_store([ch['channel_id']], store_id)]
 
             try:
                 with app.app_context():
@@ -2335,26 +2577,34 @@ def get_module_analytics(module_name):
                     total_violations = 0
                     
                     # First check running processors
+                    all_running_channels = []
                     for channel_id, processor in shared_video_processors.items():
                         if processor.is_running and 'PPEMonitoring' in processor.get_active_modules():
-                            active_channels.append(channel_id)
+                            all_running_channels.append(channel_id)
                             # Get stats from module if available
                             if channel_id in channel_modules and 'PPEMonitoring' in channel_modules[channel_id]:
                                 module = channel_modules[channel_id]['PPEMonitoring']
                                 if hasattr(module, 'total_violations'):
                                     total_violations += module.total_violations
                     
+                    # Filter running channels by store_id
+                    active_channels = filter_channels_by_store(all_running_channels, store_id)
+                    
                     # Also check configured modules (even if processor not running yet)
+                    configured_channels = []
                     for channel_id, modules_dict in channel_modules.items():
-                        if 'PPEMonitoring' in modules_dict and channel_id not in active_channels:
+                        if 'PPEMonitoring' in modules_dict and channel_id not in all_running_channels:
                             # Module is configured but processor might not be running
                             processor = shared_video_processors.get(channel_id)
                             if processor and processor.is_running:
                                 # Should have been caught above, but double-check
-                                if channel_id not in active_channels:
-                                    active_channels.append(channel_id)
+                                configured_channels.append(channel_id)
                             # Even if not running, we can still show it as configured
                             # (This helps show channels that are set up but not yet started)
+                    
+                    # Filter configured channels by store_id
+                    configured_channels = filter_channels_by_store(configured_channels, store_id)
+                    active_channels.extend(configured_channels)
                     
                     analytics = {
                         'module': 'PPE Compliance',
@@ -2374,14 +2624,18 @@ def get_module_analytics(module_name):
             active_channels = []
             total_violations = 0
             
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'DressCodeMonitoring' in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
                     # Get stats from module if available
                     if channel_id in channel_modules and 'DressCodeMonitoring' in channel_modules[channel_id]:
                         module = channel_modules[channel_id]['DressCodeMonitoring']
                         if hasattr(module, 'total_violations'):
                             total_violations += module.total_violations
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
             
             # Get comprehensive statistics from database
             db_stats = {}
@@ -2403,25 +2657,32 @@ def get_module_analytics(module_name):
             }
             
         elif module_name == 'GroomingDetection':
-            active_channels = []
+            all_active_channels = []
             total_alerts = 0
             
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and module_name in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
         
         elif module_name == 'CrowdDetection':
             active_channels = []
             current_crowd_total = 0
             total_alerts = 0
             
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'CrowdDetection' in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
                     if channel_id in channel_modules and 'CrowdDetection' in channel_modules[channel_id]:
                         module = channel_modules[channel_id]['CrowdDetection']
                         status = module.get_status() if hasattr(module, 'get_status') else {}
                         current_crowd_total += status.get('crowd_count', 0)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
             
             # Get alert count from database
             try:
@@ -2450,14 +2711,23 @@ def get_module_analytics(module_name):
             max_reset_time = 0
             
             # Check running processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'TableServiceMonitor' in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
             
             # Also check configured channels (even if processor not running)
+            configured_channels = []
             for channel_id, modules_dict in channel_modules.items():
-                if 'TableServiceMonitor' in modules_dict and channel_id not in active_channels:
-                    active_channels.append(channel_id)
+                if 'TableServiceMonitor' in modules_dict and channel_id not in all_active_channels:
+                    configured_channels.append(channel_id)
+            
+            # Filter configured channels by store_id
+            configured_channels = filter_channels_by_store(configured_channels, store_id)
+            active_channels.extend(configured_channels)
             
             # Get violations from database and calculate statistics
             try:
@@ -2565,14 +2835,23 @@ def get_module_analytics(module_name):
             max_service_wait_time = 0
             
             # Check running processors
+            all_active_channels = []
             for channel_id, processor in shared_video_processors.items():
                 if processor.is_running and 'ServiceDisciplineMonitor' in processor.get_active_modules():
-                    active_channels.append(channel_id)
+                    all_active_channels.append(channel_id)
+            
+            # Filter channels by store_id
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
             
             # Also check configured channels (even if processor not running)
+            configured_channels = []
             for channel_id, modules_dict in channel_modules.items():
-                if 'ServiceDisciplineMonitor' in modules_dict and channel_id not in active_channels:
-                    active_channels.append(channel_id)
+                if 'ServiceDisciplineMonitor' in modules_dict and channel_id not in all_active_channels:
+                    configured_channels.append(channel_id)
+            
+            # Filter configured channels by store_id
+            configured_channels = filter_channels_by_store(configured_channels, store_id)
+            active_channels.extend(configured_channels)
             
             # Get violations from database
             try:
@@ -2892,10 +3171,35 @@ def clear_old_alerts():
 def get_heatmap_snapshots():
     """Get heatmap snapshots with optional filtering"""
     channel_id = request.args.get('channel_id')
+    store_id = request.args.get('store_id', 'store_1')
     limit = int(request.args.get('limit', 20))
     
     try:
-        snapshots = db_manager.get_heatmap_snapshots(channel_id, limit)
+        # Get all channels from config file
+        try:
+            with open('config/channels.json', 'r') as f:
+                config = json.load(f)
+            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
+        except:
+            all_channels = list(shared_video_processors.keys())
+        
+        # If no specific channel requested, get channels for this store
+        if not channel_id:
+            store_channels = filter_channels_by_store(all_channels, store_id)
+            # Get snapshots from all store channels
+            snapshots = []
+            for ch_id in store_channels:
+                ch_snapshots = db_manager.get_heatmap_snapshots(ch_id, limit)
+                snapshots.extend(ch_snapshots)
+            # Sort by timestamp and limit
+            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
+        else:
+            # Verify channel belongs to requested store
+            store_channels = filter_channels_by_store([channel_id], store_id)
+            if not store_channels:
+                return jsonify({'success': False, 'error': 'Channel not found in this store'})
+            snapshots = db_manager.get_heatmap_snapshots(channel_id, limit)
+        
         return jsonify({
             'success': True,
             'snapshots': snapshots,
@@ -3137,10 +3441,35 @@ def serve_cash_snapshot(filename):
 def get_cash_snapshots():
     """Get cash detection snapshots with optional filtering"""
     channel_id = request.args.get('channel_id')
+    store_id = request.args.get('store_id', 'store_1')
     limit = int(request.args.get('limit', 50))
     
     try:
-        snapshots = db_manager.get_cash_snapshots(channel_id, limit)
+        # Get all channels from config file
+        try:
+            with open('config/channels.json', 'r') as f:
+                config = json.load(f)
+            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
+        except:
+            all_channels = list(shared_video_processors.keys())
+        
+        # If no specific channel requested, get channels for this store
+        if not channel_id:
+            store_channels = filter_channels_by_store(all_channels, store_id)
+            # Get snapshots from all store channels
+            snapshots = []
+            for ch_id in store_channels:
+                ch_snapshots = db_manager.get_cash_snapshots(ch_id, limit)
+                snapshots.extend(ch_snapshots)
+            # Sort by timestamp and limit
+            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
+        else:
+            # Verify channel belongs to requested store
+            store_channels = filter_channels_by_store([channel_id], store_id)
+            if not store_channels:
+                return jsonify({'success': False, 'error': 'Channel not found in this store'})
+            snapshots = db_manager.get_cash_snapshots(channel_id, limit)
+        
         return jsonify({
             'success': True,
             'snapshots': snapshots,
@@ -3626,9 +3955,30 @@ def get_fall_snapshots():
     """Get fall detection snapshots"""
     try:
         channel_id = request.args.get('channel_id')
+        store_id = request.args.get('store_id', 'store_1')
         limit = int(request.args.get('limit', 50))
         
-        snapshots = db_manager.get_fall_snapshots(channel_id=channel_id, limit=limit)
+        # Get all channels from config file
+        try:
+            with open('config/channels.json', 'r') as f:
+                config = json.load(f)
+            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
+        except:
+            all_channels = list(shared_video_processors.keys())
+        
+        # If no specific channel requested, get channels for this store
+        if not channel_id:
+            store_channels = filter_channels_by_store(all_channels, store_id)
+            snapshots = []
+            for ch_id in store_channels:
+                ch_snapshots = db_manager.get_fall_snapshots(channel_id=ch_id, limit=limit)
+                snapshots.extend(ch_snapshots)
+            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
+        else:
+            store_channels = filter_channels_by_store([channel_id], store_id)
+            if not store_channels:
+                return jsonify({'success': False, 'error': 'Channel not found in this store'})
+            snapshots = db_manager.get_fall_snapshots(channel_id=channel_id, limit=limit)
         
         return jsonify({
             'success': True,
@@ -3716,10 +4066,32 @@ def get_mopping_snapshots():
     """Get mopping detection snapshots from database"""
     try:
         channel_id = request.args.get('channel_id')
+        store_id = request.args.get('store_id', 'store_1')
         limit = int(request.args.get('limit', 50))
         offset = int(request.args.get('offset', 0))
         
-        snapshots = db_manager.get_mopping_snapshots(channel_id=channel_id, limit=limit, offset=offset)
+        # Get all channels from config file
+        try:
+            with open('config/channels.json', 'r') as f:
+                config = json.load(f)
+            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
+        except:
+            all_channels = list(shared_video_processors.keys())
+        
+        # If no specific channel requested, get channels for this store
+        if not channel_id:
+            store_channels = filter_channels_by_store(all_channels, store_id)
+            snapshots = []
+            for ch_id in store_channels:
+                ch_snapshots = db_manager.get_mopping_snapshots(channel_id=ch_id, limit=limit, offset=offset)
+                snapshots.extend(ch_snapshots)
+            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
+        else:
+            store_channels = filter_channels_by_store([channel_id], store_id)
+            if not store_channels:
+                return jsonify({'success': False, 'error': 'Channel not found in this store'})
+            snapshots = db_manager.get_mopping_snapshots(channel_id=channel_id, limit=limit, offset=offset)
+        
         return jsonify({'success': True, 'snapshots': snapshots})
     except Exception as e:
         logger.error(f"Error getting mopping snapshots: {e}")
@@ -3799,9 +4171,31 @@ def get_smoking_snapshots():
     """Get all smoking detection snapshots"""
     try:
         channel_id = request.args.get('channel_id')
+        store_id = request.args.get('store_id', 'store_1')
         limit = int(request.args.get('limit', 50))
         
-        snapshots = db_manager.get_smoking_snapshots(channel_id=channel_id, limit=limit)
+        # Get all channels from config file
+        try:
+            with open('config/channels.json', 'r') as f:
+                config = json.load(f)
+            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
+        except:
+            all_channels = list(shared_video_processors.keys())
+        
+        # If no specific channel requested, get channels for this store
+        if not channel_id:
+            store_channels = filter_channels_by_store(all_channels, store_id)
+            snapshots = []
+            for ch_id in store_channels:
+                ch_snapshots = db_manager.get_smoking_snapshots(channel_id=ch_id, limit=limit)
+                snapshots.extend(ch_snapshots)
+            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
+        else:
+            store_channels = filter_channels_by_store([channel_id], store_id)
+            if not store_channels:
+                return jsonify({'success': False, 'error': 'Channel not found in this store'})
+            snapshots = db_manager.get_smoking_snapshots(channel_id=channel_id, limit=limit)
+        
         return jsonify({'success': True, 'snapshots': snapshots})
     except Exception as e:
         logger.error(f"Error getting smoking snapshots: {e}")
