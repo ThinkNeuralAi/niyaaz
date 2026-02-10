@@ -1275,6 +1275,57 @@
       "enabled": true,
       "modules": [
         {
+          "type": "QueueMonitor",
+          "config": {
+            "queue_roi": {
+              "points": [
+                {
+                  "x": 0.0,
+                  "y": 0.5
+                },
+                {
+                  "x": 0.4,
+                  "y": 0.2
+                },
+                {
+                  "x": 0.4,
+                  "y": 0.0
+                },
+                {
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              ]
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.4,
+                  "y": 0.0
+                },
+                {
+                  "x": 1.0,
+                  "y": 0.0
+                },
+                {
+                  "x": 1.0,
+                  "y": 0.4
+                },
+                {
+                  "x": 0.4,
+                  "y": 0.2
+                }
+              ]
+            },
+            "settings": {
+              "dwell_time_threshold": 120,
+              "queue_alert_threshold": 3,
+              "counter_threshold": 1,
+              "alert_cooldown": 180
+            }
+          }
+        },
+        {
           "type": "FallDetection",
           "config": {
             "settings": {
@@ -1303,6 +1354,57 @@
       "rtsp_url": "rtsp://admin:admin@123@115.247.155.102:81/cam/realmonitor?channel=3&subtype=0",
       "enabled": true,
       "modules": [
+        {
+          "type": "QueueMonitor",
+          "config": {
+            "queue_roi": {
+              "points": [
+                {
+                  "x": 0.0,
+                  "y": 0.5
+                },
+                {
+                  "x": 0.4,
+                  "y": 0.2
+                },
+                {
+                  "x": 0.4,
+                  "y": 0.0
+                },
+                {
+                  "x": 0.0,
+                  "y": 0.0
+                }
+              ]
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.4,
+                  "y": 0.0
+                },
+                {
+                  "x": 1.0,
+                  "y": 0.0
+                },
+                {
+                  "x": 1.0,
+                  "y": 0.4
+                },
+                {
+                  "x": 0.4,
+                  "y": 0.2
+                }
+              ]
+            },
+            "settings": {
+              "dwell_time_threshold": 120,
+              "queue_alert_threshold": 3,
+              "counter_threshold": 1,
+              "alert_cooldown": 180
+            }
+          }
+        },
         {
           "type": "FallDetection",
           "config": {

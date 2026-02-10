@@ -15,7 +15,7 @@
       "description": "Secondary location with different modules from main store",
       "enabled": true,
       "default": false,
-      "excluded_modules": ["CashDetection", "SmokingDetection"]
+      "excluded_modules": ["CashDetection", "PersonSmokingDetection", "MaterialTheftMonitor", "CrowdDetection"]
     }
   ]
 }
