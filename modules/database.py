@@ -1907,7 +1907,10 @@ class DatabaseManager:
                 query = query.filter(self.AlertGif.created_at >= date_threshold)
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.AlertGif.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             if alert_type:
                 query = query.filter_by(alert_type=alert_type)
@@ -2055,7 +2058,10 @@ class DatabaseManager:
             query = self.HeatmapSnapshot.query
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.HeatmapSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(
                 self.HeatmapSnapshot.created_at.desc()
@@ -2393,7 +2399,10 @@ class DatabaseManager:
             query = self.CashSnapshot.query
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.CashSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(
                 self.CashSnapshot.created_at.desc()
@@ -2514,7 +2523,10 @@ class DatabaseManager:
             query = self.FallSnapshot.query
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.FallSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(self.FallSnapshot.created_at.desc()).limit(limit).all()
             
@@ -2635,7 +2647,10 @@ class DatabaseManager:
             query = self.GroomingSnapshot.query
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.GroomingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(self.GroomingSnapshot.created_at.desc()).limit(limit).all()
             
@@ -2894,7 +2909,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.DressCodeAlert.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             alerts = query.all()
             
@@ -3138,7 +3156,10 @@ class DatabaseManager:
             query = self.QueueViolation.query
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.QueueViolation.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             violations = query.order_by(self.QueueViolation.created_at.desc()).limit(limit).all()
             
@@ -3399,7 +3420,10 @@ class DatabaseManager:
                 query = query.filter(self.TableServiceViolation.created_at >= date_threshold)
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.TableServiceViolation.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             if table_id:
                 query = query.filter_by(table_id=table_id)
             
@@ -3576,7 +3600,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.PPEAlert.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             alerts = query.all()
             
@@ -3667,7 +3694,10 @@ class DatabaseManager:
             query = self.MoppingSnapshot.query.order_by(self.MoppingSnapshot.created_at.desc())
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.MoppingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.limit(limit).offset(offset).all()
             
@@ -3712,7 +3742,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.MoppingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.all()
             
@@ -3847,7 +3880,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.SmokingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.limit(limit).all()
             
@@ -3879,7 +3915,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.SmokingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.all()
             
@@ -4122,7 +4161,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.PhoneSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.all()
             
@@ -4284,7 +4326,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.RestrictedAreaSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.all()
             

@@ -355,7 +355,8 @@ class MultiModuleVideoProcessor:
         shared_detections = None
         self.detections_frame_id += 1
         
-        for module_name, module in self.modules.items():
+        # Iterate over a copy to avoid "dictionary changed size" errors
+        for module_name, module in list(self.modules.items()):
             try:
                 # Check if module has a YOLO detector that can be shared
                 if hasattr(module, 'detector') and shared_detections is None:
@@ -415,7 +416,7 @@ class MultiModuleVideoProcessor:
                 }
         
         # Combine annotations from all modules
-        combined_frame = self._combine_module_annotations(frame, self.module_results)
+        combined_frame = self._combine_module_annotations(frame, self.module_results.copy())
         
         return combined_frame
     
@@ -560,7 +561,8 @@ class MultiModuleVideoProcessor:
         avg_fps = self.frames_processed / elapsed_time if elapsed_time > 0 else 0
         
         module_statuses = {}
-        for module_name, module in self.modules.items():
+        # Iterate over copy to prevent runtime errors
+        for module_name, module in list(self.modules.items()):
             if hasattr(module, 'get_status'):
                 module_statuses[module_name] = module.get_status()
         

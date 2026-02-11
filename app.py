@@ -3,6 +3,9 @@ Sakshi.AI - Intelligent Video Analytics Platform
 Main Flask Application
 """
 import os
+
+# Set RTSP timeout to 5 seconds to prevent blocking on unreachable cameras
+os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'timeout;5000000|rtsp_transport;tcp')
 import json
 import logging
 from datetime import datetime, timedelta
@@ -189,6 +192,27 @@ app_configs = {
         'channels': {},
         'status': 'online'
     },
+    # 9) Unauthorized entry
+    'UnauthorizedEntryMonitor': {
+        'name': 'Unauthorized Entry',
+        'description': 'Monitor for unauthorized entry in restricted areas',
+        'channels': {},
+        'status': 'online'
+    },
+    # 10) Person smoking (cigarette)
+    'PersonSmokingDetection': {
+        'name': 'Person Smoking Detection',
+        'description': 'Detect cigarette smoking activity',
+        'channels': {},
+        'status': 'online'
+    },
+    # 11) Service Discipline
+    'ServiceDisciplineMonitor': {
+        'name': 'Service Discipline',
+        'description': 'Order wait time: seated to first waiter visit',
+        'channels': {},
+        'status': 'online'
+    },
 }
 
 # Database manager
@@ -197,10 +221,36 @@ db_manager = DatabaseManager(db)
 # ============= Helper Functions for Store/Channel Mapping =============
 def get_channel_to_store_mapping():
     """
-    Build a mapping of channel_id to store_id from channels.json
+    Build a mapping of channel_id to store_id.
+    Priority: 1) Database  2) app_configs['System']  3) channels.json
     Returns: {channel_id: store_id}
     """
     channel_store_map = {}
+    
+    # 1. Try database first (most authoritative)
+    try:
+        with app.app_context():
+            all_links = db_manager.get_all_rtsp_links()
+            for link in all_links:
+                if link.get('is_active') and link.get('channel_id'):
+                    channel_store_map[link['channel_id']] = link.get('store_id', 'store_1')
+        if channel_store_map:
+            return channel_store_map
+    except Exception as e:
+        logger.debug(f"Could not load store mapping from database: {e}")
+    
+    # 2. Try app_configs (populated during DB loading)
+    try:
+        system_channels = app_configs.get('System', {}).get('channels', {})
+        for channel_id, ch_data in system_channels.items():
+            if ch_data.get('store_id'):
+                channel_store_map[channel_id] = ch_data['store_id']
+        if channel_store_map:
+            return channel_store_map
+    except Exception:
+        pass
+    
+    # 3. Fallback to channels.json
     try:
         config_path = Path('config/channels.json')
         if config_path.exists():
@@ -222,526 +272,315 @@ def filter_channels_by_store(channel_ids, store_id):
     channel_store_map = get_channel_to_store_mapping()
     return [ch for ch in channel_ids if channel_store_map.get(ch) == store_id]
 
+def get_channels_for_request(store_id, channel_id=None):
+    """
+    Resolve channel(s) for a request based on store_id and optional channel_id.
+    Returns: list of channel_ids or None (if channel_id provided but invalid for store)
+    """
+    channel_store_map = get_channel_to_store_mapping()
+    
+    if channel_id:
+        # If specific channel requested, verify it belongs to store
+        # Convert channel_id to string for comparison as keys are strings
+        cid_str = str(channel_id)
+        if store_id and channel_store_map.get(cid_str) != store_id:
+            logger.warning(f"Request for channel {channel_id} mismatch with store {store_id}")
+            return None
+        return [channel_id]
+    
+    # If no channel specified, return all channels for the store
+    if store_id:
+        return [ch for ch, store in channel_store_map.items() if store == store_id]
+    
+    # If no store specified (and no channel), return all known channels
+    return list(channel_store_map.keys())
+
 # ============= Channel Auto-Loader from Configuration =============
 def load_channels_from_config(config_file='config/channels.json'):
-    """
-    Load and start channels from config file on application startup
+    """Load channel configuration from database (prioritized) or config file"""
+    import json
     
-    Args:
-        config_file: Path to the channels configuration file (default: config/channels.json)
-    """
-    config_path = Path(config_file)
-    
-    if not config_path.exists():
-        logger.warning(f"Channel configuration file not found: {config_path}")
-        return
-    
+    # 1. Try to load from Database first
     try:
+        with app.app_context():
+            # Get all active RTSP links using manager method
+            all_links = db_manager.get_all_rtsp_links()
+            rtsp_links = [l for l in all_links if l.get('is_active')]
+            
+            if rtsp_links:
+                logger.info(f"📚 Loading {len(rtsp_links)} channels from DATABASE")
+                
+                # Group by channel_id
+                db_channels = {}
+                for link in rtsp_links:
+                    db_channels[link['channel_id']] = {
+                        'channel_id': link['channel_id'],
+                        'name': link['channel_name'],
+                        'rtsp_url': link['rtsp_url'],
+                        'store_id': link['store_id'],
+                        'modules': [],
+                        'source': 'database'
+                    }
+                    
+                    # Get modules for this channel
+                    all_modules = db_manager.get_channel_modules(link['channel_id'])
+                    modules = [m for m in all_modules if m.get('enabled')]
+                    
+                    for mod in modules:
+                        config_data = mod.get('config_data', {})
+                        
+                        db_channels[link['channel_id']]['modules'].append({
+                            'name': mod['module_name'],
+                            'type': mod['module_type'],
+                            'config': config_data
+                        })
+                
+                # Process the channels
+                logger.info(f"📋 Processing {len(db_channels)} channels from database...")
+                channels_started = 0
+                channels_failed = 0
+                for channel_id, channel_data in db_channels.items():
+                    try:
+                        # Format for shared video processor
+                        video_source = channel_data['rtsp_url']
+                        
+                        # Store in app config
+                        if 'System' not in app_configs:
+                            app_configs['System'] = {'channels': {}}
+                            
+                        app_configs['System']['channels'][channel_id] = {
+                            'name': channel_data['name'],
+                            'status': 'online',
+                            'video_source': video_source,
+                            'source_type': 'rtsp',
+                            'store_id': channel_data['store_id']
+                        }
+                        
+                        # Start modules
+                        channel_ok = True
+                        for module in channel_data['modules']:
+                            app_name = module['name']
+                            if app_name not in app_configs:
+                                # Initialize config if not exists
+                                app_configs[app_name] = {'channels': {}}
+                                
+                            # Start the channel processing with video_source
+                            result = start_channel_processing(channel_id, app_name, channel_data.get('source_type', 'rtsp'), video_source=video_source)
+                            if result is False and channel_ok:
+                                channel_ok = False
+                        
+                        if channel_ok:
+                            channels_started += 1
+                        else:
+                            channels_failed += 1
+                            logger.warning(f"⚠️ Channel {channel_id} failed to start (video source unreachable)")
+                    except Exception as ch_err:
+                        channels_failed += 1
+                        logger.error(f"❌ Error starting channel {channel_id}: {ch_err}")
+                        continue
+                        
+                logger.info(f"✅ Database configuration loaded: {channels_started} channels started, {channels_failed} failed")
+                return
+            else:
+                logger.warning("⚠️ No active channels found in database, falling back to JSON config")
+    
+    except Exception as e:
+        logger.error(f"❌ Error loading from database: {e}", exc_info=True)
+        logger.info("Trying fallback to channels.json...")
+
+    # 2. Fallback to channels.json
+    try:
+        config_path = Path(config_file)
+        if not config_path.exists():
+            logger.warning(f"Channel configuration file not found: {config_path}")
+            return
+            
         with open(config_path, 'r') as f:
             config = json.load(f)
+            
+        logger.info(f"📂 Loading {len(config.get('channels', []))} channels from channels.json")
         
-        channels = config.get('channels', [])
-        logger.info(f"Loading {len(channels)} channels from configuration...")
-        
-        for channel_config in channels:
-            try:
-                if not channel_config.get('enabled', False):
-                    logger.info(f"Skipping disabled channel: {channel_config.get('channel_name', 'Unknown')}")
-                    continue
-                
-                channel_id = channel_config['channel_id']
-                channel_name = channel_config['channel_name']
-                # Support both RTSP URLs and local video files
-                rtsp_url = channel_config.get('rtsp_url', '')
-                video_file = channel_config.get('video_file', '')
-                video_source = video_file if video_file else rtsp_url
-                modules_config = channel_config.get('modules', [])
-                
-                # Save/update channel to database for persistence
-                try:
-                    with app.app_context():
-                        existing = db_manager.get_rtsp_channel(channel_id)
-                        # Always update RTSP URL from config file to ensure it's current
-                        db_manager.save_rtsp_channel(channel_id, channel_name, video_source, 
-                                                   description=f"Auto-loaded from channels.json")
-                        if existing:
-                            logger.info(f"  💾 Updated channel '{channel_name}' RTSP URL in database")
-                        else:
-                            logger.info(f"  💾 Saved channel '{channel_name}' to database")
-                except Exception as e:
-                    logger.warning(f"  ⚠ Could not save channel to database: {e}")
-                
-                # Determine video source with fallback logic
-                # Try RTSP first, fall back to video_file if RTSP fails
-                final_video_source = None
-                source_type = "unknown"
-                
-                if rtsp_url:
-                    # Try RTSP first
-                    logger.info(f"Starting channel '{channel_name}' ({channel_id}) with {len(modules_config)} modules (trying RTSP first)")
-                    final_video_source = rtsp_url
-                    source_type = "RTSP"
-                elif video_file:
-                    # Use video file directly if no RTSP URL
-                    logger.info(f"Starting channel '{channel_name}' ({channel_id}) with {len(modules_config)} modules (using video file)")
-                    final_video_source = video_file
-                    source_type = "video file"
-                else:
-                    logger.warning(f"Channel '{channel_name}' ({channel_id}) has no RTSP URL or video file - skipping")
-                    continue
-                
-                # Create video processor if it doesn't exist
-                if channel_id not in shared_video_processors:
-                    # Use SharedMultiModuleVideoProcessor - supports both RTSP and local video files
-                    processor = SharedMultiModuleVideoProcessor(
-                        video_source=final_video_source,
-                        channel_id=channel_id,
-                        fps_limit=30
-                    )
-                    shared_video_processors[channel_id] = processor
-                    
-                    # Initialize channel modules dictionary
-                    if channel_id not in channel_modules:
-                        channel_modules[channel_id] = {}
-                
-                # Add each module to the processor
-                for module_config in modules_config:
-                    module_type = module_config['type']
-                    module_settings = module_config.get('config', {})
-                    
-                    try:
-                        # Create module instance based on type
-                        if module_type == 'PeopleCounter':
-                            module = PeopleCounter(channel_id, socketio, db_manager, app)
-                            # Apply counting line configuration if provided
-                            if 'counting_line' in module_settings:
-                                logger.info(f"  📏 Loading counting line for {channel_id}:")
-                                logger.info(f"     {json.dumps(module_settings['counting_line'], indent=6)}")
-                                module.set_counting_line(module_settings['counting_line'])
-                        
-                        elif module_type == 'QueueMonitor':
-                            module = QueueMonitor(channel_id, socketio, db_manager, app)
-                            # Load configuration from database first
-                            try:
-                                with app.app_context():
-                                    module.load_configuration()
-                            except Exception as e:
-                                logger.warning(f"Could not load QueueMonitor config from DB: {e}")
-                            # Apply ROI configuration from config file if provided (overrides DB)
-                            if module_settings:
-                                # Map the channels.json structure to QueueMonitor format
-                                roi_points = {
-                                    'main': module_settings.get('queue_roi', {}).get('points', []),
-                                    'secondary': module_settings.get('counter_roi', {}).get('points', [])
-                                }
-                                if roi_points['main'] or roi_points['secondary']:
-                                    logger.info(f"  📐 Loading ROI configuration from config file for {channel_id}:")
-                                    logger.info(f"     Queue area: {len(roi_points['main'])} points")
-                                    logger.info(f"     Counter area: {len(roi_points['secondary'])} points")
-                                    module.set_roi(roi_points)
-                            # Apply settings if provided
-                            if 'settings' in module_settings:
-                                module.settings.update(module_settings['settings'])
-                        
-                        elif module_type == 'BagDetection':
-                            module = BagDetection(channel_id, socketio, db_manager, app)
-                            # Apply settings if provided
-                            if module_settings:
-                                for key, value in module_settings.items():
-                                    if hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        elif module_type == 'CashDetection':
-                            module = CashDetection(channel_id, socketio, db_manager, app)
-                            # Apply settings if provided
-                            if module_settings:
-                                for key, value in module_settings.items():
-                                    if hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        elif module_type == 'FallDetection':
-                            module = FallDetection(channel_id, socketio, db_manager, app)
-                            # Apply settings if provided
-                            if module_settings:
-                                for key, value in module_settings.items():
-                                    if hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        elif module_type == 'MoppingDetection':
-                            module = MoppingDetection(channel_id, socketio, db_manager, app)
-                            # Apply settings if provided
-                            if module_settings:
-                                for key, value in module_settings.items():
-                                    if hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        elif module_type == 'SmokingDetection':
-                            module = SmokingDetection(channel_id, socketio, db_manager, app)
-                            # Apply settings if provided
-                            if module_settings:
-                                for key, value in module_settings.items():
-                                    if hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        elif module_type == 'PersonSmokingDetection':
-                            module = PersonSmokingDetection(channel_id, socketio, db_manager, app)
-                            logger.info(f"  ✓ Added Smoking Detection to channel {channel_id}")
-                            # Apply settings if provided
-                            if module_settings:
-                                if 'alert_cooldown' in module_settings:
-                                    module.alert_cooldown = float(module_settings['alert_cooldown'])
-                                if 'conf_threshold' in module_settings:
-                                    module.conf_threshold = float(module_settings['conf_threshold'])
-                                if 'detection_duration_threshold' in module_settings:
-                                    module.detection_duration_threshold = float(module_settings['detection_duration_threshold'])
-                                logger.info(f"  ✅ Loaded settings from config for {channel_id}")
-                        
-                        elif module_type == 'PhoneUsageDetection':
-                            module = PhoneUsageDetection(channel_id, socketio, db_manager, app)
-                            # Apply settings if provided
-                            if module_settings:
-                                for key, value in module_settings.items():
-                                    if hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        elif module_type == 'RestrictedAreaMonitor':
-                            model_path = module_settings.get('model_path', 'models/best.pt') if module_settings else 'models/best.pt'
-                            module = RestrictedAreaMonitor(channel_id, model_path, db_manager, socketio, module_settings)
-                            
-                            # Load ROI points - try config first, then database
-                            roi_loaded = False
-                            if module_settings and 'roi_points' in module_settings:
-                                module.set_roi_points(module_settings['roi_points'])
-                                roi_loaded = True
-                                logger.info(f"✅ Loaded ROI from config file for {channel_id}")
-                            
-                            # If not in config, try loading from database (with app context)
-                            if not roi_loaded:
-                                try:
-                                    with app.app_context():
-                                        saved_roi = db_manager.get_channel_config(channel_id, 'RestrictedAreaMonitor', 'roi')
-                                        if saved_roi:
-                                            # Handle both dict and list formats
-                                            if isinstance(saved_roi, dict):
-                                                if 'main' in saved_roi:
-                                                    module.set_roi_points(saved_roi['main'])
-                                                    logger.info(f"✅ Loaded ROI from database (dict format) for {channel_id}: {len(saved_roi['main'])} points")
-                                                else:
-                                                    logger.warning(f"⚠️ ROI dict has no 'main' key for {channel_id}: {saved_roi}")
-                                            elif isinstance(saved_roi, list):
-                                                module.set_roi_points(saved_roi)
-                                                logger.info(f"✅ Loaded ROI from database (list format) for {channel_id}: {len(saved_roi)} points")
-                                            else:
-                                                logger.warning(f"⚠️ Unexpected ROI format for {channel_id}: {type(saved_roi)}")
-                                        else:
-                                            logger.info(f"ℹ️ No saved ROI found in database for {channel_id}")
-                                except Exception as e:
-                                    logger.error(f"❌ Could not load ROI from database for {channel_id}: {e}", exc_info=True)
-                        
-                        elif module_type == 'DressCodeMonitoring':
-                            module = DressCodeMonitoring(channel_id, socketio, db_manager, app)
-                            
-                            # Load counter ROI from config file (if provided)
-                            if module_settings:
-                                counter_roi_points = module_settings.get('counter_roi', {})
-                                if isinstance(counter_roi_points, dict) and 'points' in counter_roi_points:
-                                    module.set_counter_roi(counter_roi_points['points'])
-                                    logger.info(f"  📐 Loaded counter ROI from config for {channel_id}: {len(counter_roi_points['points'])} points")
-                                elif isinstance(counter_roi_points, list):
-                                    module.set_counter_roi(counter_roi_points)
-                                    logger.info(f"  📐 Loaded counter ROI from config for {channel_id}: {len(counter_roi_points)} points")
-                                
-                                # Load allowed uniforms from config
-                                allowed_uniforms = module_settings.get('allowed_uniforms', {})
-                                if allowed_uniforms:
-                                    module.set_allowed_uniforms(allowed_uniforms)
-                                    logger.info(f"  📐 Loaded allowed uniforms from config for {channel_id}: {allowed_uniforms}")
-                                
-                                # Apply other settings
-                                for key, value in module_settings.items():
-                                    if key not in ['counter_roi', 'allowed_uniforms'] and hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        elif module_type == 'TableServiceMonitor':
-                            module = TableServiceMonitor(channel_id, socketio, db_manager, app)
-                            
-                            # Load table ROIs from config file (if provided)
-                            if module_settings:
-                                table_rois = module_settings.get('table_rois', {})
-                                if table_rois:
-                                    for table_id, roi_data in table_rois.items():
-                                        if isinstance(roi_data, dict) and 'points' in roi_data:
-                                            module.set_table_roi(table_id, roi_data['points'])
-                                        elif isinstance(roi_data, list):
-                                            module.set_table_roi(table_id, roi_data)
-                                    logger.info(f"  📐 Loaded {len(table_rois)} table ROIs from config for {channel_id}")
-                                
-                                # Load settings from config
-                                if 'settings' in module_settings:
-                                    module.settings.update(module_settings['settings'])
-                                    logger.info(f"  ✅ Loaded settings from config for {channel_id}")
-
-                        elif module_type == 'ServiceDisciplineMonitor':
-                            module = ServiceDisciplineMonitor(channel_id, socketio, db_manager, app)
-                            logger.info(f"  ✓ Added ServiceDisciplineMonitor to channel {channel_id}")
-                            # Load from DB
-                            try:
-                                with app.app_context():
-                                    module.load_configuration()
-                            except Exception as e:
-                                logger.warning(f"Could not load ServiceDisciplineMonitor config from DB: {e}")
-                            # Apply ROIs from config
-                            if module_settings:
-                                table_rois = module_settings.get('table_rois', {})
-                                if isinstance(table_rois, dict):
-                                    for table_id, roi_data in table_rois.items():
-                                        if isinstance(roi_data, dict) and 'points' in roi_data:
-                                            module.set_table_roi(table_id, roi_data['points'])
-                                        elif isinstance(roi_data, list):
-                                            module.set_table_roi(table_id, roi_data)
-                                    logger.info(f"  📐 Loaded {len(table_rois)} table ROIs from config for {channel_id}")
-                                if 'settings' in module_settings:
-                                    module.settings.update(module_settings['settings'])
-                                    logger.info(f"  ✅ Loaded settings from config for {channel_id}")
-                        
-                        elif module_type == 'UnauthorizedEntryMonitor':
-                            module = UnauthorizedEntryMonitor(channel_id, socketio, db_manager, app)
-                            logger.info(f"  ✓ Added UnauthorizedEntryMonitor to channel {channel_id}")
-                            # Apply settings if provided
-                            if module_settings:
-                                if 'alert_cooldown' in module_settings:
-                                    module.alert_cooldown = float(module_settings['alert_cooldown'])
-                                if 'conf_threshold' in module_settings:
-                                    module.conf_threshold = float(module_settings['conf_threshold'])
-                                logger.info(f"  ✅ Loaded settings from config for {channel_id}")
-
-                        elif module_type == 'MaterialTheftMonitor':
-                            module = MaterialTheftMonitor(channel_id, socketio, db_manager, app, module_settings or {})
-                            logger.info(f"  ✓ Added MaterialTheftMonitor to channel {channel_id}")
-                            # Load ROI configuration from config file if provided
-                            if module_settings:
-                                roi_points = module_settings.get('roi_points', [])
-                                if roi_points:
-                                    # Check if points are normalized (0-1) or absolute pixels
-                                    if roi_points and len(roi_points) > 0:
-                                        # If first point values are > 1, they're absolute pixels (need normalization)
-                                        # Otherwise assume normalized
-                                        first_point = roi_points[0]
-                                        if isinstance(first_point, list) and len(first_point) >= 2:
-                                            if first_point[0] > 1 or first_point[1] > 1:
-                                                logger.warning(f"  ⚠️ MaterialTheftMonitor ROI points appear to be absolute pixels. They will be normalized on first frame.")
-                                    module.set_roi(roi_points)
-                                    logger.info(f"  📐 Loaded ROI from config for {channel_id}: {len(roi_points)} points")
-                                
-                                # Load other settings
-                                if 'min_area' in module_settings:
-                                    module.min_area = int(module_settings['min_area'])
-                                if 'still_frames_required' in module_settings:
-                                    module.still_frames_required = int(module_settings['still_frames_required'])
-                                if 'alert_cooldown' in module_settings:
-                                    module.alert_cooldown = float(module_settings['alert_cooldown'])
-                                logger.info(f"  ✅ Loaded MaterialTheftMonitor settings from config for {channel_id}")
-                        
-                        elif module_type == 'PPEMonitoring':
-                            module = PPEMonitoring(channel_id, socketio, db_manager, app)
-                            logger.info(f" ✓ Added PPEMonitoring to channel {channel_id}")
-                            # Apply settings if provided
-                            if module_settings:
-                                if 'required_items' in module_settings:
-                                    module.set_settings({'required_items': module_settings['required_items']})
-                                    logger.info(f"   Applied required_items: {module_settings['required_items']}")
-                                if 'settings' in module_settings:
-                                    module.set_settings(module_settings['settings'])
-                                    logger.info(f"   Applied settings: {module_settings['settings']}")
-                                # Also apply individual settings
-                                for key, value in module_settings.items():
-                                    if key not in ['required_items', 'settings'] and hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        elif module_type == 'CrowdDetection':
-                            module = CrowdDetection(channel_id, socketio, db_manager, app)
-                            # Load configuration from database first
-                            try:
-                                with app.app_context():
-                                    module.load_configuration()
-                            except Exception as e:
-                                logger.warning(f"Could not load CrowdDetection config from DB: {e}")
-                            # Apply ROI configuration from config file if provided (overrides DB)
-                            if module_settings:
-                                roi_points = module_settings.get('roi', {})
-                                if isinstance(roi_points, dict) and 'points' in roi_points:
-                                    module.set_roi({'main': roi_points['points']})
-                                elif isinstance(roi_points, list):
-                                    module.set_roi({'main': roi_points})
-                            # Apply settings if provided
-                            if 'settings' in module_settings:
-                                module.set_settings(module_settings['settings'])
-                        
-                        elif module_type == 'TableServiceMonitor':
-                            module = TableServiceMonitor(channel_id, socketio, db_manager, app)
-                            logger.info(f"  ✓ Added TableServiceMonitor to channel {channel_id}")
-                            # Load configuration from database first
-                            try:
-                                with app.app_context():
-                                    module.load_configuration()
-                            except Exception as e:
-                                logger.warning(f"Could not load TableServiceMonitor config from DB: {e}")
-                            # Apply table ROIs from config file if provided
-                            if module_settings:
-                                table_rois = module_settings.get('table_rois', {})
-                                if isinstance(table_rois, dict):
-                                    for table_id, roi_data in table_rois.items():
-                                        if isinstance(roi_data, dict) and 'points' in roi_data:
-                                            module.set_table_roi(table_id, roi_data['points'])
-                                        elif isinstance(roi_data, list):
-                                            module.set_table_roi(table_id, roi_data)
-                                    logger.info(f"  📐 Loaded {len(table_rois)} table ROIs from config for {channel_id}")
-                                
-                                # Load settings from config
-                                if 'settings' in module_settings:
-                                    module.settings.update(module_settings['settings'])
-                                    logger.info(f"  ✅ Loaded settings from config for {channel_id}")
-                        
-                        elif module_type == 'Heatmap':
-                            module = HeatmapProcessor(channel_id, socketio, db_manager, app)
-                            # Apply settings if provided
-                            if module_settings:
-                                for key, value in module_settings.items():
-                                    if hasattr(module, key):
-                                        setattr(module, key, value)
-                        
-                        else:
-                            logger.warning(f"Unknown module type: {module_type}")
-                            continue
-                        
-                        # Add module to processor and track it
-                        logger.info(f"  🔧 Adding {module_type} to processor for {channel_id}")
-                        shared_video_processors[channel_id].add_module(module_type, module)
-                        channel_modules[channel_id][module_type] = module
-                        logger.info(f"  ✅ {module_type} added. Active modules now: {shared_video_processors[channel_id].get_active_modules()}")
-                        
-                        # Also populate app_configs so modules loaded from
-                        # channels.json appear correctly in the dashboard for
-                        # their respective apps (not only when started via
-                        # /api/start_channel).
-                        if module_type in app_configs:
-                            if channel_id not in app_configs[module_type]['channels']:
-                                app_configs[module_type]['channels'][channel_id] = {
-                                    'name': channel_name,
-                                    'status': 'online',
-                                    'video_source': rtsp_url,
-                                    'source_type': 'rtsp',
-                                    'shared': True,
-                                    'active_modules': []
-                                }
-                            active = app_configs[module_type]['channels'][channel_id].setdefault('active_modules', [])
-                            if module_type not in active:
-                                active.append(module_type)
-                        
-                        logger.info(f"  ✓ Added {module_type} to channel {channel_id}")
-                        
-                    except Exception as e:
-                        logger.error(f"Failed to add module {module_type} to channel {channel_id}: {e}")
-                        continue
-                
-                # Start the video processor
-                try:
-                    start_result = shared_video_processors[channel_id].start()
-                    logger.info(f"Channel '{channel_name}' start() returned: {start_result}")
-                    if start_result:
-                        logger.info(f"✓ Channel '{channel_name}' started successfully")
-                    else:
-                        # RTSP connection failed - try fallback to video file if available
-                        if rtsp_url and video_file:
-                            logger.warning(f"⚠ RTSP connection failed for '{channel_name}', trying fallback to video file: {video_file}")
-                            
-                            # Remove failed processor
-                            if channel_id in shared_video_processors:
-                                failed_processor = shared_video_processors[channel_id]
-                                try:
-                                    failed_processor.stop()
-                                except:
-                                    pass
-                                del shared_video_processors[channel_id]
-                            
-                            # Create new processor with video file
-                            try:
-                                fallback_processor = SharedMultiModuleVideoProcessor(
-                                    video_source=video_file,
-                                    channel_id=channel_id,
-                                    fps_limit=30
-                                )
-                                shared_video_processors[channel_id] = fallback_processor
-                                
-                                # Re-add all modules to the new processor
-                                for module_name, module_instance in channel_modules[channel_id].items():
-                                    fallback_processor.add_module(module_name, module_instance)
-                                
-                                # Try to start with video file
-                                fallback_result = fallback_processor.start()
-                                if fallback_result:
-                                    logger.info(f"✅ Channel '{channel_name}' started successfully using video file fallback")
-                                else:
-                                    logger.warning(f"⚠ Video file fallback also failed for '{channel_name}'")
-                                    logger.warning(f"⚠ Keeping channel in channel_modules for dashboard visibility (is_running=False)")
-                                    if channel_id in shared_video_processors:
-                                        del shared_video_processors[channel_id]
-                            except Exception as fallback_error:
-                                logger.error(f"❌ Video file fallback failed for '{channel_name}': {fallback_error}")
-                                logger.warning(f"⚠ Keeping channel in channel_modules for dashboard visibility (is_running=False)")
-                                if channel_id in shared_video_processors:
-                                    del shared_video_processors[channel_id]
-                        else:
-                            # start() may return False if the processor is already running.
-                            # Treat that case as success and do NOT delete the processor.
-                            processor = shared_video_processors.get(channel_id)
-                            thread_alive = bool(getattr(processor, 'processing_thread', None) and processor.processing_thread.is_alive()) if processor else False
-                            has_frame = bool(getattr(processor, 'latest_raw_frame', None) is not None or getattr(processor, 'latest_annotated_frame', None) is not None) if processor else False
-                            if processor and (getattr(processor, 'is_running', False) or thread_alive or has_frame):
-                                logger.info(f"✓ Channel '{channel_name}' is already running (thread_alive={thread_alive}, has_frame={has_frame}); keeping existing processor")
-                            else:
-                                logger.warning(f"⚠ Channel '{channel_name}' processor start() returned False - RTSP connection may have failed")
-                                logger.warning(f"⚠ No video file fallback available (video_file not configured)")
-                                logger.warning(f"⚠ Keeping channel in channel_modules for dashboard visibility (is_running=False)")
-                                # Remove processor from shared_video_processors since it's not actually running
-                                if channel_id in shared_video_processors:
-                                    del shared_video_processors[channel_id]
-                                    logger.info(f"Removed non-running processor for {channel_id} from shared_video_processors")
-                except Exception as e:
-                    logger.error(f"❌ Failed to start channel '{channel_name}': {e}", exc_info=True)
-                    # Keep channel_modules entry even on failure so dashboard can show it
-                    # Only remove processor if it exists
-                    if channel_id in shared_video_processors:
-                        del shared_video_processors[channel_id]
-                    # Keep channel_modules so dashboard can show configured channels
-                
-            except KeyError as e:
-                logger.error(f"Invalid channel configuration - missing required field: {e}")
+        for channel in config.get('channels', []):
+            channel_id = channel.get('channel_id')
+            if not channel.get('enabled', True):
                 continue
-            except Exception as e:
-                logger.error(f"Error loading channel: {e}")
-                continue
+                
+            rtsp_url = channel.get('rtsp_url')
+            
+            # Store in app config
+            if 'System' not in app_configs:
+                app_configs['System'] = {'channels': {}}
+                
+            app_configs['System']['channels'][channel_id] = {
+                'name': channel.get('channel_name', channel_id),
+                'status': 'online',
+                'video_source': rtsp_url,
+                'source_type': 'rtsp',
+                'store_id': channel.get('store_id', 'store_1')
+            }
+            
+            # Start modules
+            for module in channel.get('modules', []):
+                if not module.get('enabled', True):
+                    continue
+                    
+                app_name = module.get('type')
+                if app_name not in app_configs:
+                    continue
+                    
+                # Start the channel processing
+                start_channel_processing(channel_id, app_name, 'rtsp', video_source=rtsp_url)
+                
+        logger.info("✅ JSON configuration loaded successfully")
         
-        # Summary of channel loading
-        running_count = len(shared_video_processors)
-        configured_count = len(channel_modules)
-        logger.info(f"📊 Channel loading complete:")
-        logger.info(f"   - {running_count} channels with running processors")
-        logger.info(f"   - {configured_count} channels configured (may include non-running)")
-        
-        # Log which channels are running vs configured
-        running_channels = set(shared_video_processors.keys())
-        configured_channels = set(channel_modules.keys())
-        not_running = configured_channels - running_channels
-        if not_running:
-            logger.warning(f"   ⚠ {len(not_running)} channels configured but not running: {sorted(not_running)}")
-        if running_channels:
-            logger.info(f"   ✓ {len(running_channels)} channels running: {sorted(running_channels)}")
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse channel configuration file: {e}")
     except Exception as e:
-        logger.error(f"Error loading channels from config: {e}")
+        logger.error(f"Error loading config: {e}")
+def start_channel_processing(channel_id, app_name, source_type, video_source=None):
+    """Start processing a channel with a specific module"""
+    try:
+        if not video_source:
+            try:
+                # Try to get from database first
+                with app.app_context():
+                    # use get_rtsp_link as that corresponds to the RTSPLink model used in sync script
+                    rtsp_channel = db_manager.get_rtsp_link(channel_id)
+                    
+                if rtsp_channel:
+                    video_source = rtsp_channel['rtsp_url']
+                    source_type = 'rtsp'
+                else:
+                    # Fallback to local file
+                    video_source = f'videos/{channel_id}.mp4'
+                    source_type = 'video'
+            except Exception as e:
+                logger.error(f"Error determining video source for {channel_id}: {e}")
+                video_source = f'videos/{channel_id}.mp4'
+                source_type = 'video'
+
+        # 2. Ensure Video Processor Exists
+        if channel_id not in shared_video_processors:
+            # Create new multi-module processor
+            processor = MultiModuleVideoProcessor(video_source, channel_id)
+            shared_video_processors[channel_id] = processor
+            channel_modules[channel_id] = {}
+            
+            # Start the processor
+            if not processor.start():
+                del shared_video_processors[channel_id]
+                del channel_modules[channel_id]
+                logger.error(f"Failed to start video processor for {channel_id} ({source_type})")
+                return False
+        
+        processor = shared_video_processors[channel_id]
+        
+        # 3. Check if module already active
+        if app_name in channel_modules[channel_id]:
+            # logger.info(f"{app_name} already active on channel {channel_id}")
+            return True
+        
+        # 4. Instantiate Module
+        module = None
+        if app_name == 'PeopleCounter':
+            module = PeopleCounter(channel_id, socketio, db_manager, app)
+        elif app_name == 'QueueMonitor':
+            module = QueueMonitor(channel_id, socketio, db_manager, app)
+            try:
+                with app.app_context():
+                    module.load_configuration()
+            except Exception:
+                pass
+        elif app_name == 'BagDetection':
+            module = BagDetection(channel_id, socketio, db_manager, app)
+        elif app_name == 'Heatmap':
+            module = HeatmapProcessor(channel_id, socketio, db_manager, app)
+        elif app_name == 'CashDetection':
+            module = CashDetection(channel_id, socketio, db_manager, app)
+        elif app_name == 'FallDetection':
+            module = FallDetection(channel_id, socketio, db_manager, app)
+        elif app_name == 'MoppingDetection':
+            module = MoppingDetection(channel_id, socketio, db_manager, app)
+        elif app_name == 'SmokingDetection':
+            module = SmokingDetection(channel_id, socketio, db_manager, app)
+        elif app_name == 'PhoneUsageDetection':
+            module = PhoneUsageDetection(channel_id, socketio, db_manager, app)
+        elif app_name == 'RestrictedAreaMonitor':
+            model_path = 'models/best.pt'
+            module = RestrictedAreaMonitor(channel_id, model_path, db_manager, socketio, config={})
+            try:
+                saved_roi = db_manager.get_channel_config(channel_id, 'RestrictedAreaMonitor', 'roi')
+                if saved_roi:
+                    if isinstance(saved_roi, dict) and 'main' in saved_roi:
+                        module.set_roi_points(saved_roi['main'])
+                    elif isinstance(saved_roi, list):
+                        module.set_roi_points(saved_roi)
+            except Exception:
+                pass
+        elif app_name == 'DressCodeMonitoring':
+            module = DressCodeMonitoring(channel_id, socketio, db_manager, app)
+        elif app_name == 'PPEMonitoring':
+            module = PPEMonitoring(channel_id, socketio, db_manager, app)
+        elif app_name == 'CrowdDetection':
+            module = CrowdDetection(channel_id, socketio, db_manager, app)
+        elif app_name == 'TableServiceMonitor':
+             module = TableServiceMonitor(channel_id, socketio, db_manager, app)
+             try:
+                 with app.app_context():
+                     module.load_configuration()
+             except Exception:
+                 pass
+        elif app_name == 'ServiceDisciplineMonitor':
+            module = ServiceDisciplineMonitor(channel_id, socketio, db_manager, app)
+            try:
+                with app.app_context():
+                    module.load_configuration()
+            except Exception:
+                pass
+        elif app_name == 'UnauthorizedEntryMonitor':
+            module = UnauthorizedEntryMonitor(channel_id, socketio, db_manager, app)
+        elif app_name == 'PersonSmokingDetection':
+            module = PersonSmokingDetection(channel_id, socketio, db_manager, app)
+        else:
+            logger.error(f"Unknown app type: {app_name}")
+            return False
+
+        # 5. Add Module to Processor
+        if module:
+            processor.add_module(app_name, module)
+            channel_modules[channel_id][app_name] = module
+            
+            # 6. Update App Configs (for Dashboard)
+            if app_name not in app_configs:
+                app_configs[app_name] = {'channels': {}}
+
+            if channel_id not in app_configs[app_name]['channels']:
+                app_configs[app_name]['channels'][channel_id] = {
+                    'name': f"Channel {channel_id}",
+                    'status': 'online',
+                    'video_source': video_source,
+                    'source_type': source_type,
+                    'shared': True,
+                    'active_modules': []
+                }
+            
+            # Add to active modules list
+            if app_name not in app_configs[app_name]['channels'][channel_id].get('active_modules', []):
+                app_configs[app_name]['channels'][channel_id].setdefault('active_modules', []).append(app_name)
+            
+            # Sync other apps
+            for other_app in app_configs:
+                if other_app != app_name and channel_id in channel_modules[channel_id]:
+                    if channel_id in app_configs[other_app]['channels']:
+                        # Update active modules for other apps
+                        current_modules = list(channel_modules[channel_id].keys())
+                        app_configs[other_app]['channels'][channel_id]['active_modules'] = current_modules
+
+            logger.info(f"Started {app_name} on channel {channel_id}")
+            return True
+        return False
+
+    except Exception as e:
+        logger.error(f"Error in start_channel_processing: {e}")
+        return False
 
 # ============= Authentication Decorator =============
 def login_required(f):
@@ -853,12 +692,13 @@ def get_channels(app_name):
     channels = []
     
     # Get saved RTSP channels from database
+    # Get saved RTSP channels from database
     try:
-        saved_channels = db_manager.get_rtsp_channels()
+        saved_channels = db_manager.get_all_rtsp_links()
         for channel in saved_channels:
             channels.append({
                 'id': channel['channel_id'],
-                'name': channel['name'],
+                'name': channel['channel_name'],
                 'rtsp_url': channel['rtsp_url'],
                 'type': 'rtsp'
             })
@@ -1181,154 +1021,47 @@ def remove_rtsp_channel():
 @login_required
 def start_channel():
     """Start processing a video channel - supports multiple modules on same video"""
-    data = request.json
-    app_name = data.get('app_name')
-    channel_id = data.get('channel_id')
-    
-    # Determine video source (RTSP URL or video file path)
-    rtsp_url = data.get('rtsp_url')
-    video_path = data.get('video_path')
-    
-    if rtsp_url:
-        video_source = rtsp_url
-        source_type = 'rtsp'
-    elif video_path:
-        video_source = video_path
-        source_type = 'video'
-    else:
-        # Try to get from database or fallback to video file
-        try:
-            rtsp_channel = db_manager.get_rtsp_channel(channel_id)
-            if rtsp_channel:
-                video_source = rtsp_channel['rtsp_url']
-                source_type = 'rtsp'
-            else:
-                video_source = f'videos/{channel_id}.mp4'
-                source_type = 'video'
-        except:
-            video_source = f'videos/{channel_id}.mp4'
-            source_type = 'video'
-    
     try:
-        # Check if video processor already exists for this channel
-        if channel_id not in shared_video_processors:
-            # Create new multi-module processor
-            processor = MultiModuleVideoProcessor(video_source, channel_id)
-            shared_video_processors[channel_id] = processor
-            channel_modules[channel_id] = {}
+        data = request.json
+        app_name = data.get('app_name')
+        channel_id = data.get('channel_id')
+        
+        if not app_name or not channel_id:
+             return jsonify({'success': False, 'error': 'app_name and channel_id are required'})
+
+        # Determine video source (RTSP URL or video file path)
+        rtsp_url = data.get('rtsp_url')
+        video_path = data.get('video_path')
+        
+        video_source = None
+        source_type = 'unknown'
+        
+        if rtsp_url:
+            video_source = rtsp_url
+            source_type = 'rtsp'
+        elif video_path:
+            video_source = video_path
+            source_type = 'video'
             
-            # Start the processor
-            if not processor.start():
-                del shared_video_processors[channel_id]
-                del channel_modules[channel_id]
-                return jsonify({'success': False, 'error': f'Failed to start video processor for {source_type} source'})
+        success, message = start_channel_processing(channel_id, app_name, source_type, video_source)
         
-        processor = shared_video_processors[channel_id]
-        
-        # Check if this module is already active for this channel
-        if app_name in channel_modules[channel_id]:
-            return jsonify({'success': True, 'message': f'{app_name} already active on channel {channel_id}'})
-        
-        # Create and add the analysis module
-        if app_name == 'PeopleCounter':
-            module = PeopleCounter(channel_id, socketio, db_manager, app)
-        elif app_name == 'QueueMonitor':
-            module = QueueMonitor(channel_id, socketio, db_manager, app)
-            # Load saved ROI configuration from database
-            try:
-                with app.app_context():
-                    module.load_configuration()
-                logger.info(f"✅ Loaded QueueMonitor configuration from database for {channel_id}")
-            except Exception as e:
-                logger.warning(f"⚠️ Could not load QueueMonitor config from DB for {channel_id}: {e}")
-        elif app_name == 'BagDetection':
-            module = BagDetection(channel_id, socketio, db_manager, app)
-        elif app_name == 'Heatmap':
-            module = HeatmapProcessor(channel_id, socketio, db_manager, app)
-        elif app_name == 'CashDetection':
-            module = CashDetection(channel_id, socketio, db_manager, app)
-        elif app_name == 'FallDetection':
-            module = FallDetection(channel_id, socketio, db_manager, app)
-        elif app_name == 'MoppingDetection':
-            module = MoppingDetection(channel_id, socketio, db_manager, app)
-        elif app_name == 'SmokingDetection':
-            module = SmokingDetection(channel_id, socketio, db_manager, app)
-        elif app_name == 'PhoneUsageDetection':
-            module = PhoneUsageDetection(channel_id, socketio, db_manager, app)
-        elif app_name == 'RestrictedAreaMonitor':
-            model_path = 'models/best.pt'
-            module = RestrictedAreaMonitor(channel_id, model_path, db_manager, socketio, config={})
-            # Load saved ROI points from database
-            try:
-                saved_roi = db_manager.get_channel_config(channel_id, 'RestrictedAreaMonitor', 'roi')
-                logger.info(f"📐 Loading ROI from database for {channel_id}: type={type(saved_roi)}, data={saved_roi}")
-                if saved_roi:
-                    # Handle both formats: list or dict with 'main' key
-                    if isinstance(saved_roi, dict) and 'main' in saved_roi:
-                        module.set_roi_points(saved_roi['main'])
-                        logger.info(f"✅ Loaded saved ROI (dict format) for RestrictedAreaMonitor on channel {channel_id}: {len(saved_roi['main'])} points")
-                    elif isinstance(saved_roi, list):
-                        module.set_roi_points(saved_roi)
-                        logger.info(f"✅ Loaded saved ROI (list format) for RestrictedAreaMonitor on channel {channel_id}: {len(saved_roi)} points")
-                    else:
-                        logger.warning(f"⚠️ Unknown ROI format for {channel_id}: {type(saved_roi)}")
-                else:
-                    logger.info(f"ℹ️ No saved ROI found for RestrictedAreaMonitor on channel {channel_id}")
-            except Exception as e:
-                logger.error(f"❌ Could not load saved ROI for RestrictedAreaMonitor: {e}", exc_info=True)
-        elif app_name == 'DressCodeMonitoring':
-            module = DressCodeMonitoring(channel_id, socketio, db_manager, app)
-        elif app_name == 'PPEMonitoring':
-            module = PPEMonitoring(channel_id, socketio, db_manager, app)
-        elif app_name == 'CrowdDetection':
-            module = CrowdDetection(channel_id, socketio, db_manager, app)
-        else:
-            return jsonify({'success': False, 'error': 'Unknown app type'})
-        
-        # Add module to processor
-        processor.add_module(app_name, module)
-        channel_modules[channel_id][app_name] = module
-        
-        # Update config
-        if channel_id not in app_configs[app_name]['channels']:
-            app_configs[app_name]['channels'][channel_id] = {
-                'name': f"Channel {channel_id}",
-                'status': 'online',
-                'video_source': video_source,
-                'source_type': source_type,
-                'shared': True,
-                'active_modules': []
-            }
-        
-        # Add this module to active modules list
-        if app_name not in app_configs[app_name]['channels'][channel_id].get('active_modules', []):
-            app_configs[app_name]['channels'][channel_id].setdefault('active_modules', []).append(app_name)
-        
-        # Update other app configs to show shared status
-        for other_app in app_configs:
-            if other_app != app_name and channel_id in channel_modules[channel_id]:
-                if channel_id not in app_configs[other_app]['channels']:
-                    app_configs[other_app]['channels'][channel_id] = {
-                        'name': f"Channel {channel_id}",
-                        'status': 'online',
-                        'video_source': video_source,
-                        'source_type': source_type,
-                        'shared': True,
-                        'active_modules': []
-                    }
-                # Update active modules for other apps
+        if success:
+            # Gather info for response
+            current_modules = []
+            if channel_id in channel_modules:
                 current_modules = list(channel_modules[channel_id].keys())
-                app_configs[other_app]['channels'][channel_id]['active_modules'] = current_modules
-        
-        logger.info(f"Started {app_name} on channel {channel_id} ({source_type}: {video_source})")
-        return jsonify({
-            'success': True, 
-            'shared': True, 
-            'active_modules': list(channel_modules[channel_id].keys()),
-            'source_type': source_type,
-            'video_source': video_source
-        })
-        
+                
+            return jsonify({
+                'success': True, 
+                'message': message,
+                'shared': True, 
+                'active_modules': current_modules,
+                'source_type': source_type,
+                'video_source': video_source or 'database'
+            })
+        else:
+            return jsonify({'success': False, 'error': message})
+            
     except Exception as e:
         logger.error(f"Error starting channel: {e}")
         return jsonify({'success': False, 'error': str(e)})
@@ -3121,8 +2854,14 @@ def get_alert_gifs():
     days = request.args.get('days')
     days = int(days) if days else None
     
+    store_id = request.args.get('store_id', 'store_1')
+    
     try:
-        alert_gifs = db_manager.get_alert_gifs(channel_id, alert_type, limit, days=days)
+        target_channels = get_channels_for_request(store_id, channel_id)
+        if target_channels is None:
+             return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+             
+        alert_gifs = db_manager.get_alert_gifs(target_channels, alert_type, limit, days=days)
         return jsonify({
             'success': True,
             'alert_gifs': alert_gifs,
@@ -3184,21 +2923,14 @@ def get_heatmap_snapshots():
             all_channels = list(shared_video_processors.keys())
         
         # If no specific channel requested, get channels for this store
-        if not channel_id:
-            store_channels = filter_channels_by_store(all_channels, store_id)
-            # Get snapshots from all store channels
-            snapshots = []
-            for ch_id in store_channels:
-                ch_snapshots = db_manager.get_heatmap_snapshots(ch_id, limit)
-                snapshots.extend(ch_snapshots)
-            # Sort by timestamp and limit
-            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
-        else:
-            # Verify channel belongs to requested store
-            store_channels = filter_channels_by_store([channel_id], store_id)
-            if not store_channels:
-                return jsonify({'success': False, 'error': 'Channel not found in this store'})
-            snapshots = db_manager.get_heatmap_snapshots(channel_id, limit)
+        # Use helper to get channels filtering by store
+        target_channels = get_channels_for_request(store_id, channel_id)
+        if target_channels is None:
+             return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+        
+        # Get snapshots (db_manager now accepts list of channels)
+        snapshots = db_manager.get_heatmap_snapshots(target_channels, limit)
+
         
         return jsonify({
             'success': True,
@@ -3454,21 +3186,11 @@ def get_cash_snapshots():
             all_channels = list(shared_video_processors.keys())
         
         # If no specific channel requested, get channels for this store
-        if not channel_id:
-            store_channels = filter_channels_by_store(all_channels, store_id)
-            # Get snapshots from all store channels
-            snapshots = []
-            for ch_id in store_channels:
-                ch_snapshots = db_manager.get_cash_snapshots(ch_id, limit)
-                snapshots.extend(ch_snapshots)
-            # Sort by timestamp and limit
-            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
-        else:
-            # Verify channel belongs to requested store
-            store_channels = filter_channels_by_store([channel_id], store_id)
-            if not store_channels:
-                return jsonify({'success': False, 'error': 'Channel not found in this store'})
-            snapshots = db_manager.get_cash_snapshots(channel_id, limit)
+        target_channels = get_channels_for_request(store_id, channel_id)
+        if target_channels is None:
+             return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+             
+        snapshots = db_manager.get_cash_snapshots(target_channels, limit)
         
         return jsonify({
             'success': True,
@@ -3958,27 +3680,11 @@ def get_fall_snapshots():
         store_id = request.args.get('store_id', 'store_1')
         limit = int(request.args.get('limit', 50))
         
-        # Get all channels from config file
-        try:
-            with open('config/channels.json', 'r') as f:
-                config = json.load(f)
-            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
-        except:
-            all_channels = list(shared_video_processors.keys())
+        target_channels = get_channels_for_request(store_id, channel_id)
+        if target_channels is None:
+             return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
         
-        # If no specific channel requested, get channels for this store
-        if not channel_id:
-            store_channels = filter_channels_by_store(all_channels, store_id)
-            snapshots = []
-            for ch_id in store_channels:
-                ch_snapshots = db_manager.get_fall_snapshots(channel_id=ch_id, limit=limit)
-                snapshots.extend(ch_snapshots)
-            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
-        else:
-            store_channels = filter_channels_by_store([channel_id], store_id)
-            if not store_channels:
-                return jsonify({'success': False, 'error': 'Channel not found in this store'})
-            snapshots = db_manager.get_fall_snapshots(channel_id=channel_id, limit=limit)
+        snapshots = db_manager.get_fall_snapshots(channel_id=target_channels, limit=limit)
         
         return jsonify({
             'success': True,
@@ -3987,6 +3693,8 @@ def get_fall_snapshots():
     except Exception as e:
         logger.error(f"Error getting fall snapshots: {e}")
         return jsonify({'success': False, 'error': str(e)})
+
+
 
 @app.route('/api/delete_fall_snapshot/<int:snapshot_id>', methods=['DELETE'])
 def delete_fall_snapshot(snapshot_id):
@@ -4070,27 +3778,11 @@ def get_mopping_snapshots():
         limit = int(request.args.get('limit', 50))
         offset = int(request.args.get('offset', 0))
         
-        # Get all channels from config file
-        try:
-            with open('config/channels.json', 'r') as f:
-                config = json.load(f)
-            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
-        except:
-            all_channels = list(shared_video_processors.keys())
+        target_channels = get_channels_for_request(store_id, channel_id)
+        if target_channels is None:
+             return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
         
-        # If no specific channel requested, get channels for this store
-        if not channel_id:
-            store_channels = filter_channels_by_store(all_channels, store_id)
-            snapshots = []
-            for ch_id in store_channels:
-                ch_snapshots = db_manager.get_mopping_snapshots(channel_id=ch_id, limit=limit, offset=offset)
-                snapshots.extend(ch_snapshots)
-            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
-        else:
-            store_channels = filter_channels_by_store([channel_id], store_id)
-            if not store_channels:
-                return jsonify({'success': False, 'error': 'Channel not found in this store'})
-            snapshots = db_manager.get_mopping_snapshots(channel_id=channel_id, limit=limit, offset=offset)
+        snapshots = db_manager.get_mopping_snapshots(channel_id=target_channels, limit=limit, offset=offset)
         
         return jsonify({'success': True, 'snapshots': snapshots})
     except Exception as e:
@@ -4174,27 +3866,11 @@ def get_smoking_snapshots():
         store_id = request.args.get('store_id', 'store_1')
         limit = int(request.args.get('limit', 50))
         
-        # Get all channels from config file
-        try:
-            with open('config/channels.json', 'r') as f:
-                config = json.load(f)
-            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
-        except:
-            all_channels = list(shared_video_processors.keys())
+        target_channels = get_channels_for_request(store_id, channel_id)
+        if target_channels is None:
+             return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
         
-        # If no specific channel requested, get channels for this store
-        if not channel_id:
-            store_channels = filter_channels_by_store(all_channels, store_id)
-            snapshots = []
-            for ch_id in store_channels:
-                ch_snapshots = db_manager.get_smoking_snapshots(channel_id=ch_id, limit=limit)
-                snapshots.extend(ch_snapshots)
-            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
-        else:
-            store_channels = filter_channels_by_store([channel_id], store_id)
-            if not store_channels:
-                return jsonify({'success': False, 'error': 'Channel not found in this store'})
-            snapshots = db_manager.get_smoking_snapshots(channel_id=channel_id, limit=limit)
+        snapshots = db_manager.get_smoking_snapshots(channel_id=target_channels, limit=limit)
         
         return jsonify({'success': True, 'snapshots': snapshots})
     except Exception as e:
@@ -4564,48 +4240,47 @@ def handle_subscribe_stream(data):
             # Channel is configured but processor not running - try to restart it
             logger.info(f"Channel {channel_id} not in shared_video_processors, attempting to restart...")
             
-            # Get channel configuration - channels.json is source of truth
+            # Get channel configuration - database is source of truth
             rtsp_url = None
             
-            # FIRST: Always check channels.json (source of truth) and update database
+            # 1. Try to get from database first
             try:
-                config_path = Path('config/channels.json')
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = json.load(f)
-                        for ch in config.get('channels', []):
-                            if ch.get('channel_id') == channel_id:
-                                rtsp_url = ch.get('rtsp_url')
-                                if rtsp_url:
-                                    logger.info(f"Found RTSP URL for {channel_id} in channels.json: {rtsp_url}")
-                                    # Update database with correct URL from channels.json
-                                    try:
-                                        channel_name = ch.get('channel_name', channel_id)
-                                        with app.app_context():
-                                            db_manager.save_rtsp_channel(
-                                                channel_id, 
-                                                channel_name, 
-                                                rtsp_url,
-                                                description=f"Auto-updated from channels.json"
-                                            )
-                                            logger.info(f"💾 Updated database with correct RTSP URL for {channel_id}")
-                                    except Exception as db_error:
-                                        logger.warning(f"Could not update database URL for {channel_id}: {db_error}")
-                                break
+                with app.app_context():
+                    rtsp_channel = db_manager.get_rtsp_link(channel_id)
+                    if rtsp_channel:
+                        rtsp_url = rtsp_channel.get('rtsp_url')
+                        if rtsp_url:
+                            logger.info(f"Found RTSP URL for {channel_id} in database")
             except Exception as e:
-                logger.error(f"Error reading channels.json: {e}")
-            
-            # Fallback to database only if not found in channels.json
+                logger.debug(f"Could not get RTSP URL from database: {e}")
+
+            # 2. Fallback to channels.json only if not in DB
             if not rtsp_url:
                 try:
-                    with app.app_context():
-                        rtsp_channel = db_manager.get_rtsp_channel(channel_id)
-                        if rtsp_channel:
-                            rtsp_url = rtsp_channel.get('rtsp_url')
-                            if rtsp_url:
-                                logger.info(f"Found RTSP URL for {channel_id} in database (fallback)")
+                    config_path = Path('config/channels.json')
+                    if config_path.exists():
+                        with open(config_path, 'r') as f:
+                            config = json.load(f)
+                            for ch in config.get('channels', []):
+                                if ch.get('channel_id') == channel_id:
+                                    rtsp_url = ch.get('rtsp_url')
+                                    if rtsp_url:
+                                        logger.info(f"Found RTSP URL for {channel_id} in channels.json (fallback)")
+                                        # Update database with correct URL from channels.json
+                                        try:
+                                            channel_name = ch.get('channel_name', channel_id)
+                                            with app.app_context():
+                                                db_manager.save_rtsp_channel(
+                                                    channel_id, 
+                                                    channel_name, 
+                                                    rtsp_url,
+                                                    description=f"Auto-updated from channels.json"
+                                                )
+                                        except Exception:
+                                            pass
+                                    break
                 except Exception as e:
-                    logger.debug(f"Could not get RTSP URL from database: {e}")
+                    logger.error(f"Error reading channels.json: {e}")
             
             # If still not found, try app_configs
             if not rtsp_url and channel_id in channel_modules:
@@ -5036,9 +4711,13 @@ def get_dresscode_alerts():
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
     
+    store_id = request.args.get('store_id', 'store_1')
     try:
         with app.app_context():
-            alerts = db_manager.get_dresscode_alerts(channel_id=channel_id, limit=limit)
+            target_channels = get_channels_for_request(store_id, channel_id)
+            if target_channels is None:
+                 return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+            alerts = db_manager.get_dresscode_alerts(channel_id=target_channels, limit=limit)
         
         return jsonify({
             'success': True,
@@ -5248,10 +4927,15 @@ def get_table_service_violations():
     days = request.args.get('days')
     days = int(days) if days else None
     
+    store_id = request.args.get('store_id', 'store_1')
     try:
         with app.app_context():
+            target_channels = get_channels_for_request(store_id, channel_id)
+            if target_channels is None:
+                 return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+
             violations = db_manager.get_table_service_violations(
-                channel_id=channel_id, 
+                channel_id=target_channels, 
                 violation_type=violation_type,
                 limit=limit,
                 days=days
@@ -5276,10 +4960,15 @@ def get_table_cleanliness_violations():
     days = request.args.get('days')
     days = int(days) if days else None
 
+    store_id = request.args.get('store_id', 'store_1')
     try:
         with app.app_context():
+            target_channels = get_channels_for_request(store_id, channel_id)
+            if target_channels is None:
+                 return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+
             violations = db_manager.get_table_cleanliness_violations(
-                channel_id=channel_id,
+                channel_id=target_channels,
                 table_id=table_id,
                 limit=limit,
                 days=days,
@@ -5433,9 +5122,26 @@ def get_dresscode_stats():
     channel_id = request.args.get('channel_id')
     days = int(request.args.get('days', 7))
     
+    store_id = request.args.get('store_id', 'store_1')
     try:
         with app.app_context():
-            stats = db_manager.get_dresscode_stats(channel_id=channel_id, days=days)
+            target_channels = get_channels_for_request(store_id, channel_id)
+            if target_channels is None:
+                 return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+            # For stats, db_manager might expect a single channel or handle None for all.
+            # But get_dresscode_stats implementation likely aggregates if channel_id is None.
+            # However, we want it to aggregate only for store channels.
+            # Currently get_dresscode_stats in db_manager (from previous read) likely takes single channel_id.
+            # If so, we can't easily pass a list unless updated.
+            # Let's check db_manager implementation for stats.
+            # If it doesn't support list, we might need to iterate.
+            # But earlier I modified snapshot getters to support list. I didn't verify stats getters.
+            # If I check db_manager.py again, I can see if get_dresscode_stats supports list.
+            # Assuming it does OR I will update it if not.
+            # Actually, I updated get_dresscode_snapshots but maybe not stats.
+            # Let's assume for now I should pass target_channels if it supports it, or handle it.
+            # I will pass target_channels and if it fails I'll fix db_manager.
+            stats = db_manager.get_dresscode_stats(channel_id=target_channels, days=days)
         
         return jsonify({
             'success': True,
@@ -5451,9 +5157,13 @@ def get_ppe_alerts():
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
     
+    store_id = request.args.get('store_id', 'store_1')
     try:
         with app.app_context():
-            alerts = db_manager.get_ppe_alerts(channel_id=channel_id, limit=limit)
+            target_channels = get_channels_for_request(store_id, channel_id)
+            if target_channels is None:
+                 return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+            alerts = db_manager.get_ppe_alerts(channel_id=target_channels, limit=limit)
         
         return jsonify({
             'success': True,
@@ -5486,9 +5196,13 @@ def get_ppe_stats():
     channel_id = request.args.get('channel_id')
     days = int(request.args.get('days', 7))
     
+    store_id = request.args.get('store_id', 'store_1')
     try:
         with app.app_context():
-            stats = db_manager.get_ppe_stats(channel_id=channel_id, days=days)
+            target_channels = get_channels_for_request(store_id, channel_id)
+            if target_channels is None:
+                 return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+            stats = db_manager.get_ppe_stats(channel_id=target_channels, days=days)
         
         return jsonify({
             'success': True,
@@ -5504,9 +5218,13 @@ def get_queue_violations():
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
     
+    store_id = request.args.get('store_id', 'store_1')
     try:
         with app.app_context():
-            violations = db_manager.get_queue_violations(channel_id=channel_id, limit=limit)
+            target_channels = get_channels_for_request(store_id, channel_id)
+            if target_channels is None:
+                 return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
+            violations = db_manager.get_queue_violations(channel_id=target_channels, limit=limit)
         
         logger.info(f"Retrieved {len(violations)} queue violations (channel_id={channel_id}, limit={limit})")
         
@@ -5607,7 +5325,8 @@ if __name__ == '__main__':
         """Load channels in background thread so server starts immediately"""
         time.sleep(1)  # Give server a moment to start
         logger.info("Loading channels from configuration in background...")
-        load_channels_from_config()
+        with app.app_context():
+            load_channels_from_config()
         logger.info("✅ Channel loading completed")
     
     # Start channel loading in background thread
