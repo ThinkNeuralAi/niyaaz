@@ -3988,20 +3988,7 @@
                         if (moduleChannels.length === 0) {
                             console.warn(`⚠️ No active channels found for ${moduleName}, trying fallback from channels.json`);
 
-                            // Immediate fallback for MaterialTheftMonitor - directly add camera_15
-                            if (moduleName === 'MaterialTheftMonitor') {
-                                console.log('🔧 Immediate fallback: Adding camera_15 for MaterialTheftMonitor');
-                                const streamBoxId = `stream-box-${moduleName}-camera_15`;
-                                const existingStream = document.getElementById(streamBoxId);
-                                if (!existingStream) {
-                                    addVideoStream(moduleName, 'camera_15', false, []);
-                                    setTimeout(() => {
-                                        updateVideoPagination(moduleName);
-                                    }, 500);
-                                } else {
-                                    console.log(`⏭️ Video stream already exists for ${moduleName}/camera_15, skipping fallback`);
-                                }
-                            }
+
 
                             fetch(`/api/get_configured_channels?store_id=${selectedStore}`)
                                 .then(response => response.json())
@@ -4033,20 +4020,7 @@
                                 })
                                 .catch(err => {
                                     console.error('❌ Error loading channels.json fallback:', err);
-                                    // Last resort: manually add camera_15 for MaterialTheftMonitor if module name matches
-                                    if (moduleName === 'MaterialTheftMonitor') {
-                                        console.log('🔧 Last resort: Adding camera_15 for MaterialTheftMonitor');
-                                        const streamBoxId = `stream-box-${moduleName}-camera_15`;
-                                        const existingStream = document.getElementById(streamBoxId);
-                                        if (!existingStream) {
-                                            addVideoStream(moduleName, 'camera_15', false, []);
-                                            setTimeout(() => {
-                                                updateVideoPagination(moduleName);
-                                            }, 500);
-                                        } else {
-                                            console.log(`⏭️ Video stream already exists for ${moduleName}/camera_15, skipping last resort`);
-                                        }
-                                    }
+
                                 });
                         }
                     } else {

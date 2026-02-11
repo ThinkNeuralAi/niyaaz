@@ -503,11 +503,14 @@ class DatabaseManager:
                 result.append({
                     'id': store.id,
                     'store_id': store.store_id,
+                    'store_name': store.name,  # Aliased for frontend compatibility
                     'name': store.name,
                     'location': store.location,
                     'description': store.description,
                     'is_active': store.is_active,
+                    'enabled': store.is_active,  # Aliased for frontend compatibility
                     'is_default': store.is_default,
+                    'default': store.is_default, # Aliased for frontend compatibility
                     'excluded_modules': excluded_modules,
                     'created_at': store.created_at.isoformat() if store.created_at else None,
                     'updated_at': store.updated_at.isoformat() if store.updated_at else None,

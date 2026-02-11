@@ -739,9 +739,11 @@ def get_active_channels():
         # Only get channels from processors that are actually running and can provide frames
         for channel_id, processor in shared_video_processors.items():
             # If store_id is specified, filter channels by store
-            if store_id and channel_store_map.get(channel_id) != store_id:
-                logger.debug(f"📊 Channel {channel_id}: Skipped - belongs to {channel_store_map.get(channel_id)}, not {store_id}")
-                continue
+            if store_id:
+                mapped_store = channel_store_map.get(channel_id)
+                if mapped_store != store_id:
+                    logger.info(f"📊 Channel {channel_id}: Skipped - mapped to {mapped_store}, filtering for {store_id}")
+                    continue
             
             # Check if processor is actually running
             is_running = getattr(processor, 'is_running', False)
@@ -841,19 +843,65 @@ def get_configured_channels():
         logger.error(f"Error getting configured channels: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/debug_store_filter')
+def debug_store_filter():
+    store_id = request.args.get('store_id', 'store_1')
+    
+    channel_store_map = get_channel_to_store_mapping()
+    
+    active_channels_raw = list(shared_video_processors.keys())
+    active_filtered = [ch for ch in active_channels_raw if channel_store_map.get(ch) == store_id]
+    
+    try:
+        config_path = Path('config/channels.json')
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        configured_channels_raw = [ch.get('channel_id') for ch in config.get('channels', [])]
+        configured_filtered = [ch for ch in configured_channels_raw if channel_store_map.get(ch) == store_id]
+        
+        # Check raw JSON channel store_ids
+        json_store_ids = {ch.get('channel_id'): ch.get('store_id') for ch in config.get('channels', [])}
+    except Exception as e:
+        configured_channels_raw = str(e)
+        configured_filtered = str(e)
+        json_store_ids = str(e)
+
+    return jsonify({
+        'store_id': store_id,
+        'channel_store_map': channel_store_map,
+        'active_channels_raw': active_channels_raw,
+        'active_filtered': active_filtered,
+        'configured_channels_raw': configured_channels_raw,
+        'configured_filtered': configured_filtered,
+        'json_store_ids': json_store_ids
+    })
+
 @app.route('/api/get_stores')
 def get_stores():
     """Get all available stores"""
     try:
-        config_path = Path('config/stores.json')
-        if not config_path.exists():
-            return jsonify({'success': False, 'error': 'stores.json not found'})
+        # Get stores from database (source of truth)
+        stores = db_manager.get_all_stores()
         
-        with open(config_path, 'r') as f:
-            config = json.load(f)
+        # Fallback to legacy file only if database is empty
+        if not stores:
+            config_path = Path('config/stores.json')
+            if config_path.exists():
+                try:
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                    stores = config.get('stores', [])
+                    logger.warning("Using legacy stores.json (database empty)")
+                except Exception as json_err:
+                    logger.error(f"Error reading legacy stores.json: {json_err}")
         
-        stores = config.get('stores', [])
-        enabled_stores = [s for s in stores if s.get('enabled', True)]
+        # Filter enabled stores if legacy (DB query already returns all, we filter in code or query)
+        # db_manager.get_all_stores returns all stores.
+        # Frontend logic expects filtered list? NO, frontend does drop down.
+        # But previous code filtered enabled_stores.
+        
+        # Filter to only enabled stores
+        enabled_stores = [s for s in stores if s.get('enabled', True) or s.get('is_active', True)]
         
         return jsonify({
             'success': True,
