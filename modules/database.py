@@ -336,6 +336,63 @@ class DatabaseManager:
             file_size = self.db.Column(self.db.Integer)  # File size in bytes (if snapshot exists)
             created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
         
+        # Store Management
+        class Store(self.db.Model):
+            __tablename__ = 'stores'
+            
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            store_id = self.db.Column(self.db.String(50), unique=True, nullable=False)
+            name = self.db.Column(self.db.String(100), nullable=False)
+            location = self.db.Column(self.db.String(200), nullable=False)
+            description = self.db.Column(self.db.Text)
+            is_active = self.db.Column(self.db.Boolean, default=True)
+            is_default = self.db.Column(self.db.Boolean, default=False)
+            excluded_modules = self.db.Column(self.db.Text)  # JSON array of module names to exclude
+            created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+            updated_at = self.db.Column(self.db.DateTime, default=get_ist_now, onupdate=get_ist_now)
+        
+        # RTSP Link Configuration
+        class RTSPLink(self.db.Model):
+            __tablename__ = 'rtsp_links'
+            
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            channel_id = self.db.Column(self.db.String(50), unique=True, nullable=False)
+            store_id = self.db.Column(self.db.String(50), nullable=False)
+            channel_name = self.db.Column(self.db.String(100), nullable=False)
+            rtsp_url = self.db.Column(self.db.String(500), nullable=False)
+            description = self.db.Column(self.db.Text)
+            is_active = self.db.Column(self.db.Boolean, default=True)
+            resolution = self.db.Column(self.db.String(50))  # e.g., '1920x1080'
+            fps = self.db.Column(self.db.Integer)  # Frames per second
+            codec = self.db.Column(self.db.String(50))  # e.g., 'h264', 'h265'
+            created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+            updated_at = self.db.Column(self.db.DateTime, default=get_ist_now, onupdate=get_ist_now)
+            
+            # Foreign key relationship
+            __table_args__ = (self.db.ForeignKeyConstraint(['store_id'], ['stores.store_id']),)
+        
+        # Channel Modules Configuration
+        class ChannelModule(self.db.Model):
+            __tablename__ = 'channel_modules'
+            
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            channel_id = self.db.Column(self.db.String(50), nullable=False)
+            store_id = self.db.Column(self.db.String(50), nullable=False)
+            module_name = self.db.Column(self.db.String(100), nullable=False)  # e.g., 'QueueMonitor', 'PPEMonitoring'
+            module_type = self.db.Column(self.db.String(50), nullable=False)  # Type of module
+            enabled = self.db.Column(self.db.Boolean, default=True)
+            config_data = self.db.Column(self.db.Text)  # JSON data with module-specific configuration (ROI, thresholds, etc.)
+            is_default = self.db.Column(self.db.Boolean, default=False)  # Use default config if true
+            created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+            updated_at = self.db.Column(self.db.DateTime, default=get_ist_now, onupdate=get_ist_now)
+            
+            # Unique constraint to prevent duplicate module configs per channel
+            __table_args__ = (
+                self.db.UniqueConstraint('channel_id', 'module_name'),
+                self.db.ForeignKeyConstraint(['store_id'], ['stores.store_id']),
+                self.db.ForeignKeyConstraint(['channel_id'], ['rtsp_links.channel_id']),
+            )
+        
         # Store model classes for access
         self.User = User
         self.DailyFootfall = DailyFootfall
@@ -348,6 +405,9 @@ class DatabaseManager:
         self.HeatmapSnapshot = HeatmapSnapshot
         self.TableServiceViolation = TableServiceViolation
         self.TableCleanlinessViolation = TableCleanlinessViolation
+        self.Store = Store
+        self.RTSPLink = RTSPLink
+        self.ChannelModule = ChannelModule
         self.CashSnapshot = CashSnapshot
         self.FallSnapshot = FallSnapshot
         self.GroomingSnapshot = GroomingSnapshot
@@ -358,6 +418,466 @@ class DatabaseManager:
         self.SmokingSnapshot = SmokingSnapshot
         self.PhoneSnapshot = PhoneSnapshot
         self.RestrictedAreaSnapshot = RestrictedAreaSnapshot
+
+    # ==================== Store Management Methods ====================
+    
+    def add_store(self, store_id, name, location, description=None, is_active=True, is_default=False, excluded_modules=None):
+        """Add a new store to the database"""
+        import json
+        try:
+            existing = self.Store.query.filter_by(store_id=store_id).first()
+            if existing:
+                logger.warning(f"Store {store_id} already exists")
+                return None
+            
+            excluded_modules_str = None
+            if excluded_modules:
+                if isinstance(excluded_modules, list):
+                    excluded_modules_str = json.dumps(excluded_modules)
+                else:
+                    excluded_modules_str = excluded_modules
+            
+            store = self.Store(
+                store_id=store_id,
+                name=name,
+                location=location,
+                description=description,
+                is_active=is_active,
+                is_default=is_default,
+                excluded_modules=excluded_modules_str
+            )
+            self.db.session.add(store)
+            self.db.session.commit()
+            logger.info(f"Store added: {store_id} - {name}")
+            return store.id
+        except Exception as e:
+            logger.error(f"Error adding store: {e}")
+            self.db.session.rollback()
+            return None
+    
+    def get_store(self, store_id):
+        """Get store details by store_id"""
+        import json
+        try:
+            store = self.Store.query.filter_by(store_id=store_id).first()
+            if not store:
+                return None
+            
+            excluded_modules = []
+            if store.excluded_modules:
+                try:
+                    excluded_modules = json.loads(store.excluded_modules)
+                except:
+                    excluded_modules = []
+            
+            return {
+                'id': store.id,
+                'store_id': store.store_id,
+                'name': store.name,
+                'location': store.location,
+                'description': store.description,
+                'is_active': store.is_active,
+                'is_default': store.is_default,
+                'excluded_modules': excluded_modules,
+                'created_at': store.created_at.isoformat() if store.created_at else None,
+                'updated_at': store.updated_at.isoformat() if store.updated_at else None,
+            }
+        except Exception as e:
+            logger.error(f"Error getting store: {e}")
+            return None
+    
+    def get_all_stores(self):
+        """Get all stores from database"""
+        import json
+        try:
+            stores = self.Store.query.all()
+            result = []
+            for store in stores:
+                excluded_modules = []
+                if store.excluded_modules:
+                    try:
+                        excluded_modules = json.loads(store.excluded_modules)
+                    except:
+                        excluded_modules = []
+                
+                result.append({
+                    'id': store.id,
+                    'store_id': store.store_id,
+                    'name': store.name,
+                    'location': store.location,
+                    'description': store.description,
+                    'is_active': store.is_active,
+                    'is_default': store.is_default,
+                    'excluded_modules': excluded_modules,
+                    'created_at': store.created_at.isoformat() if store.created_at else None,
+                    'updated_at': store.updated_at.isoformat() if store.updated_at else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Error getting all stores: {e}")
+            return []
+    
+    def update_store(self, store_id, **kwargs):
+        """Update store details"""
+        import json
+        try:
+            store = self.Store.query.filter_by(store_id=store_id).first()
+            if not store:
+                logger.warning(f"Store {store_id} not found")
+                return False
+            
+            for key, value in kwargs.items():
+                if key == 'excluded_modules' and value is not None:
+                    if isinstance(value, list):
+                        setattr(store, key, json.dumps(value))
+                    else:
+                        setattr(store, key, value)
+                elif key in ['name', 'location', 'description', 'is_active', 'is_default']:
+                    setattr(store, key, value)
+            
+            store.updated_at = get_ist_now()
+            self.db.session.commit()
+            logger.info(f"Store updated: {store_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating store: {e}")
+            self.db.session.rollback()
+            return False
+    
+    def delete_store(self, store_id):
+        """Delete a store"""
+        try:
+            store = self.Store.query.filter_by(store_id=store_id).first()
+            if not store:
+                logger.warning(f"Store {store_id} not found")
+                return False
+            
+            self.db.session.delete(store)
+            self.db.session.commit()
+            logger.info(f"Store deleted: {store_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting store: {e}")
+            self.db.session.rollback()
+            return False
+    
+    # ==================== RTSP Link Management Methods ====================
+    
+    def add_rtsp_link(self, channel_id, store_id, channel_name, rtsp_url, description=None, 
+                      is_active=True, resolution=None, fps=None, codec=None):
+        """Add a new RTSP link/channel to the database"""
+        try:
+            existing = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
+            if existing:
+                logger.warning(f"RTSP link {channel_id} already exists")
+                return None
+            
+            rtsp_link = self.RTSPLink(
+                channel_id=channel_id,
+                store_id=store_id,
+                channel_name=channel_name,
+                rtsp_url=rtsp_url,
+                description=description,
+                is_active=is_active,
+                resolution=resolution,
+                fps=fps,
+                codec=codec
+            )
+            self.db.session.add(rtsp_link)
+            self.db.session.commit()
+            logger.info(f"RTSP link added: {channel_id} for store {store_id}")
+            return rtsp_link.id
+        except Exception as e:
+            logger.error(f"Error adding RTSP link: {e}")
+            self.db.session.rollback()
+            return None
+    
+    def get_rtsp_link(self, channel_id):
+        """Get RTSP link details by channel_id"""
+        try:
+            link = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
+            if not link:
+                return None
+            
+            return {
+                'id': link.id,
+                'channel_id': link.channel_id,
+                'store_id': link.store_id,
+                'channel_name': link.channel_name,
+                'rtsp_url': link.rtsp_url,
+                'description': link.description,
+                'is_active': link.is_active,
+                'resolution': link.resolution,
+                'fps': link.fps,
+                'codec': link.codec,
+                'created_at': link.created_at.isoformat() if link.created_at else None,
+                'updated_at': link.updated_at.isoformat() if link.updated_at else None,
+            }
+        except Exception as e:
+            logger.error(f"Error getting RTSP link: {e}")
+            return None
+    
+    def get_rtsp_links_by_store(self, store_id):
+        """Get all RTSP links for a specific store"""
+        try:
+            links = self.RTSPLink.query.filter_by(store_id=store_id).all()
+            result = []
+            for link in links:
+                result.append({
+                    'id': link.id,
+                    'channel_id': link.channel_id,
+                    'store_id': link.store_id,
+                    'channel_name': link.channel_name,
+                    'rtsp_url': link.rtsp_url,
+                    'description': link.description,
+                    'is_active': link.is_active,
+                    'resolution': link.resolution,
+                    'fps': link.fps,
+                    'codec': link.codec,
+                    'created_at': link.created_at.isoformat() if link.created_at else None,
+                    'updated_at': link.updated_at.isoformat() if link.updated_at else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Error getting RTSP links for store {store_id}: {e}")
+            return []
+    
+    def get_all_rtsp_links(self):
+        """Get all RTSP links from database"""
+        try:
+            links = self.RTSPLink.query.all()
+            result = []
+            for link in links:
+                result.append({
+                    'id': link.id,
+                    'channel_id': link.channel_id,
+                    'store_id': link.store_id,
+                    'channel_name': link.channel_name,
+                    'rtsp_url': link.rtsp_url,
+                    'description': link.description,
+                    'is_active': link.is_active,
+                    'resolution': link.resolution,
+                    'fps': link.fps,
+                    'codec': link.codec,
+                    'created_at': link.created_at.isoformat() if link.created_at else None,
+                    'updated_at': link.updated_at.isoformat() if link.updated_at else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Error getting all RTSP links: {e}")
+            return []
+    
+    def update_rtsp_link(self, channel_id, **kwargs):
+        """Update RTSP link details"""
+        try:
+            link = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
+            if not link:
+                logger.warning(f"RTSP link {channel_id} not found")
+                return False
+            
+            for key, value in kwargs.items():
+                if key in ['channel_name', 'rtsp_url', 'description', 'is_active', 'resolution', 'fps', 'codec']:
+                    setattr(link, key, value)
+            
+            link.updated_at = get_ist_now()
+            self.db.session.commit()
+            logger.info(f"RTSP link updated: {channel_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating RTSP link: {e}")
+            self.db.session.rollback()
+            return False
+    
+    def delete_rtsp_link(self, channel_id):
+        """Delete an RTSP link"""
+        try:
+            link = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
+            if not link:
+                logger.warning(f"RTSP link {channel_id} not found")
+                return False
+            
+            self.db.session.delete(link)
+            self.db.session.commit()
+            logger.info(f"RTSP link deleted: {channel_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting RTSP link: {e}")
+            self.db.session.rollback()
+            return False
+    
+    # ==================== Channel Module Management Methods ====================
+    
+    def add_channel_module(self, channel_id, store_id, module_name, module_type, enabled=True, 
+                          config_data=None, is_default=False):
+        """Add a module configuration to a channel"""
+        import json
+        try:
+            existing = self.ChannelModule.query.filter_by(channel_id=channel_id, module_name=module_name).first()
+            if existing:
+                logger.warning(f"Module {module_name} already configured for channel {channel_id}")
+                return None
+            
+            config_data_str = None
+            if config_data:
+                if isinstance(config_data, dict):
+                    config_data_str = json.dumps(config_data)
+                else:
+                    config_data_str = config_data
+            
+            module = self.ChannelModule(
+                channel_id=channel_id,
+                store_id=store_id,
+                module_name=module_name,
+                module_type=module_type,
+                enabled=enabled,
+                config_data=config_data_str,
+                is_default=is_default
+            )
+            self.db.session.add(module)
+            self.db.session.commit()
+            logger.info(f"Channel module added: {module_name} for channel {channel_id}")
+            return module.id
+        except Exception as e:
+            logger.error(f"Error adding channel module: {e}")
+            self.db.session.rollback()
+            return None
+    
+    def get_channel_module(self, channel_id, module_name):
+        """Get module configuration for a channel"""
+        import json
+        try:
+            module = self.ChannelModule.query.filter_by(channel_id=channel_id, module_name=module_name).first()
+            if not module:
+                return None
+            
+            config_data = None
+            if module.config_data:
+                try:
+                    config_data = json.loads(module.config_data)
+                except:
+                    config_data = module.config_data
+            
+            return {
+                'id': module.id,
+                'channel_id': module.channel_id,
+                'store_id': module.store_id,
+                'module_name': module.module_name,
+                'module_type': module.module_type,
+                'enabled': module.enabled,
+                'config_data': config_data,
+                'is_default': module.is_default,
+                'created_at': module.created_at.isoformat() if module.created_at else None,
+                'updated_at': module.updated_at.isoformat() if module.updated_at else None,
+            }
+        except Exception as e:
+            logger.error(f"Error getting channel module: {e}")
+            return None
+    
+    def get_channel_modules(self, channel_id):
+        """Get all modules configured for a channel"""
+        import json
+        try:
+            modules = self.ChannelModule.query.filter_by(channel_id=channel_id).all()
+            result = []
+            for module in modules:
+                config_data = None
+                if module.config_data:
+                    try:
+                        config_data = json.loads(module.config_data)
+                    except:
+                        config_data = module.config_data
+                
+                result.append({
+                    'id': module.id,
+                    'channel_id': module.channel_id,
+                    'store_id': module.store_id,
+                    'module_name': module.module_name,
+                    'module_type': module.module_type,
+                    'enabled': module.enabled,
+                    'config_data': config_data,
+                    'is_default': module.is_default,
+                    'created_at': module.created_at.isoformat() if module.created_at else None,
+                    'updated_at': module.updated_at.isoformat() if module.updated_at else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Error getting channel modules: {e}")
+            return []
+    
+    def get_modules_by_store(self, store_id):
+        """Get all modules configured for a store (across all channels)"""
+        import json
+        try:
+            modules = self.ChannelModule.query.filter_by(store_id=store_id).all()
+            result = []
+            for module in modules:
+                config_data = None
+                if module.config_data:
+                    try:
+                        config_data = json.loads(module.config_data)
+                    except:
+                        config_data = module.config_data
+                
+                result.append({
+                    'id': module.id,
+                    'channel_id': module.channel_id,
+                    'store_id': module.store_id,
+                    'module_name': module.module_name,
+                    'module_type': module.module_type,
+                    'enabled': module.enabled,
+                    'config_data': config_data,
+                    'is_default': module.is_default,
+                    'created_at': module.created_at.isoformat() if module.created_at else None,
+                    'updated_at': module.updated_at.isoformat() if module.updated_at else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Error getting modules for store {store_id}: {e}")
+            return []
+    
+    def update_channel_module(self, channel_id, module_name, **kwargs):
+        """Update module configuration for a channel"""
+        import json
+        try:
+            module = self.ChannelModule.query.filter_by(channel_id=channel_id, module_name=module_name).first()
+            if not module:
+                logger.warning(f"Module {module_name} not found for channel {channel_id}")
+                return False
+            
+            for key, value in kwargs.items():
+                if key == 'config_data' and value is not None:
+                    if isinstance(value, dict):
+                        setattr(module, key, json.dumps(value))
+                    else:
+                        setattr(module, key, value)
+                elif key in ['enabled', 'is_default']:
+                    setattr(module, key, value)
+            
+            module.updated_at = get_ist_now()
+            self.db.session.commit()
+            logger.info(f"Channel module updated: {module_name} for channel {channel_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating channel module: {e}")
+            self.db.session.rollback()
+            return False
+    
+    def delete_channel_module(self, channel_id, module_name):
+        """Delete a module configuration from a channel"""
+        try:
+            module = self.ChannelModule.query.filter_by(channel_id=channel_id, module_name=module_name).first()
+            if not module:
+                logger.warning(f"Module {module_name} not found for channel {channel_id}")
+                return False
+            
+            self.db.session.delete(module)
+            self.db.session.commit()
+            logger.info(f"Channel module deleted: {module_name} from channel {channel_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting channel module: {e}")
+            self.db.session.rollback()
+            return False
 
     def add_table_cleanliness_violation(
         self,

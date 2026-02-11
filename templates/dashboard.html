@@ -689,6 +689,12 @@
             <img src="/static/images/sakshi-logo.png" alt="Sakshi.AI Logo" style="height: 50px; width: auto; object-fit: contain;">
         </div>
         <div style="display: flex; align-items: center; gap: 20px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="store-selector" style="color: var(--text-secondary); font-size: 0.9em; font-weight: 500;">🏪 Store:</label>
+                <select id="store-selector" style="padding: 8px 12px; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); cursor: pointer; font-weight: 600; font-size: 0.9em;" onchange="handleStoreChange()">
+                    <option value="">Loading stores...</option>
+                </select>
+            </div>
             <span style="color: var(--text-secondary); font-size: 0.9em;">
                 👤 <strong style="color: var(--text-primary);" id="username-display">{{ user.username }}</strong>
             </span>
@@ -2318,6 +2324,14 @@
 
     // Initialize dashboard
     document.addEventListener('DOMContentLoaded', function() {
+        // Load stores first
+        loadStoresDropdown();
+        
+        // Set default store if none is selected
+        if (!localStorage.getItem('selected_store')) {
+            localStorage.setItem('selected_store', 'store_1');
+        }
+        
         // Load analytics cards first
         loadAnalyticsCards();
         
@@ -2347,6 +2361,140 @@
     });
 
     // Analytics Dashboard Functions
+    
+    // ====== STORE MANAGEMENT FUNCTIONS ======
+    
+    /**
+     * Load available stores from the API and populate the store selector dropdown
+     */
+    async function loadStoresDropdown() {
+        try {
+            const response = await fetch('/api/get_stores');
+            const data = await response.json();
+            
+            if (!data.success || !data.stores || data.stores.length === 0) {
+                console.warn('⚠️ No stores available');
+                return;
+            }
+            
+            const storeSelector = document.getElementById('store-selector');
+            if (!storeSelector) {
+                console.error('❌ Store selector element not found');
+                return;
+            }
+            
+            // Clear existing options
+            storeSelector.innerHTML = '';
+            
+            // Add stores to dropdown
+            data.stores.forEach(store => {
+                const option = document.createElement('option');
+                option.value = store.store_id;
+                option.textContent = `${store.store_name} (${store.location})`;
+                storeSelector.appendChild(option);
+            });
+            
+            // Set selected store from localStorage or default to first store
+            let selectedStore = localStorage.getItem('selected_store') || data.stores[0].store_id;
+            storeSelector.value = selectedStore;
+            localStorage.setItem('selected_store', selectedStore);
+            
+            console.log(`✅ Stores loaded. Selected: ${selectedStore}`);
+        } catch (error) {
+            console.error('❌ Error loading stores:', error);
+        }
+    }
+    
+    /**
+     * Handle store selection change
+     */
+    async function handleStoreChange() {
+        const storeSelector = document.getElementById('store-selector');
+        const selectedStore = storeSelector.value;
+        
+        if (!selectedStore) {
+            console.warn('⚠️ No store selected');
+            return;
+        }
+        
+        // Save selected store to localStorage
+        localStorage.setItem('selected_store', selectedStore);
+        console.log(`🏪 Store changed to: ${selectedStore}`);
+        
+        // Reload analytics for the selected store
+        loadAnalyticsCards();
+        
+        // If any module is currently being viewed, reload its data with the new store
+        const modal = document.getElementById('liveMonitoringModal');
+        const modalTitle = document.getElementById('modalModuleTitle');
+        const modalContent = document.getElementById('modalModuleContent');
+        
+        if (modal && modal.style.display === 'block' && modal.dataset.currentModule) {
+            // Module is currently open, reload it with the new store's data
+            const currentModule = modal.dataset.currentModule;
+            console.log(`🔄 Reloading currently open module: ${currentModule} for store ${selectedStore}`);
+            
+            // Clear the modal content and reinitialize with new store data
+            if (modalContent) {
+                modalContent.innerHTML = '';
+            }
+            
+            // Reset initialization flag and reinitialize the module
+            moduleInitializationInProgress[currentModule] = false;
+            initializeLiveModule(currentModule);
+        }
+    }
+    
+    /**
+     * Get channels for the selected store
+     * @returns {Promise<Array>} Array of channels for the selected store
+     */
+    async function getStoreChannels() {
+        const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+        
+        try {
+            const response = await fetch(`/api/get_channels_by_store/${selectedStore}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                console.log(`📺 Loaded ${data.count} channels for store ${selectedStore}`);
+                return data.channels;
+            } else {
+                console.error('❌ Error fetching channels:', data.error);
+                return [];
+            }
+        } catch (error) {
+            console.error('❌ Error getting store channels:', error);
+            return [];
+        }
+    }
+    
+    /**
+     * Get modules/usecases available for the selected store
+     * @returns {Promise<Array>} Array of modules for the selected store
+     */
+    async function getStoreModules() {
+        const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+        
+        try {
+            const response = await fetch(`/api/get_modules_by_store/${selectedStore}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                console.log(`📊 Loaded ${data.count} modules for store ${selectedStore}`);
+                return data.modules;
+            } else {
+                console.error('❌ Error fetching modules:', data.error);
+                return [];
+            }
+        } catch (error) {
+            console.error('❌ Error getting store modules:', error);
+            return [];
+        }
+    }
+    
+    // ====== END STORE MANAGEMENT FUNCTIONS ======
+    
     async function loadAnalyticsCards() {
         const analyticsContainer = document.getElementById('analytics-cards');
         if (!analyticsContainer) {
@@ -2354,6 +2502,24 @@
             return;
         }
         analyticsContainer.innerHTML = '<div class="loading-spinner">⏳ Loading Analytics...</div>';
+        
+        // Get selected store and its excluded modules
+        const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+        let excludedModules = [];
+        
+        try {
+            const storesResponse = await fetch('/api/get_stores');
+            const storesData = await storesResponse.json();
+            if (storesData.success) {
+                const store = storesData.stores.find(s => s.store_id === selectedStore);
+                if (store && store.excluded_modules) {
+                    excludedModules = store.excluded_modules;
+                    console.log(`📦 Store ${selectedStore} excluded modules:`, excludedModules);
+                }
+            }
+        } catch (err) {
+            console.warn('⚠️ Could not fetch store configuration:', err);
+        }
         
         const modules = [
             { name: 'QueueMonitor', icon: '/static/images/icons/queue.png', title: 'Queue & Wait Time' },
@@ -2371,12 +2537,15 @@
             { name: 'CrowdDetection', icon: '/static/images/icons/crowd.jpg', title: 'Crowd Detection' },
         ];
         
+        // Filter out excluded modules for this store
+        const filteredModules = modules.filter(module => !excludedModules.includes(module.name));
+        
         try {
             const cardsHTML = [];
             
-            for (const module of modules) {
+            for (const module of filteredModules) {
                 try {
-                    const response = await fetch(`/api/get_module_analytics/${module.name}`);
+                    const response = await fetch(`/api/get_module_analytics/${module.name}?store_id=${selectedStore}`);
                     const data = await response.json();
                     
                     console.log(`📊 ${module.name} analytics response:`, data);
@@ -3530,7 +3699,12 @@
         // Load only the active channels for this specific module
         console.log('🔍 Loading active channels for:', moduleName);
         
-        fetch('/api/get_active_channels')
+        // Get selected store
+        const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+        const url = `/api/get_active_channels?store_id=${selectedStore}`;
+        console.log(`📍 Fetching channels for store: ${selectedStore} from ${url}`);
+        
+        fetch(url)
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
@@ -3601,7 +3775,7 @@
                             }
                         }
                         
-                        fetch('/api/get_configured_channels')
+                        fetch(`/api/get_configured_channels?store_id=${selectedStore}`)
                             .then(response => response.json())
                             .then(channelData => {
                                 if (channelData.success && channelData.channels) {
@@ -3610,7 +3784,7 @@
                                         // API returns modules as array of strings (module type names)
                                         return ch.modules.includes(moduleName);
                                     });
-                                    console.log(`📋 Found ${configuredChannels.length} configured channels for ${moduleName} in channels.json:`, configuredChannels);
+                                    console.log(`📋 Found ${configuredChannels.length} configured channels for ${moduleName} in channels.json (store: ${selectedStore}):`, configuredChannels);
                                     
                                     if (configuredChannels.length > 0) {
                                         configuredChannels.forEach(channel => {
@@ -4787,8 +4961,9 @@
     // Load heatmap snapshots
     async function loadHeatmapSnapshots() {
         try {
-            // Load all heatmap snapshots from all channels
-            const url = '/api/get_heatmap_snapshots?limit=50';
+            // Load heatmap snapshots for the selected store
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const url = `/api/get_heatmap_snapshots?limit=50&store_id=${selectedStore}`;
             
             const response = await fetch(url);
             const result = await response.json();
@@ -4981,13 +5156,14 @@
     // Load cash detection snapshots
     async function loadCashSnapshots() {
         try {
-            // Load cash detection snapshots from both cash_snapshots and alert_gifs tables
+            // Load cash detection snapshots for the selected store
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
             // First, try to load from cash_snapshots
-            const cashResponse = await fetch('/api/get_cash_snapshots?limit=50');
+            const cashResponse = await fetch(`/api/get_cash_snapshots?limit=50&store_id=${selectedStore}`);
             const cashResult = await cashResponse.json();
             
             // Also load from alert_gifs table for cash_detection_alert type
-            const gifResponse = await fetch('/api/get_alert_gifs?alert_type=cash_detection_alert&limit=50');
+            const gifResponse = await fetch(`/api/get_alert_gifs?alert_type=cash_detection_alert&limit=50&store_id=${selectedStore}`);
             const gifResult = await gifResponse.json();
             
             // Merge results, prioritizing cash_snapshots but including alert_gifs that might not be in cash_snapshots
@@ -5985,8 +6161,9 @@
     // Mopping Detection Functions
     async function loadMoppingSnapshots() {
         try {
-            // Load all mopping detection snapshots from all channels
-            const url = '/api/get_mopping_snapshots?limit=50';
+            // Load mopping detection snapshots for the selected store
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const url = `/api/get_mopping_snapshots?limit=50&store_id=${selectedStore}`;
             
             const response = await fetch(url);
             const result = await response.json();
@@ -6096,8 +6273,9 @@
     // Smoking Detection Functions
     async function loadSmokingSnapshots() {
         try {
-            // Load all smoking detection snapshots from all channels
-            const url = '/api/get_smoking_snapshots?limit=50';
+            // Load smoking detection snapshots for the selected store
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const url = `/api/get_smoking_snapshots?limit=50&store_id=${selectedStore}`;
             
             const response = await fetch(url);
             const result = await response.json();
