@@ -5682,7 +5682,8 @@
         async function loadUnauthorizedEntryAlerts() {
             try {
                 console.log('🚨 Loading unauthorized entry alerts...');
-                const response = await fetch('/api/get_alert_gifs?alert_type=unauthorized_entry_alert&days=7&limit=50');
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&days=7&limit=50&store_id=${selectedStore}`);
                 const result = await response.json();
 
                 console.log('🚨 Unauthorized entry alerts response:', result);
@@ -5850,7 +5851,8 @@
         async function loadPersonSmokingAlerts() {
             try {
                 console.log('🚬 Loading smoking alerts...');
-                const response = await fetch('/api/get_alert_gifs?alert_type=person_smoking_alert&days=7&limit=50');
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_alert_gifs?alert_type=person_smoking_alert&days=7&limit=50&store_id=${selectedStore}`);
                 const result = await response.json();
 
                 if (result.success) {
@@ -6024,7 +6026,8 @@
         // ============= Material Theft / Misuse Functions =============
         async function loadMaterialTheftAlerts() {
             try {
-                const response = await fetch('/api/get_alert_gifs?alert_type=material_theft_alert&days=7&limit=50');
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_alert_gifs?alert_type=material_theft_alert&days=7&limit=50&store_id=${selectedStore}`);
                 const result = await response.json();
 
                 if (result.success) {
@@ -6983,9 +6986,27 @@
             }
         }
 
+        async function loadUnauthorizedEntryAlerts() {
+            try {
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&days=7&limit=50&store_id=${selectedStore}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    displayCrowdAlerts(result.alert_gifs || result.alerts || []);
+                    // Update stats after loading alerts
+                } else {
+                    console.error('Failed to load unauthorized entry alerts:', result.error);
+                }
+            } catch (error) {
+                console.error('Error loading unauthorized entry alerts:', error);
+            }
+        }
+
         async function loadCrowdAlerts() {
             try {
-                const response = await fetch('/api/get_alert_gifs?alert_type=crowd_alert&limit=50&days=7');
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_alert_gifs?alert_type=crowd_alert&limit=50&days=7&store_id=${selectedStore}`);
                 const result = await response.json();
 
                 if (result.success) {
