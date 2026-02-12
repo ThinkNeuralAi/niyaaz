@@ -690,12 +690,16 @@ def video_feed(app_name, channel_id):
 def get_channels(app_name):
     """Get available channels for an app"""
     channels = []
+    store_id = request.args.get('store_id')
     
-    # Get saved RTSP channels from database
     # Get saved RTSP channels from database
     try:
         saved_channels = db_manager.get_all_rtsp_links()
         for channel in saved_channels:
+            # Filter by store if provided
+            if store_id and channel.get('store_id') != store_id:
+                continue
+                
             channels.append({
                 'id': channel['channel_id'],
                 'name': channel['channel_name'],

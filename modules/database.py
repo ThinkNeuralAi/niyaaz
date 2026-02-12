@@ -10,7 +10,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-def _send_telegram_alert(channel_id, alert_type, alert_message, snapshot_path=None, alert_data=None):
+def _send_telegram_alert(channel_id, alert_type, alert_message, snapshot_path=None, alert_data=None, store_name=None):
     """Helper function to send Telegram alert notification"""
     try:
         from modules.telegram_notifier import get_telegram_notifier
@@ -23,7 +23,8 @@ def _send_telegram_alert(channel_id, alert_type, alert_message, snapshot_path=No
             alert_type=alert_type,
             alert_message=alert_message or f"Alert from {channel_id}",
             image_path=snapshot_path,  # Pass as-is, let notifier resolve
-            alert_data=alert_data
+            alert_data=alert_data,
+            store_name=store_name
         )
     except Exception as tg_error:
         logger.warning(f"Failed to send Telegram notification: {tg_error}", exc_info=True)
@@ -645,6 +646,19 @@ class DatabaseManager:
             logger.error(f"Error getting RTSP links for store {store_id}: {e}")
             return []
     
+    def get_store_name_for_channel(self, channel_id: str):
+        """Get store name for a channel"""
+        try:
+            link = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
+            if link and link.store_id:
+                store = self.Store.query.filter_by(store_id=link.store_id).first()
+                if store:
+                    return store.name
+            return None
+        except Exception as e:
+            logger.error(f"Error getting store name: {e}")
+            return None
+
     def get_all_rtsp_links(self):
         """Get all RTSP links from database"""
         try:
@@ -934,12 +948,14 @@ class DatabaseManager:
             # Send Telegram notification (can be disabled via environment variable)
             if not os.getenv("DISABLE_TABLE_SERVICE_ALERTS", "").lower() in ("true", "1", "yes"):
                 violation_msg = "Unclean table" if violation_type == 'unclean_table' else "Slow table reset"
+                store_name = self.get_store_name_for_channel(channel_id)
                 _send_telegram_alert(
                     channel_id=channel_id,
                     alert_type='table_cleanliness_violation',
                     alert_message=f"Table {table_id}: {violation_msg}",
                     snapshot_path=snapshot_path,
-                    alert_data={'table_id': table_id, 'violation_type': violation_type}
+                    alert_data={'table_id': table_id, 'violation_type': violation_type},
+                    store_name=store_name
                 )
             else:
                 logger.debug(f"Table cleanliness violation alerts disabled via DISABLE_TABLE_SERVICE_ALERTS environment variable")
@@ -1543,7 +1559,7 @@ class DatabaseManager:
                     'date': d.report_date.isoformat(),
                     'in_count': d.in_count,
                     'out_count': d.out_count,
-                    'total': d.in_count + d.out_count
+                    'total': d.in_count + d.in_count
                 } for d in daily_data
             ]
         }
@@ -1698,20 +1714,24 @@ class DatabaseManager:
                         full_gif_path = None
                 
                 if full_gif_path:
+                    store_name = self.get_store_name_for_channel(channel_id)
                     notifier.send_alert(
                         channel_id=channel_id,
                         alert_type=alert_type,
                         alert_message=alert_message or f"Alert from {channel_id}",
                         image_path=full_gif_path,
-                        alert_data=alert_data
+                        alert_data=alert_data,
+                        store_name=store_name
                     )
                 else:
                     # Send text-only if GIF path not found
+                    store_name = self.get_store_name_for_channel(channel_id)
                     notifier.send_alert(
                         channel_id=channel_id,
                         alert_type=alert_type,
                         alert_message=alert_message or f"Alert from {channel_id}",
-                        alert_data=alert_data
+                        alert_data=alert_data,
+                        store_name=store_name
                     )
             except Exception as tg_error:
                 logger.warning(f"Failed to send Telegram notification: {tg_error}")
@@ -1764,11 +1784,13 @@ class DatabaseManager:
             try:
                 from modules.telegram_notifier import get_telegram_notifier
                 notifier = get_telegram_notifier()
+                store_name = self.get_store_name_for_channel(channel_id)
                 notifier.send_alert(
                     channel_id=channel_id,
                     alert_type=alert_type,
                     alert_message=alert_message,
-                    alert_data=alert_data
+                    alert_data=alert_data,
+                    store_name=store_name
                 )
             except Exception as tg_error:
                 logger.warning(f"Failed to send Telegram notification: {tg_error}")
@@ -2221,12 +2243,14 @@ class DatabaseManager:
             logger.info(f"Cash snapshot saved to database: ID {snapshot.id}")
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='cash_alert',
                 alert_message=alert_message or f"Cash detected: {detection_count} instance(s)",
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return snapshot.id
@@ -2505,12 +2529,14 @@ class DatabaseManager:
             self.db.session.commit()
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='fall_alert',
                 alert_message=alert_message or f"Fall detected (duration: {fall_duration:.1f}s)",
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return snapshot.id
@@ -2629,12 +2655,14 @@ class DatabaseManager:
             self.db.session.commit()
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='grooming_alert',
                 alert_message=alert_message or f"Grooming violation: {violation_type} - {violation_item}",
                 snapshot_path=snapshot_path,
-                alert_data={'violation_type': violation_type, 'violation_item': violation_item}
+                alert_data={'violation_type': violation_type, 'violation_item': violation_item},
+                store_name=store_name
             )
             
             return snapshot.id
@@ -2833,12 +2861,14 @@ class DatabaseManager:
             
             # Send Telegram notification
             violations_str = violations if isinstance(violations, str) else ', '.join(violations) if isinstance(violations, list) else str(violations)
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='dresscode_alert',
                 alert_message=f"Dress code violation: {violations_str}",
                 snapshot_path=snapshot_path,
-                alert_data={'violations': violations_str, 'uniform_color': uniform_color}
+                alert_data={'violations': violations_str, 'uniform_color': uniform_color},
+                store_name=store_name
             )
             
             return alert
@@ -3002,12 +3032,14 @@ class DatabaseManager:
             logger.info(f"PPE alert saved: {violations_str} for channel {channel_id}")
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='ppe_alert',
                 alert_message=f"PPE violation: {violations_str}",
                 snapshot_path=snapshot_path,
-                alert_data={'violations': violations_str, 'violation_types': violation_types}
+                alert_data={'violations': violations_str, 'violation_types': violation_types},
+                store_name=store_name
             )
             return alert
             
@@ -3134,12 +3166,14 @@ class DatabaseManager:
                 wait_min = wait_time_seconds / 60
                 alert_message += f" (Wait: {wait_min:.1f} min)"
             
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='queue_violation',
                 alert_message=alert_message,
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return violation.id
@@ -3345,12 +3379,14 @@ class DatabaseManager:
                     if resolved_snapshot_path and os.path.exists(resolved_snapshot_path) and not is_placeholder:
                         file_size_check = os.path.getsize(resolved_snapshot_path)
                         if file_size_check > 0:
+                            store_name = self.get_store_name_for_channel(channel_id)
                             _send_telegram_alert(
                                 channel_id=channel_id,
                                 alert_type='table_service_violation',
                                 alert_message=alert_message,
                                 snapshot_path=resolved_snapshot_path,
-                                alert_data=alert_data_for_telegram
+                                alert_data=alert_data_for_telegram,
+                                store_name=store_name
                             )
                         else:
                             logger.warning(f"⚠️ Snapshot file is empty (0 bytes) for table {table_id} - skipping Telegram notification")
@@ -3670,6 +3706,18 @@ class DatabaseManager:
             self.db.session.commit()
             
             logger.info(f"Mopping snapshot saved: {snapshot_filename} (ID: {snapshot.id})")
+
+            # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
+            _send_telegram_alert(
+                channel_id=channel_id,
+                alert_type='mopping_alert',
+                alert_message=alert_message or f"Mopping detected: {detection_count} instance(s)",
+                snapshot_path=snapshot_path,
+                alert_data=alert_data,
+                store_name=store_name
+            )
+            
             return snapshot.id
             
         except Exception as e:
@@ -3860,12 +3908,14 @@ class DatabaseManager:
             logger.info(f"Smoking snapshot saved: {snapshot_filename}")
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='smoking_alert',
                 alert_message=alert_message or f"Smoke/Fire detected: {detection_count} instance(s)",
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return snapshot.id
@@ -4035,12 +4085,14 @@ class DatabaseManager:
             logger.info(f"Phone snapshot saved: {snapshot_filename} (ID: {snapshot.id})")
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='phone_alert',
                 alert_message=alert_message or f"Phone usage detected: {detection_count} instance(s)",
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return snapshot.id
