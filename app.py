@@ -3101,15 +3101,16 @@ def get_queue_report(channel_id):
 
 @app.route('/api/get_alert_gifs')
 def get_alert_gifs():
-    """Get alert GIFs with optional filtering"""
+    """Get alert GIFs with optional filtering by channel, alert type, or store"""
     channel_id = request.args.get('channel_id')
     alert_type = request.args.get('alert_type')
     limit = int(request.args.get('limit', 20))
     days = request.args.get('days')
     days = int(days) if days else None
+    store_id = request.args.get('store_id')  # Add store_id parameter
     
     try:
-        alert_gifs = db_manager.get_alert_gifs(channel_id, alert_type, limit, days=days)
+        alert_gifs = db_manager.get_alert_gifs(channel_id, alert_type, limit, days=days, store_id=store_id)
         return jsonify({
             'success': True,
             'alert_gifs': alert_gifs,
@@ -3945,27 +3946,8 @@ def get_fall_snapshots():
         store_id = request.args.get('store_id', 'store_1')
         limit = int(request.args.get('limit', 50))
         
-        # Get all channels from config file
-        try:
-            with open('config/channels.json', 'r') as f:
-                config = json.load(f)
-            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
-        except:
-            all_channels = list(shared_video_processors.keys())
-        
-        # If no specific channel requested, get channels for this store
-        if not channel_id:
-            store_channels = filter_channels_by_store(all_channels, store_id)
-            snapshots = []
-            for ch_id in store_channels:
-                ch_snapshots = db_manager.get_fall_snapshots(channel_id=ch_id, limit=limit)
-                snapshots.extend(ch_snapshots)
-            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
-        else:
-            store_channels = filter_channels_by_store([channel_id], store_id)
-            if not store_channels:
-                return jsonify({'success': False, 'error': 'Channel not found in this store'})
-            snapshots = db_manager.get_fall_snapshots(channel_id=channel_id, limit=limit)
+        # Use database function with store_id parameter
+        snapshots = db_manager.get_fall_snapshots(channel_id=channel_id, limit=limit, store_id=store_id)
         
         return jsonify({
             'success': True,
@@ -4161,27 +4143,8 @@ def get_smoking_snapshots():
         store_id = request.args.get('store_id', 'store_1')
         limit = int(request.args.get('limit', 50))
         
-        # Get all channels from config file
-        try:
-            with open('config/channels.json', 'r') as f:
-                config = json.load(f)
-            all_channels = [ch.get('channel_id') for ch in config.get('channels', [])]
-        except:
-            all_channels = list(shared_video_processors.keys())
-        
-        # If no specific channel requested, get channels for this store
-        if not channel_id:
-            store_channels = filter_channels_by_store(all_channels, store_id)
-            snapshots = []
-            for ch_id in store_channels:
-                ch_snapshots = db_manager.get_smoking_snapshots(channel_id=ch_id, limit=limit)
-                snapshots.extend(ch_snapshots)
-            snapshots = sorted(snapshots, key=lambda x: x.get('timestamp', ''), reverse=True)[:limit]
-        else:
-            store_channels = filter_channels_by_store([channel_id], store_id)
-            if not store_channels:
-                return jsonify({'success': False, 'error': 'Channel not found in this store'})
-            snapshots = db_manager.get_smoking_snapshots(channel_id=channel_id, limit=limit)
+        # Use database function with store_id parameter
+        snapshots = db_manager.get_smoking_snapshots(channel_id=channel_id, limit=limit, store_id=store_id)
         
         return jsonify({'success': True, 'snapshots': snapshots})
     except Exception as e:
@@ -5022,10 +4985,11 @@ def get_dresscode_alerts():
     """Get dress code violation alerts"""
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
+    store_id = request.args.get('store_id')  # Add store_id parameter
     
     try:
         with app.app_context():
-            alerts = db_manager.get_dresscode_alerts(channel_id=channel_id, limit=limit)
+            alerts = db_manager.get_dresscode_alerts(channel_id=channel_id, limit=limit, store_id=store_id)
         
         return jsonify({
             'success': True,
@@ -5234,6 +5198,7 @@ def get_table_service_violations():
     limit = int(request.args.get('limit', 50))
     days = request.args.get('days')
     days = int(days) if days else None
+    store_id = request.args.get('store_id')  # Add store_id parameter
     
     try:
         with app.app_context():
@@ -5241,7 +5206,8 @@ def get_table_service_violations():
                 channel_id=channel_id, 
                 violation_type=violation_type,
                 limit=limit,
-                days=days
+                days=days,
+                store_id=store_id
             )
         
         return jsonify({
@@ -5262,6 +5228,7 @@ def get_table_cleanliness_violations():
     limit = int(request.args.get('limit', 50))
     days = request.args.get('days')
     days = int(days) if days else None
+    store_id = request.args.get('store_id')  # Add store_id parameter
 
     try:
         with app.app_context():
@@ -5270,6 +5237,7 @@ def get_table_cleanliness_violations():
                 table_id=table_id,
                 limit=limit,
                 days=days,
+                store_id=store_id
             )
         return jsonify({'success': True, 'violations': violations, 'count': len(violations)})
     except Exception as e:
@@ -5437,10 +5405,11 @@ def get_ppe_alerts():
     """Get PPE violation alerts"""
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
+    store_id = request.args.get('store_id')  # Add store_id parameter
     
     try:
         with app.app_context():
-            alerts = db_manager.get_ppe_alerts(channel_id=channel_id, limit=limit)
+            alerts = db_manager.get_ppe_alerts(channel_id=channel_id, limit=limit, store_id=store_id)
         
         return jsonify({
             'success': True,
@@ -5490,12 +5459,13 @@ def get_queue_violations():
     """Get queue violation alerts"""
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
+    store_id = request.args.get('store_id')  # Add store_id parameter
     
     try:
         with app.app_context():
-            violations = db_manager.get_queue_violations(channel_id=channel_id, limit=limit)
+            violations = db_manager.get_queue_violations(channel_id=channel_id, limit=limit, store_id=store_id)
         
-        logger.info(f"Retrieved {len(violations)} queue violations (channel_id={channel_id}, limit={limit})")
+        logger.info(f"Retrieved {len(violations)} queue violations (channel_id={channel_id}, store_id={store_id}, limit={limit})")
         
         # Ensure each violation has a timestamp field (for compatibility)
         for violation in violations:

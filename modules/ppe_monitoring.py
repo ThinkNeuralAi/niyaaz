@@ -398,13 +398,7 @@ class PPEMonitoring:
                                         snapshot_path=snapshot_path,
                                         alert_data={'violations': violations, 'message': alert_message}
                                     )
-                                    # Also log to general alerts table
-                                    self.db_manager.log_alert(
-                                        self.channel_id,
-                                        'ppe_alert',
-                                        alert_message,
-                                        alert_data={'violations': violations}
-                                    )
+                                    # GIF will be saved with save_alert_gif() when recording completes
                             else:
                                 self.db_manager.add_ppe_alert(
                                     channel_id=self.channel_id,
@@ -414,12 +408,7 @@ class PPEMonitoring:
                                     snapshot_path=snapshot_path,
                                     alert_data={'violations': violations, 'message': alert_message}
                                 )
-                                self.db_manager.log_alert(
-                                    self.channel_id,
-                                    'ppe_alert',
-                                    alert_message,
-                                    alert_data={'violations': violations}
-                                )
+                                # GIF will be saved with save_alert_gif() when recording completes
                             logger.info(f"✅ PPE violation saved to database: {violation_msg}")
                         except Exception as e:
                             logger.error(f"Database logging error for PPE alert: {e}")

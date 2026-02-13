@@ -714,36 +714,8 @@ class ServiceDisciplineMonitor:
                 else:
                     logger.warning(f"[{self.channel_id}] ⚠️ Cannot save violation: Flask app context not available")
                 
-                # Also log to general alerts table for consistency with other modules
-                alert_message = f"Service discipline violation: Table {table_id} waiting {waiting_time:.1f}s"
-                if self.app:
-                    with self.app.app_context():
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'service_discipline_alert',
-                            alert_message,
-                            alert_data={
-                                "violation_type": "service_discipline",
-                                "table_id": table_id,
-                                "waiting_time": waiting_time,
-                                "threshold": self.settings.get("wait_time_threshold", 300.0),
-                                "snapshot_path": snapshot_path
-                            }
-                        )
-                else:
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        'service_discipline_alert',
-                        alert_message,
-                        alert_data={
-                            "violation_type": "service_discipline",
-                            "table_id": table_id,
-                            "waiting_time": waiting_time,
-                            "threshold": self.settings.get("wait_time_threshold", 300.0),
-                            "snapshot_path": snapshot_path
-                        }
-                    )
-                logger.info(f"Service discipline alert logged to general alerts table: {alert_message}")
+                # GIF will be saved with save_alert_gif() when recording completes
+                logger.info(f"Service discipline alert will be saved when GIF recording completes")
             except Exception as e:
                 logger.error(f"Failed to save service discipline violation: {e}")
 
@@ -1543,60 +1515,7 @@ class ServiceDisciplineMonitor:
                     logger.warning(f"[{self.channel_id}] ⚠️ Cannot save violation: Flask app context not available")
                     result = None
                 
-                # Also log to general alerts table for consistency with other modules
-                # Determine the correct threshold based on violation type
-                if violation_type == "order_wait":
-                    threshold = self.settings.get("order_wait_threshold", 120.0)
-                elif violation_type == "service_wait":
-                    threshold = self.settings.get("service_wait_threshold", 300.0)
-                else:
-                    threshold = self.settings.get("wait_time_threshold", 120.0)
-                
-                alert_message = f"Service discipline violation: Table {table_id} {violation_type} = {wait_time:.1f}s (threshold: {threshold}s)"
-                
-                try:
-                    if self.app:
-                        with self.app.app_context():
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                'service_discipline_alert',
-                                alert_message,
-                                alert_data={
-                                    "violation_type": violation_type,
-                                    "table_id": table_id,
-                                    "wait_time": wait_time,
-                                    "threshold": threshold,
-                                    "snapshot_path": snapshot_path,
-                                    "T_seated": customer.get("T_seated"),
-                                    "T_order_start": customer.get("T_order_start"),
-                                    "T_order_end": customer.get("T_order_end"),
-                                    "T_food_served": customer.get("T_food_served"),
-                                    "order_wait_time": order_wait_time,  # Use calculated value, not customer dict
-                                    "service_wait_time": service_wait_time  # Use calculated value, not customer dict
-                                }
-                            )
-                    else:
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'service_discipline_alert',
-                            alert_message,
-                            alert_data={
-                                "violation_type": violation_type,
-                                "table_id": table_id,
-                                "wait_time": wait_time,
-                                "threshold": threshold,
-                                "snapshot_path": snapshot_path,
-                                "T_seated": customer.get("T_seated"),
-                                "T_order_start": customer.get("T_order_start"),
-                                "T_order_end": customer.get("T_order_end"),
-                                "T_food_served": customer.get("T_food_served"),
-                                "order_wait_time": order_wait_time,  # Use calculated value, not customer dict
-                                "service_wait_time": service_wait_time  # Use calculated value, not customer dict
-                            }
-                        )
-                    logger.info(f"[{self.channel_id}] ✅ Alert logged to general alerts table: {alert_message}")
-                except Exception as e2:
-                    logger.error(f"[{self.channel_id}] ❌ Failed to log to general alerts table: {e2}", exc_info=True)
+                # GIF will be saved with save_alert_gif() when recording completes
                     
             except Exception as e:
                 logger.error(f"[{self.channel_id}] ❌ Failed to save service discipline violation: {e}", exc_info=True)

@@ -186,7 +186,8 @@ class TelegramNotifier:
         alert_type: str,
         alert_message: str,
         image_path: Optional[str] = None,
-        alert_data: Optional[Dict[str, Any]] = None
+        alert_data: Optional[Dict[str, Any]] = None,
+        store_name: Optional[str] = None
     ) -> bool:
         """
         Send a formatted alert to Telegram
@@ -197,6 +198,7 @@ class TelegramNotifier:
             alert_message: Alert message text
             image_path: Optional path to image/GIF file
             alert_data: Optional additional alert data
+            store_name: Optional store name to include in alert
             
         Returns:
             True if sent successfully, False otherwise
@@ -211,12 +213,19 @@ class TelegramNotifier:
             
             # Build message
             message_parts = [
-                f"{alert_emoji} <b>Alert: {self._format_alert_type(alert_type)}</b>",
+                f"{alert_emoji} <b>Alert: {self._format_alert_type(alert_type)}</b>"
+            ]
+            
+            # Add store information if available
+            if store_name:
+                message_parts.append(f"🏪 <b>Store:</b> {store_name}")
+            
+            message_parts.extend([
                 f"📍 <b>Channel:</b> {channel_id}",
                 f"⏰ <b>Time:</b> {timestamp}",
                 f"",
                 f"📝 <b>Message:</b> {alert_message}"
-            ]
+            ])
             
             # Add additional data if available
             if alert_data:

@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROI Editor - Service Discipline</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 20px;
+            padding: 30px;
+        }
+        
+        .canvas-container {
+            position: relative;
+            background: #f5f5f5;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+            overflow: hidden;
+        }
+        
+        canvas {
+            display: block;
+            background: #000;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+        
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .controls-section {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .controls-section h3 {
+            margin-bottom: 12px;
+            color: #333;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 12px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        
+        select, input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: inherit;
+        }
+        
+        select:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        button {
+            padding: 10px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 100%;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+            width: 100%;
+            border: 1px solid #ddd;
+        }
+        
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+        
+        .btn-danger {
+            background: #ff6b6b;
+            color: white;
+            width: 100%;
+        }
+        
+        .btn-danger:hover {
+            background: #ff5252;
+        }
+        
+        .btn-small {
+            padding: 6px 10px;
+            font-size: 0.85em;
+            width: auto;
+        }
+        
+        .points-list {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        
+        .point-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 8px;
+            background: #f9f9f9;
+            border-radius: 3px;
+            margin-bottom: 5px;
+            font-size: 0.85em;
+        }
+        
+        .point-item button {
+            padding: 3px 8px;
+            font-size: 0.8em;
+        }
+        
+        .status {
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            text-align: center;
+        }
+        
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .status.success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        
+        .status.error {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        
+        .instructions {
+            background: #fff3cd;
+            color: #856404;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            line-height: 1.5;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.show {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 90%;
+        }
+        
+        .modal-header {
+            margin-bottom: 20px;
+        }
+        
+        .modal-header h2 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .modal-body {
+            margin-bottom: 20px;
+            color: #666;
+            line-height: 1.6;
+        }
+        
+        .modal-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🖼️ ROI Editor</h1>
+            <p>Draw Region of Interest for Service Discipline Monitoring</p>
+        </div>
+        
+        <div class="content">
+            <div class="canvas-container">
+                <canvas id="roiCanvas"></canvas>
+                <div style="position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 4px; font-size: 0.9em;">
+                    <div>Camera: <strong id="cameraDisplay">Select camera</strong></div>
+                    <div>Points: <strong id="pointCount">0</strong></div>
+                </div>
+            </div>
+            
+            <div class="sidebar">
+                <!-- Camera Selection -->
+                <div class="controls-section">
+                    <h3>📹 Select Camera</h3>
+                    <div class="form-group">
+                        <select id="cameraSelect" onchange="changeCamera()">
+                            <option value="">Loading cameras...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <select id="tableSelect" onchange="changeTable()">
+                            <option value="">Select Table ROI...</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Drawing Controls -->
+                <div class="controls-section">
+                    <h3>🎯 Drawing Tools</h3>
+                    <button class="btn-primary" onclick="startDrawing()">Start Drawing</button>
+                    <button class="btn-secondary" onclick="undoPoint()" style="margin-top: 8px;">↶ Undo Point</button>
+                    <button class="btn-danger" onclick="clearROI()" style="margin-top: 8px;">🗑️ Clear All</button>
+                </div>
+                
+                <!-- Points Display -->
+                <div class="controls-section">
+                    <h3>📍 Points (<span id="totalPoints">0</span>)</h3>
+                    <div class="points-list" id="pointsList">
+                        <div style="color: #999; text-align: center; padding: 20px;">No points drawn yet</div>
+                    </div>
+                </div>
+                
+                <!-- Status -->
+                <div id="statusDiv" class="status info">
+                    Ready to draw ROI. Click on canvas to add points.
+                </div>
+                
+                <!-- Save -->
+                <div class="controls-section">
+                    <h3>💾 Save ROI</h3>
+                    <div class="form-group">
+                        <label>ROI Name</label>
+                        <input type="text" id="roiName" placeholder="e.g., table_2" value="">
+                    </div>
+                    <button class="btn-primary" onclick="saveROI()">Save to Config</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Success Modal -->
+    <div id="successModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>✅ Success!</h2>
+            </div>
+            <div class="modal-body">
+                <p>ROI has been saved successfully!</p>
+                <p id="successDetails"></p>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn-secondary" onclick="closeModal()">Close</button>
+                <button class="btn-primary" onclick="downloadConfig()">Download Config</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('roiCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let cameras = [];
+        let currentCamera = null;
+        let currentTableName = 'table_1';
+        let roiPoints = [];
+        let isDrawing = false;
+        let lastFrame = null;
+        
+        // Resize canvas to container
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            redrawCanvas();
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        
+        // Load cameras on page load
+        async function loadCameras() {
+            try {
+                const response = await fetch('/api/get_active_channels?store_id=store_2');
+                const data = await response.json();
+                
+                if (data.success && data.active_channels) {
+                    cameras = data.active_channels.filter(ch => 
+                        ch.modules.includes('ServiceDisciplineMonitor')
+                    );
+                    
+                    const select = document.getElementById('cameraSelect');
+                    select.innerHTML = '';
+                    
+                    if (cameras.length === 0) {
+                        select.innerHTML = '<option value="">No ServiceDiscipline cameras found</option>';
+                        updateStatus('No cameras with ServiceDisciplineMonitor found in store_2', 'error');
+                    } else {
+                        cameras.forEach((cam, idx) => {
+                            const option = document.createElement('option');
+                            option.value = cam.channel_id;
+                            option.textContent = cam.channel_id + (cam.is_running ? ' ✓' : ' (configured)');
+                            select.appendChild(option);
+                            if (idx === 0) {
+                                option.selected = true;
+                            }
+                        });
+                        changeCamera();
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading cameras:', error);
+                updateStatus('Error loading cameras: ' + error.message, 'error');
+            }
+        }
+        
+        async function changeCamera() {
+            const cameraId = document.getElementById('cameraSelect').value;
+            if (!cameraId) return;
+            
+            currentCamera = cameraId;
+            document.getElementById('cameraDisplay').textContent = cameraId;
+            
+            // Try to get live frame from this camera
+            try {
+                const response = await fetch(`/api/get_frame?channel_id=${cameraId}`);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const img = new Image();
+                    img.onload = () => {
+                        // Draw image on canvas
+                        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+                        const x = (canvas.width - img.width * scale) / 2;
+                        const y = (canvas.height - img.height * scale) / 2;
+                        
+                        ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+                        lastFrame = {img, scale, x, y};
+                        
+                        roiPoints = [];
+                        updateStatus(`Camera ${cameraId} loaded. Start drawing points.`, 'info');
+                        redrawCanvas();
+                    };
+                    img.src = url;
+                }
+            } catch (error) {
+                console.error('Error loading frame:', error);
+                updateStatus('Using placeholder. Camera may not be streaming.', 'info');
+                ctx.fillStyle = '#333';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Camera: ${cameraId}`, canvas.width / 2, canvas.height / 2);
+                ctx.fillText('(Placeholder - Draw ROI below)', canvas.width / 2, canvas.height / 2 + 40);
+            }
+            
+            clearROI();
+        }
+        
+        function changeTable() {
+            const table = document.getElementById('tableSelect').value;
+            if (table) {
+                currentTableName = table;
+                updateStatus(`Switched to ${table}`, 'info');
+                clearROI();
+            }
+        }
+        
+        function startDrawing() {
+            if (!currentCamera) {
+                updateStatus('Please select a camera first', 'error');
+                return;
+            }
+            isDrawing = true;
+            updateStatus('Click on the canvas to add ROI points. At least 3 points needed.', 'info');
+        }
+        
+        canvas.addEventListener('click', (e) => {
+            if (!isDrawing || !currentCamera) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            let x = (e.clientX - rect.left) / rect.width;
+            let y = (e.clientY - rect.top) / rect.height;
+            
+            // Normalize to 0-1 range
+            x = Math.max(0, Math.min(1, x));
+            y = Math.max(0, Math.min(1, y));
+            
+            roiPoints.push({ x: Math.round(x * 10000) / 10000, y: Math.round(y * 10000) / 10000 });
+            redrawCanvas();
+            updatePointsList();
+            updateStatus(`Point added (${roiPoints.length} total)`, 'success');
+        });
+        
+        function redrawCanvas() {
+            if (lastFrame) {
+                const {img, scale, x, y} = lastFrame;
+                ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+            } else {
+                ctx.fillStyle = '#222';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            
+            // Draw existing points
+            roiPoints.forEach((point, idx) => {
+                const px = point.x * canvas.width;
+                const py = point.y * canvas.height;
+                
+                // Draw point
+                ctx.fillStyle = '#00ff00';
+                ctx.beginPath();
+                ctx.arc(px, py, 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw number
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 10px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText((idx + 1).toString(), px, py);
+                
+                // Draw line to next point
+                if (idx < roiPoints.length - 1) {
+                    const nextPoint = roiPoints[idx + 1];
+                    const nextPx = nextPoint.x * canvas.width;
+                    const nextPy = nextPoint.y * canvas.height;
+                    
+                    ctx.strokeStyle = '#00ff00';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(px, py);
+                    ctx.lineTo(nextPx, nextPy);
+                    ctx.stroke();
+                }
+            });
+            
+            // Draw line from last to first if > 2 points
+            if (roiPoints.length > 2) {
+                const firstPoint = roiPoints[0];
+                const lastPoint = roiPoints[roiPoints.length - 1];
+                const firstPx = firstPoint.x * canvas.width;
+                const firstPy = firstPoint.y * canvas.height;
+                const lastPx = lastPoint.x * canvas.width;
+                const lastPy = lastPoint.y * canvas.height;
+                
+                ctx.strokeStyle = '#00ff0080';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(lastPx, lastPy);
+                ctx.lineTo(firstPx, firstPy);
+                ctx.stroke();
+                
+                // Fill polygon
+                ctx.fillStyle = '#00ff0015';
+                ctx.beginPath();
+                ctx.moveTo(firstPx, firstPy);
+                for (let i = 1; i < roiPoints.length; i++) {
+                    const px = roiPoints[i].x * canvas.width;
+                    const py = roiPoints[i].y * canvas.height;
+                    ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
+            
+            // Update counter
+            document.getElementById('pointCount').textContent = roiPoints.length;
+            document.getElementById('totalPoints').textContent = roiPoints.length;
+        }
+        
+        function updatePointsList() {
+            const pointsList = document.getElementById('pointsList');
+            if (roiPoints.length === 0) {
+                pointsList.innerHTML = '<div style="color: #999; text-align: center; padding: 20px;">No points drawn yet</div>';
+                return;
+            }
+            
+            pointsList.innerHTML = roiPoints.map((p, idx) => `
+                <div class="point-item">
+                    <span>#${idx + 1}: (${p.x.toFixed(3)}, ${p.y.toFixed(3)})</span>
+                    <button class="btn-small btn-secondary" onclick="removePoint(${idx})">Remove</button>
+                </div>
+            `).join('');
+        }
+        
+        function undoPoint() {
+            if (roiPoints.length > 0) {
+                roiPoints.pop();
+                redrawCanvas();
+                updatePointsList();
+                updateStatus(`Point removed (${roiPoints.length} remain)`, 'info');
+            }
+        }
+        
+        function removePoint(idx) {
+            roiPoints.splice(idx, 1);
+            redrawCanvas();
+            updatePointsList();
+        }
+        
+        function clearROI() {
+            roiPoints = [];
+            isDrawing = false;
+            redrawCanvas();
+            updatePointsList();
+            updateStatus('ROI cleared. Ready to draw new ROI.', 'info');
+        }
+        
+        async function saveROI() {
+            if (roiPoints.length < 3) {
+                updateStatus('At least 3 points required for ROI', 'error');
+                return;
+            }
+            
+            const roiName = document.getElementById('roiName').value || currentTableName;
+            
+            try {
+                const response = await fetch('/api/save_roi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        channel_id: currentCamera,
+                        module: 'ServiceDisciplineMonitor',
+                        roi_name: roiName,
+                        points: roiPoints
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    updateStatus(`✅ ROI saved: ${roiName}`, 'success');
+                    document.getElementById('successDetails').textContent = 
+                        `Camera: ${currentCamera}\nROI: ${roiName}\nPoints: ${roiPoints.length}`;
+                    document.getElementById('successModal').classList.add('show');
+                    clearROI();
+                } else {
+                    updateStatus(`Error: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`Error saving ROI: ${error.message}`, 'error');
+            }
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('statusDiv');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+        }
+        
+        function closeModal() {
+            document.getElementById('successModal').classList.remove('show');
+        }
+        
+        function downloadConfig() {
+            // Placeholder - in real implementation would download updated channels.json
+            updateStatus('Config download feature coming soon', 'info');
+        }
+        
+        // Load cameras on page load
+        loadCameras();
+    </script>
+</body>
+</html>

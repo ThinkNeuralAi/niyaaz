@@ -4199,8 +4199,9 @@
     async function loadAlertGifs() {
         try {
             const channelFilter = document.getElementById('alert-channel-filter').value;
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
             // Filter by queue_alert type to only show Queue Monitor alerts
-            let url = '/api/get_alert_gifs?alert_type=queue_alert&limit=20';
+            let url = `/api/get_alert_gifs?alert_type=queue_alert&limit=20&store_id=${selectedStore}`;
             if (channelFilter) {
                 url += `&channel_id=${channelFilter}`;
             }
@@ -4329,7 +4330,8 @@
         
         try {
             const channelFilter = document.getElementById('alert-channel-filter')?.value || '';
-            let url = '/api/get_queue_violations?limit=50';
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            let url = `/api/get_alert_gifs?alert_type=queue_alert&limit=50&store_id=${selectedStore}`;
             if (channelFilter) {
                 url += `&channel_id=${channelFilter}`;
             }
@@ -4344,10 +4346,10 @@
             const result = await response.json();
             
             console.log('📦 API Response:', result);
-            console.log('📊 Violations data:', result.violations);
+            console.log('📊 Violations data:', result.alert_gifs);
             
             if (result.success) {
-                const violations = result.violations || [];
+                const violations = result.alert_gifs || [];
                 console.log(`✅ Loaded ${violations.length} queue violations`);
                 
                 if (violations.length > 0) {
@@ -4805,7 +4807,7 @@
     async function loadBagAlerts() {
         try {
             // Load all bag alerts from all channels
-            const url = `/api/get_alert_gifs?alert_type=bag_unattended`;
+            const url = `/api/get_alert_gifs?alert_type=bag_unattended&store_id=${selectedStore}`;
             
             const response = await fetch(url);
             const result = await response.json();
@@ -5480,7 +5482,8 @@
     async function loadUnauthorizedEntryAlerts() {
         try {
             console.log('🚨 Loading unauthorized entry alerts...');
-            const response = await fetch('/api/get_alert_gifs?alert_type=unauthorized_entry_alert&days=7&limit=50');
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&days=7&limit=50&store_id=${selectedStore}`);
             const result = await response.json();
             
             console.log('🚨 Unauthorized entry alerts response:', result);
@@ -5648,7 +5651,8 @@
     async function loadPersonSmokingAlerts() {
         try {
             console.log('🚬 Loading smoking alerts...');
-            const response = await fetch('/api/get_alert_gifs?alert_type=person_smoking_alert&days=7&limit=50');
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const response = await fetch(`/api/get_alert_gifs?alert_type=person_smoking_alert&days=7&limit=50&store_id=${selectedStore}`);
             const result = await response.json();
             
             if (result.success) {
@@ -5822,7 +5826,8 @@
     // ============= Material Theft / Misuse Functions =============
     async function loadMaterialTheftAlerts() {
         try {
-            const response = await fetch('/api/get_alert_gifs?alert_type=material_theft_alert&days=7&limit=50');
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const response = await fetch(`/api/get_alert_gifs?alert_type=material_theft_alert&days=7&limit=50&store_id=${selectedStore}`);
             const result = await response.json();
             
             if (result.success) {
@@ -5995,7 +6000,8 @@
     async function loadFallSnapshots() {
         try {
             // Load all fall detection snapshots from all channels
-            const url = '/api/get_fall_snapshots?limit=50';
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const url = `/api/get_fall_snapshots?limit=50&store_id=${selectedStore}`;
             
             const response = await fetch(url);
             const result = await response.json();
@@ -6783,7 +6789,8 @@
     
     async function loadCrowdAlerts() {
         try {
-            const response = await fetch('/api/get_alert_gifs?alert_type=crowd_alert&limit=50&days=7');
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const response = await fetch(`/api/get_alert_gifs?alert_type=crowd_alert&limit=50&days=7&store_id=${selectedStore}`);
             const result = await response.json();
             
             if (result.success) {
@@ -6888,7 +6895,8 @@
         try {
             // Fetch all violations, then filter to include only service discipline violations
             // This includes violations with waiting_time > 0 or violation_type = 'service_discipline'
-            const response = await fetch('/api/get_table_service_violations?limit=100&days=7');
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const response = await fetch(`/api/get_table_service_violations?limit=100&days=7&store_id=${selectedStore}`);
             const result = await response.json();
             
             if (result.success) {
@@ -8435,7 +8443,8 @@
     async function loadFallSnapshots() {
         try {
             // Load all fall detection snapshots from all channels
-            const url = '/api/get_fall_snapshots?limit=50';
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const url = `/api/get_fall_snapshots?limit=50&store_id=${selectedStore}`;
             
             const response = await fetch(url);
             const result = await response.json();
@@ -11245,7 +11254,8 @@
         
         try {
             // Fetch cleanliness violations from dedicated table (unclean_table / slow_reset only)
-            const response = await fetch('/api/get_table_cleanliness_violations?limit=100');
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const response = await fetch(`/api/get_table_cleanliness_violations?limit=100&store_id=${selectedStore}`);
             const result = await response.json();
             
             console.log('📊 Table service violations response:', result);
@@ -11456,7 +11466,8 @@
         grid.innerHTML = '<p style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading alerts...</p>';
         
         try {
-            const response = await fetch('/api/get_dresscode_alerts?limit=50');
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const response = await fetch(`/api/get_dresscode_alerts?limit=50&store_id=${selectedStore}`);
             const result = await response.json();
             
             console.log('📊 Dress code alerts response:', result);
@@ -11583,7 +11594,8 @@
     async function loadPPEAlerts() {
         try {
             console.log('🛡️ Loading PPE alerts...');
-            const response = await fetch('/api/get_ppe_alerts?limit=50');
+            const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+            const response = await fetch(`/api/get_ppe_alerts?limit=50&store_id=${selectedStore}`);
             const result = await response.json();
             
             console.log('🛡️ PPE alerts response:', result);

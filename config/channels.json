@@ -154,10 +154,148 @@
       "channel_id": "camera_2",
       "channel_name": "Deluxe Counter",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:555/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@132.154.208.136:571/cam/realmonitor?channel=1&subtype=1",
       "video_file": "",
       "enabled": true,
       "modules": [
+        {
+          "type": "QueueMonitor",
+          "config": {
+            "queue_roi": {
+              "points": [
+                {
+                  "x": 0.255,
+                  "y": 0.356
+                },
+                {
+                  "x": 0.837,
+                  "y": 0.643
+                },
+                {
+                  "x": 0.653,
+                  "y": 0.995
+                },
+                {
+                  "x": 0.999,
+                  "y": 0.983
+                },
+                {
+                  "x": 0.998,
+                  "y": 0.346
+                },
+                {
+                  "x": 0.22,
+                  "y": 0.119
+                },
+                {
+                  "x": -0.004,
+                  "y": 0.25
+                },
+                {
+                  "x": 0.002,
+                  "y": 0.517
+                },
+                {
+                  "x": 0.15062255859375,
+                  "y": 0.4115953947368421
+                }
+              ]
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.00843505859375,
+                  "y": 0.5089638157894737
+                },
+                {
+                  "x": 0.26259765625,
+                  "y": 0.37595395539936266
+                },
+                {
+                  "x": 0.83577880859375,
+                  "y": 0.6629111842105263
+                },
+                {
+                  "x": 0.65765380859375,
+                  "y": 0.9997532894736842
+                },
+                {
+                  "x": 0,
+                  "y": 0.9944901315789474
+                }
+              ]
+            },
+            "settings": {
+              "dwell_time_threshold": 120,
+              "queue_alert_threshold": 3,
+              "counter_threshold": 1,
+              "alert_cooldown": 180
+            }
+          }
+        },
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.00843505859375,
+                  "y": 0.5089638157894737
+                },
+                {
+                  "x": 0.26259765625,
+                  "y": 0.37595395539936266
+                },
+                {
+                  "x": 0.83577880859375,
+                  "y": 0.6629111842105263
+                },
+                {
+                  "x": 0.65765380859375,
+                  "y": 0.9997532894736842
+                },
+                {
+                  "x": 0,
+                  "y": 0.9944901315789474
+                }
+              ]
+            },
+            "allowed_uniforms": {
+              "counter": [
+                "Uniform_grey"
+              ]
+            },
+            "settings": {
+              "alert_cooldown": 180.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "CashDetection",
+          "config": {
+            "conf_threshold": 0.7,
+            "alert_cooldown": 600.0,
+            "detection_duration_threshold": 1.0
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.4,
+            "alert_cooldown": 180.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
         {
           "type": "FallDetection",
           "config": {
@@ -1459,6 +1597,37 @@
           }
         },
         {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.2,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.8
+                  },
+                  {
+                    "x": 0.2,
+                    "y": 0.8
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
           "type": "FallDetection",
           "config": {
             "settings": {
@@ -1494,6 +1663,37 @@
             "settings": {
               "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.2,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.8
+                  },
+                  {
+                    "x": 0.2,
+                    "y": 0.8
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
             }
           }
         },
@@ -1599,6 +1799,61 @@
           }
         },
         {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.2,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.8
+                  },
+                  {
+                    "x": 0.2,
+                    "y": 0.8
+                  }
+                ]
+              },
+              "Table_table_1": {
+                "points": [
+                  {
+                    "x": 0.3634982665379842,
+                    "y": 0.3512988690976743
+                  },
+                  {
+                    "x": 0.6874565998713176,
+                    "y": 0.3253729431717484
+                  },
+                  {
+                    "x": 0.7582899332046509,
+                    "y": 0.7651877579865632
+                  },
+                  {
+                    "x": 0.34995659987131755,
+                    "y": 0.7753729431717484
+                  },
+                  {
+                    "x": 0.34995659987131755,
+                    "y": 0.7753729431717484
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
           "type": "FallDetection",
           "config": {
             "settings": {
@@ -1638,6 +1893,37 @@
           }
         },
         {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.2,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.8
+                  },
+                  {
+                    "x": 0.2,
+                    "y": 0.8
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
           "type": "FallDetection",
           "config": {
             "settings": {
@@ -1673,6 +1959,37 @@
             "settings": {
               "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_1": {
+                "points": [
+                  {
+                    "x": 0.2,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.2
+                  },
+                  {
+                    "x": 0.8,
+                    "y": 0.8
+                  },
+                  {
+                    "x": 0.2,
+                    "y": 0.8
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
             }
           }
         },

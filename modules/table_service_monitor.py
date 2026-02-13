@@ -755,16 +755,7 @@ class TableServiceMonitor:
                         )
                         if result:
                             self._pending_violation_id = result
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            "table_cleanliness_alert",
-                            alert_message,
-                            alert_data={
-                                "violation_type": "unclean_table",
-                                "table_id": table_id,
-                                "unclean_duration": unclean_duration,
-                            },
-                        )
+                        # GIF will be saved with save_alert_gif() when recording completes
                 else:
                     result = self.db_manager.add_table_cleanliness_violation(
                         channel_id=self.channel_id,
@@ -776,18 +767,8 @@ class TableServiceMonitor:
                     )
                     if result:
                         self._pending_violation_id = result
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        "table_cleanliness_alert",
-                        alert_message,
-                        alert_data={
-                            "violation_type": "unclean_table",
-                            "table_id": table_id,
-                            "unclean_duration": unclean_duration,
-                        },
-                    )
-
-                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: unclean_table for {table_id} (GIF recording in progress)")
+                    # GIF will be saved with save_alert_gif() when recording completes
+                    logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: unclean_table for {table_id} (GIF recording in progress)")
             except Exception as e:
                 logger.error(f"Failed to save table cleanliness (unclean_table): {e}", exc_info=True)
 
@@ -932,16 +913,7 @@ class TableServiceMonitor:
                         )
                         if result:
                             self._pending_violation_id = result
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            "table_cleanliness_alert",
-                            alert_message,
-                            alert_data={
-                                "violation_type": "slow_reset",
-                                "table_id": table_id,
-                                "reset_duration": reset_duration,
-                            },
-                        )
+                        # GIF will be saved with save_alert_gif() when recording completes
                 else:
                     result = self.db_manager.add_table_cleanliness_violation(
                         channel_id=self.channel_id,
@@ -953,17 +925,8 @@ class TableServiceMonitor:
                     )
                     if result:
                         self._pending_violation_id = result
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        "table_cleanliness_alert",
-                        alert_message,
-                        alert_data={
-                            "violation_type": "slow_reset",
-                            "table_id": table_id,
-                            "reset_duration": reset_duration,
-                        },
-                    )
-                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: slow_reset for {table_id} (GIF recording in progress)")
+                    # GIF will be saved with save_alert_gif() when recording completes
+                    logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: slow_reset for {table_id} (GIF recording in progress)")
             except Exception as e:
                 logger.error(f"Failed to save table cleanliness (slow_reset): {e}", exc_info=True)
 
@@ -1565,16 +1528,7 @@ class TableServiceMonitor:
                         )
                         if result:
                             self._pending_violation_id = result
-                        # Also log to general alerts table
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'table_service_alert',
-                            alert_message,
-                            alert_data={
-                                "violation_type": "wrong_uniform",
-                                "wrong_uniforms": wrong_uniforms
-                            }
-                        )
+                        # GIF will be saved with save_alert_gif() when recording completes
                         logger.info(f"[{self.channel_id}] ✅ Uniform violation alert saved to database: {uniform_names} (GIF recording in progress)")
                 else:
                     result = self.db_manager.add_table_service_violation(
@@ -1591,16 +1545,7 @@ class TableServiceMonitor:
                     )
                     if result:
                         self._pending_violation_id = result
-                    # Also log to general alerts table
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        'table_service_alert',
-                        alert_message,
-                        alert_data={
-                            "violation_type": "wrong_uniform",
-                            "wrong_uniforms": wrong_uniforms
-                        }
-                    )
+                    # GIF will be saved with save_alert_gif() when recording completes
                     logger.info(f"[{self.channel_id}] ✅ Uniform violation alert saved to database: {uniform_names} (GIF recording in progress)")
             except Exception as e:
                 logger.error(f"Failed to save uniform violation to database: {e}", exc_info=True)

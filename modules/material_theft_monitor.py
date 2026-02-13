@@ -539,31 +539,10 @@ class MaterialTheftMonitor:
             
             logger.info(f"[{self.channel_id}] 📹 Material theft alert GIF recording started: {alert_message}")
 
-            # Log alert to database immediately (GIF will be saved when recording completes)
-            if self.db_manager:
-                try:
-                    if self.app:
-                        with self.app.app_context():
-                            # Log alert to database
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                'material_theft_alert',
-                                alert_message,
-                                alert_data=alert_data
-                            )
-                            logger.info(f"[{self.channel_id}] Material theft alert logged to database (GIF recording in progress)")
-                    else:
-                        # Log alert to database
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'material_theft_alert',
-                            alert_message,
-                            alert_data=alert_data
-                        )
-                        logger.info(f"[{self.channel_id}] Material theft alert logged to database (GIF recording in progress)")
-                except Exception as db_error:
-                    logger.error(f"[{self.channel_id}] Error saving material theft alert to database: {db_error}", exc_info=True)
-
+            # Store alert info for database saving when GIF completes
+            # Don't call log_alert() here as it creates empty records
+            # GIF will be saved with save_alert_gif() when recording completes
+            
             # Emit socket event
             if self.socketio:
                 emit_data = {

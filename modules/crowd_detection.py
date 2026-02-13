@@ -627,38 +627,8 @@ class CrowdDetection:
                 self.gif_recorder.start_alert_recording(gathering_alert_info)
                 self.gif_recorder.add_alert_frame(original_frame)
                 
-                # Log alert to database
-                if self.db_manager:
-                    try:
-                        if self.app:
-                            with self.app.app_context():
-                                self.db_manager.log_alert(
-                                    self.channel_id,
-                                    'crowd_alert',
-                                    alert_message,
-                                    alert_data={
-                                        'crowd_count': cluster_size,
-                                        'long_stay_count': self.crowd_count,
-                                        'duration': duration,
-                                        'is_stationary': is_stationary_gathering,
-                                        'threshold': self.settings['crowd_threshold']
-                                    }
-                                )
-                        else:
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                'crowd_alert',
-                                alert_message,
-                                alert_data={
-                                    'crowd_count': cluster_size,
-                                    'long_stay_count': self.crowd_count,
-                                    'duration': duration,
-                                    'is_stationary': is_stationary_gathering,
-                                    'threshold': self.settings['crowd_threshold']
-                                }
-                            )
-                    except Exception as e:
-                        logger.error(f"Database logging error for crowd alert: {e}")
+                # GIF will be saved with save_alert_gif() when recording completes
+                # Don't call log_alert() here as it creates empty records
                 
                 # Send real-time alert
                 self.socketio.emit('crowd_alert', gathering_alert_info)
@@ -675,34 +645,8 @@ class CrowdDetection:
             self.gif_recorder.start_alert_recording(alert_info)
             self.gif_recorder.add_alert_frame(original_frame)
             
-            # Log alert to database
-            if self.db_manager:
-                try:
-                    if self.app:
-                        with self.app.app_context():
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                'crowd_alert',
-                                alert_info['message'],
-                                alert_data={
-                                    'crowd_count': alert_info['crowd_count'],
-                                    'raw_count': alert_info.get('raw_count', self.raw_crowd_now),
-                                    'threshold': self.settings['crowd_threshold']
-                                }
-                            )
-                    else:
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'crowd_alert',
-                            alert_info['message'],
-                            alert_data={
-                                'crowd_count': alert_info['crowd_count'],
-                                'raw_count': alert_info.get('raw_count', self.raw_crowd_now),
-                                'threshold': self.settings['crowd_threshold']
-                            }
-                        )
-                except Exception as e:
-                    logger.error(f"Database logging error for crowd alert: {e}")
+            # GIF will be saved with save_alert_gif() when recording completes
+            # Don't call log_alert() here as it creates empty records
             
             # Send real-time alert
             self.socketio.emit('crowd_alert', alert_info)

@@ -284,43 +284,8 @@ class UnauthorizedEntryMonitor:
                     ]
                 })
             
-            # Log to database
-            if self.db_manager:
-                try:
-                    if self.app:
-                        with self.app.app_context():
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                "unauthorized_entry_alert",
-                                alert_message,
-                                {
-                                    "person_count": person_count,
-                                    "detections": [
-                                        {
-                                            "bbox": d["bbox"],
-                                            "confidence": d["confidence"]
-                                        } for d in detections
-                                    ]
-                                }
-                            )
-                    else:
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            "unauthorized_entry_alert",
-                            alert_message,
-                            {
-                                "person_count": person_count,
-                                "detections": [
-                                    {
-                                        "bbox": d["bbox"],
-                                        "confidence": d["confidence"]
-                                    } for d in detections
-                                ]
-                            }
-                        )
-                    logger.info(f"Unauthorized entry alert logged to database: {alert_message}")
-                except Exception as e:
-                    logger.error(f"Failed to log unauthorized entry alert to database: {e}")
+            # GIF will be saved with save_alert_gif() when recording completes
+            # Don't call log_alert() here as it creates empty records
             
             self.total_alerts += 1
             self.detection_sessions += 1

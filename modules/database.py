@@ -948,8 +948,8 @@ class DatabaseManager:
             self.db.session.rollback()
             return None
 
-    def get_table_cleanliness_violations(self, channel_id=None, table_id=None, limit=50, days=None):
-        """Get recent table cleanliness violations"""
+    def get_table_cleanliness_violations(self, channel_id=None, table_id=None, limit=50, days=None, store_id=None):
+        """Get recent table cleanliness violations, optionally filtered by store"""
         import json
         from datetime import datetime, timedelta
 
@@ -960,8 +960,20 @@ class DatabaseManager:
                 date_threshold = datetime.now() - timedelta(days=days)
                 query = query.filter(self.TableCleanlinessViolation.created_at >= date_threshold)
 
-            if channel_id:
+            # If store_id is provided but not channel_id, filter by store
+            if store_id and not channel_id:
+                # Import here to avoid circular imports
+                from app import channel_store_map
+                # Get all channels for this store
+                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
+                if store_channels:
+                    query = query.filter(self.TableCleanlinessViolation.channel_id.in_(store_channels))
+                else:
+                    # No channels for this store, return empty
+                    return []
+            elif channel_id:
                 query = query.filter_by(channel_id=channel_id)
+                
             if table_id:
                 query = query.filter_by(table_id=table_id)
 
@@ -1894,8 +1906,8 @@ class DatabaseManager:
                 'period_days': days
             }
     
-    def get_alert_gifs(self, channel_id=None, alert_type=None, limit=50, days=None):
-        """Get alert GIFs from database"""
+    def get_alert_gifs(self, channel_id=None, alert_type=None, limit=50, days=None, store_id=None):
+        """Get alert GIFs from database, optionally filtered by store"""
         try:
             from datetime import datetime, timedelta
             
@@ -1906,7 +1918,18 @@ class DatabaseManager:
                 date_threshold = datetime.now() - timedelta(days=days)
                 query = query.filter(self.AlertGif.created_at >= date_threshold)
             
-            if channel_id:
+            # If store_id is provided but not channel_id, filter by store
+            if store_id and not channel_id:
+                # Import here to avoid circular imports
+                from app import channel_store_map
+                # Get all channels for this store
+                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
+                if store_channels:
+                    query = query.filter(self.AlertGif.channel_id.in_(store_channels))
+                else:
+                    # No channels for this store, return empty
+                    return []
+            elif channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             if alert_type:
@@ -2508,12 +2531,23 @@ class DatabaseManager:
             logger.error(f"Error saving fall snapshot: {e}")
             raise e
     
-    def get_fall_snapshots(self, channel_id=None, limit=50):
-        """Get fall detection snapshots from database"""
+    def get_fall_snapshots(self, channel_id=None, limit=50, store_id=None):
+        """Get fall detection snapshots from database, optionally filtered by store"""
         try:
             query = self.FallSnapshot.query
             
-            if channel_id:
+            # If store_id is provided but not channel_id, filter by store
+            if store_id and not channel_id:
+                # Import here to avoid circular imports
+                from app import channel_store_map
+                # Get all channels for this store
+                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
+                if store_channels:
+                    query = query.filter(self.FallSnapshot.channel_id.in_(store_channels))
+                else:
+                    # No channels for this store, return empty
+                    return []
+            elif channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(self.FallSnapshot.created_at.desc()).limit(limit).all()
@@ -2835,12 +2869,23 @@ class DatabaseManager:
             logger.error(traceback.format_exc())
             return None
     
-    def get_dresscode_alerts(self, channel_id=None, limit=50):
-        """Get recent dress code alerts"""
+    def get_dresscode_alerts(self, channel_id=None, limit=50, store_id=None):
+        """Get recent dress code alerts, optionally filtered by store"""
         try:
             query = self.DressCodeAlert.query
             
-            if channel_id:
+            # If store_id is provided but not channel_id, filter by store
+            if store_id and not channel_id:
+                # Import here to avoid circular imports
+                from app import channel_store_map
+                # Get all channels for this store
+                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
+                if store_channels:
+                    query = query.filter(self.DressCodeAlert.channel_id.in_(store_channels))
+                else:
+                    # No channels for this store, return empty
+                    return []
+            elif channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             alerts = query.order_by(self.DressCodeAlert.created_at.desc()).limit(limit).all()
@@ -2995,14 +3040,25 @@ class DatabaseManager:
             logger.error(f"Error saving PPE alert: {e}")
             return None
     
-    def get_ppe_alerts(self, channel_id=None, limit=50):
-        """Get recent PPE violation alerts"""
+    def get_ppe_alerts(self, channel_id=None, limit=50, store_id=None):
+        """Get recent PPE violation alerts, optionally filtered by store"""
         import json
         
         try:
             query = self.PPEAlert.query
             
-            if channel_id:
+            # If store_id is provided but not channel_id, filter by store
+            if store_id and not channel_id:
+                # Import here to avoid circular imports
+                from app import channel_store_map
+                # Get all channels for this store
+                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
+                if store_channels:
+                    query = query.filter(self.PPEAlert.channel_id.in_(store_channels))
+                else:
+                    # No channels for this store, return empty
+                    return []
+            elif channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             alerts = query.order_by(self.PPEAlert.created_at.desc()).limit(limit).all()
@@ -3130,14 +3186,25 @@ class DatabaseManager:
             logger.error(traceback.format_exc())
             return None
     
-    def get_queue_violations(self, channel_id=None, limit=50):
-        """Get recent queue violations"""
+    def get_queue_violations(self, channel_id=None, limit=50, store_id=None):
+        """Get recent queue violations, optionally filtered by store"""
         import json
         
         try:
             query = self.QueueViolation.query
             
-            if channel_id:
+            # If store_id is provided but not channel_id, filter by store
+            if store_id and not channel_id:
+                # Import here to avoid circular imports
+                from app import channel_store_map
+                # Get all channels for this store
+                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
+                if store_channels:
+                    query = query.filter(self.QueueViolation.channel_id.in_(store_channels))
+                else:
+                    # No channels for this store, return empty
+                    return []
+            elif channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             violations = query.order_by(self.QueueViolation.created_at.desc()).limit(limit).all()
@@ -3385,8 +3452,8 @@ class DatabaseManager:
             self.db.session.rollback()
             return None
     
-    def get_table_service_violations(self, channel_id=None, table_id=None, violation_type=None, limit=50, days=None):
-        """Get recent table service violations"""
+    def get_table_service_violations(self, channel_id=None, table_id=None, violation_type=None, limit=50, days=None, store_id=None):
+        """Get recent table service violations, optionally filtered by store"""
         import json
         from datetime import datetime, timedelta
         
@@ -3398,8 +3465,20 @@ class DatabaseManager:
                 date_threshold = datetime.now() - timedelta(days=days)
                 query = query.filter(self.TableServiceViolation.created_at >= date_threshold)
             
-            if channel_id:
+            # If store_id is provided but not channel_id, filter by store
+            if store_id and not channel_id:
+                # Import here to avoid circular imports
+                from app import channel_store_map
+                # Get all channels for this store
+                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
+                if store_channels:
+                    query = query.filter(self.TableServiceViolation.channel_id.in_(store_channels))
+                else:
+                    # No channels for this store, return empty
+                    return []
+            elif channel_id:
                 query = query.filter_by(channel_id=channel_id)
+                
             if table_id:
                 query = query.filter_by(table_id=table_id)
             
@@ -3839,14 +3918,25 @@ class DatabaseManager:
             self.db.session.rollback()
             return None
     
-    def get_smoking_snapshots(self, channel_id=None, limit=50):
-        """Get smoking detection snapshots from database"""
+    def get_smoking_snapshots(self, channel_id=None, limit=50, store_id=None):
+        """Get smoking detection snapshots from database, optionally filtered by store"""
         try:
             query = self.SmokingSnapshot.query.order_by(
                 self.SmokingSnapshot.created_at.desc()
             )
             
-            if channel_id:
+            # If store_id is provided but not channel_id, filter by store
+            if store_id and not channel_id:
+                # Import here to avoid circular imports
+                from app import channel_store_map
+                # Get all channels for this store
+                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
+                if store_channels:
+                    query = query.filter(self.SmokingSnapshot.channel_id.in_(store_channels))
+                else:
+                    # No channels for this store, return empty
+                    return []
+            elif channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.limit(limit).all()

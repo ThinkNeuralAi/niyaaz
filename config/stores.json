@@ -2,15 +2,15 @@
   "stores": [
     {
       "store_id": "store_1",
-      "store_name": "Niyaaz_Biryani",
-      "location": "Belgaum",
+      "store_name": "Niyaaz_Biryani_Belagavi",
+      "location": "Belagavi",
       "description": "Primary location with all monitoring modules",
       "enabled": true,
       "default": true
     },
     {
       "store_id": "store_2",
-      "store_name": "Niyaaz_Biryani",
+      "store_name": "Niyaaz_Biryani_Goa",
       "location": "Goa",
       "description": "Secondary location with different modules from main store",
       "enabled": true,

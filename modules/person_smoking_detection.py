@@ -352,19 +352,8 @@ class PersonSmokingDetection:
             self._last_alert_message = f"Smoking detected - {len(detections)} instance(s)"
             self._last_alert_data = alert_data
             
-            # Save to database
-            if self.db_manager and self.app:
-                try:
-                    with self.app.app_context():
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            "person_smoking_alert",
-                            f"Smoking detected - {len(detections)} instance(s)",
-                            alert_data
-                        )
-                        logger.info(f"✓ Smoking alert saved to database")
-                except Exception as e:
-                    logger.error(f"Failed to save smoking alert to database: {e}")
+            # GIF will be saved when recording completes via save_alert_gif()
+            # Don't call log_alert() here as it creates empty records
             
             # Send real-time alert via SocketIO
             if self.socketio:
