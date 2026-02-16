@@ -12275,8 +12275,21 @@
                         const dateStr = date.toLocaleDateString();
 
                         let mediaContent = '';
-                        if (alert.snapshot_filename) {
-                            const src = `/static/queue_violations/${alert.snapshot_filename}`;
+                        let src = '';
+                        if (alert.snapshot_path) {
+                            // If path is provided, use it (handle potential leading slash)
+                            src = alert.snapshot_path.startsWith('/') ? alert.snapshot_path : `/${alert.snapshot_path}`;
+                        } else if (alert.snapshot_filename) {
+                            // Legacy fallback: assume it's in queue_violations folder
+                            // Check if filename indicates it is an alert GIF (starts with alert_)
+                            if (alert.snapshot_filename.startsWith('alert_')) {
+                                src = `/static/alerts/${alert.snapshot_filename}`;
+                            } else {
+                                src = `/static/queue_violations/${alert.snapshot_filename}`;
+                            }
+                        }
+
+                        if (src) {
                             mediaContent = `<div class="gif-preview" onclick="openLightbox('${src}', 'Queue Violation - ${alert.channel_id}', 'Time: ${timeStr}')">
                                 <img src="${src}" alt="Queue Violation" loading="lazy">
                             </div>`;
