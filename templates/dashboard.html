@@ -2176,6 +2176,58 @@
         </div>
     </div>
 
+    <!-- Unauthorized Entry Monitor Module -->
+    <div id="UnauthorizedEntryMonitor-module" class="module-content">
+        <div class="tab-nav" style="border-top: 1px solid var(--border-color); padding-top: 10px;">
+            <button class="tab-button active" onclick="openTab(event, 'UnauthorizedEntryMonitor')">Live
+                Detection</button>
+            <button class="tab-button" onclick="openTab(event, 'UnauthorizedEntrySnapshots')">Detection History</button>
+        </div>
+
+        <div id="UnauthorizedEntryMonitor" class="tab-content active">
+            <div class="info-box"
+                style="margin: 20px 0; background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444;">
+                <strong>🚫 Unauthorized Entry Monitor:</strong>
+                <ul style="margin: 10px 0 0 20px; font-size: 0.9em;">
+                    <li>Monitors restricted areas for unauthorized access</li>
+                    <li>Detects persons in prohibited zones using AI</li>
+                    <li>Triggers immediate alerts upon detection</li>
+                    <li>Captures snapshots/GIFs of intrusion events</li>
+                    <li>Maintains audit trail of all unauthorized entries</li>
+                </ul>
+            </div>
+
+            <div id="uem-video-grid" class="video-grid">
+                <!-- Video streams will be added here dynamically -->
+            </div>
+            <div id="uem-video-pagination" class="video-pagination" style="display: none;">
+                <button class="btn" onclick="changeVideoPage('UnauthorizedEntryMonitor', -1)">◀ Previous</button>
+                <span class="pagination-info">
+                    <span id="uem-page-info">Page 1 of 1</span>
+                    (Showing <span id="uem-showing-count">0</span> of <span id="uem-total-count">0</span> channels)
+                </span>
+                <button class="btn" onclick="changeVideoPage('UnauthorizedEntryMonitor', 1)">Next ▶</button>
+            </div>
+        </div>
+
+        <div id="UnauthorizedEntrySnapshots" class="tab-content">
+            <h3>🚫 Unauthorized Entry History - All Channels</h3>
+
+            <div class="filter-controls" style="margin-bottom: 20px;">
+                <button class="btn" onclick="loadUnauthorizedEntrySnapshots()">🔄 Refresh</button>
+                <button class="btn" onclick="clearOldUnauthorizedEntrySnapshots()">🗑️ Clear Old Snapshots (7+
+                    days)</button>
+            </div>
+
+            <div id="unauthorized-snapshots-grid" class="alert-gifs-grid">
+                <!-- Snapshots will be displayed here -->
+                <p style="color: var(--text-secondary); text-align: center; padding: 40px;">
+                    Loading detection history...
+                </p>
+            </div>
+        </div>
+    </div>
+
     </div>
     </div>
     </div>
@@ -2488,7 +2540,8 @@
             'PPEMonitoring': {},
             'CashDetection': {},
             'SmokingDetection': {},
-            'CrowdDetection': {}
+            'CrowdDetection': {},
+            'UnauthorizedEntryMonitor': {}
         };
         let sharedChannels = {};  // Track which channels are shared across modules
 
@@ -4084,6 +4137,12 @@
                 loadServiceDisciplineAlerts();
                 // Also update stats
                 updateServiceDisciplineStats([]); // Will be updated when alerts load
+            } else if (tabId === 'UnauthorizedEntryMonitor-reports') {
+                loadUnauthorizedEntryAlerts();
+            } else if (tabId === 'FallDetection-reports') {
+                loadFallSnapshots();
+            } else if (tabId === 'RestrictedAreaMonitor-reports') {
+                loadRestrictedAreaSnapshots();
             }
         }
 
@@ -12100,6 +12159,453 @@
                 changeLightboxImage(1);
             }
         });
+
+        // Unauthorized Entry Monitor Functions
+        async function loadUnauthorizedEntryAlerts() {
+            const container = document.getElementById('unauthorized-entry-alerts-grid');
+            if (!container) return;
+
+            container.innerHTML = '<p style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading alerts...</p>';
+
+            try {
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&store_id=${selectedStore}`);
+                const data = await response.json();
+
+                if (data.success && data.alert_gifs && data.alert_gifs.length > 0) {
+                    container.innerHTML = '';
+                    data.alert_gifs.forEach(alert => {
+                        const date = new Date(alert.created_at);
+                        const timeStr = date.toLocaleTimeString();
+                        const dateStr = date.toLocaleDateString();
+
+                        let mediaContent = '';
+                        if (alert.gif_filename) {
+                            mediaContent = `<div class="gif-preview" onclick="openLightbox('/static/alerts/${alert.gif_filename}', 'Unauthorized Entry - ${alert.channel_id}', 'Time: ${timeStr}')">
+                                <img src="/static/alerts/${alert.gif_filename}" alt="Unauthorized Entry" loading="lazy">
+                                <div class="play-icon">▶</div>
+                            </div>`;
+                        } else {
+                            mediaContent = `<div class="gif-preview" style="background: #333; display: flex; align-items: center; justify-content: center; height: 150px;">
+                                <span style="font-size: 3em;">🚫</span>
+                            </div>`;
+                        }
+
+                        const card = document.createElement('div');
+                        card.className = 'alert-gif-card';
+                        card.style.borderLeft = '4px solid #ef4444';
+                        card.innerHTML = `
+                            ${mediaContent}
+                            <div class="alert-info">
+                                <strong>${alert.channel_id}</strong> • ${dateStr} ${timeStr}
+                            </div>
+                            <div class="alert-message">
+                                ${alert.alert_message || 'Unauthorized Entry Detected'}
+                            </div>
+                            <div class="alert-actions">
+                                <button class="btn btn-sm btn-danger" onclick="deleteAlert(${alert.id}, 'unauthorized_entry_alert')">🗑️ Delete</button>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    });
+                } else {
+                    container.innerHTML = '<p style="text-align: center; padding: 40px; color: var(--text-secondary);">No unauthorized entry alerts found.</p>';
+                }
+            } catch (error) {
+                console.error('Error loading unauthorized entry alerts:', error);
+                container.innerHTML = '<p style="text-align: center; padding: 20px; color: #ef4444;">Error loading alerts</p>';
+            }
+        }
+
+        async function clearOldUnauthorizedEntryAlerts() {
+            if (!confirm('Delete old unauthorized entry alerts (older than 7 days)?')) return;
+            try {
+                const response = await fetch('/api/clear_old_alerts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ days: 7, alert_type: 'unauthorized_entry_alert' })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert('Cleared ' + data.count + ' old alerts');
+                    loadUnauthorizedEntryAlerts();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (e) {
+                console.error(e);
+                alert('Failed to clear old alerts');
+            }
+        }
+
+        async function deleteAlert(id, type) {
+            if (!confirm('Delete this alert?')) return;
+            try {
+                const response = await fetch(`/api/delete_alert_gif/${id}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    if (type === 'unauthorized_entry_alert') loadUnauthorizedEntryAlerts();
+                    // Add other types if needed
+                }
+                else alert('Error: ' + data.error);
+            } catch (e) {
+                console.error(e);
+                alert('Failed to delete alert');
+            }
+        }
+
+        // Queue Monitor Alert Functions
+        async function loadQueueViolations() {
+            console.log('🔄 Loading queue violations...');
+            const container = document.getElementById('queue-violations-grid');
+            if (!container) return;
+
+            container.innerHTML = '<p style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading violations...</p>';
+
+            try {
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_queue_violations?store_id=${selectedStore}`);
+                const data = await response.json();
+
+                if (data.success && data.violations && data.violations.length > 0) {
+                    container.innerHTML = '';
+                    data.violations.forEach(alert => {
+                        const date = new Date(alert.created_at || alert.timestamp);
+                        const timeStr = date.toLocaleTimeString();
+                        const dateStr = date.toLocaleDateString();
+
+                        let mediaContent = '';
+                        if (alert.snapshot_filename) {
+                            const src = `/static/queue_violations/${alert.snapshot_filename}`;
+                            mediaContent = `<div class="gif-preview" onclick="openLightbox('${src}', 'Queue Violation - ${alert.channel_id}', 'Time: ${timeStr}')">
+                                <img src="${src}" alt="Queue Violation" loading="lazy">
+                            </div>`;
+                        } else {
+                            mediaContent = `<div class="gif-preview" style="background: #333; display: flex; align-items: center; justify-content: center; height: 150px;">
+                                <span style="font-size: 3em;">👥</span>
+                            </div>`;
+                        }
+
+                        const card = document.createElement('div');
+                        card.className = 'alert-gif-card';
+                        card.innerHTML = `
+                            ${mediaContent}
+                            <div class="alert-info">
+                                <strong>${alert.channel_id}</strong> • ${dateStr} ${timeStr}
+                            </div>
+                            <div class="alert-message">
+                                ${alert.violation_message || alert.alert_message || 'Queue Violation'}
+                            </div>
+                            <div class="alert-actions">
+                                <button class="btn btn-sm" onclick="deleteQueueViolation(${alert.id})">🗑️ Delete</button>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    });
+                } else {
+                    container.innerHTML = '<p style="text-align: center; padding: 40px; color: var(--text-secondary);">No queue violations found.</p>';
+                }
+            } catch (error) {
+                console.error('Error loading queue violations:', error);
+                container.innerHTML = '<p style="text-align: center; padding: 20px; color: #ef4444;">Error loading violations</p>';
+            }
+        }
+
+        async function deleteQueueViolation(id) {
+            if (!confirm('Delete this violation?')) return;
+            try {
+                const response = await fetch(`/api/delete_queue_violation/${id}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) loadQueueViolations();
+                else alert('Error: ' + data.error);
+            } catch (e) {
+                console.error(e);
+                alert('Failed to delete violation');
+            }
+        }
+
+        async function clearOldQueueViolations() {
+            alert('Feature not available yet.');
+        }
+
+        // Fall Detection Functions
+        async function loadFallSnapshots() {
+            console.log('🔄 Loading fall detection snapshots...');
+            const container = document.getElementById('fall-snapshots-grid');
+            if (!container) return;
+
+            container.innerHTML = '<p style="text-align: center; padding: 20px; color: var(--text-secondary);">Loading snapshots...</p>';
+
+            try {
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_fall_snapshots?store_id=${selectedStore}`);
+                const data = await response.json();
+
+                if (data.success && data.snapshots && data.snapshots.length > 0) {
+                    container.innerHTML = '';
+                    data.snapshots.forEach(snapshot => {
+                        const date = new Date(snapshot.timestamp);
+                        const timeStr = date.toLocaleTimeString();
+                        const dateStr = date.toLocaleDateString();
+
+                        // Parse alert/snapshot data if available
+                        let fallDuration = snapshot.fall_duration || '?';
+
+                        let mediaContent = '';
+                        // Use snapshot_filename (new) or snapshot_path (legacy)
+                        const filename = snapshot.snapshot_filename || (snapshot.snapshot_path ? snapshot.snapshot_path.split('/').pop() : '');
+
+                        if (filename) {
+                            const src = `/static/fall_snapshots/${filename}`;
+                            mediaContent = `<div class="gif-preview" onclick="openLightbox('${src}', 'Fall Detected - ${snapshot.channel_id}', 'Duration: ${fallDuration}s')">
+                                <img src="${src}" alt="Fall Alert" loading="lazy">
+                            </div>`;
+                        } else {
+                            mediaContent = `<div class="gif-preview" style="background: #333; display: flex; align-items: center; justify-content: center; height: 150px;">
+                                <span style="font-size: 3em;">🚨</span>
+                            </div>`;
+                        }
+
+                        const card = document.createElement('div');
+                        card.className = 'alert-gif-card';
+                        card.style.borderLeft = '4px solid #dc2626';
+                        card.innerHTML = `
+                            ${mediaContent}
+                            <div class="alert-info">
+                                <strong>${snapshot.channel_id}</strong> • ${dateStr} ${timeStr}
+                            </div>
+                            <div class="alert-message" style="color: #ef4444; font-weight: bold;">
+                                Fall Detected (${fallDuration}s)
+                            </div>
+                            <div class="alert-actions">
+                                <button class="btn btn-sm btn-danger" onclick="deleteFallSnapshot(${snapshot.id})">🗑️ Delete</button>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    });
+                } else {
+                    container.innerHTML = '<p style="text-align: center; padding: 40px; color: var(--text-secondary);">No fall detection alerts found.</p>';
+                }
+            } catch (error) {
+                console.error('Error loading fall snapshots:', error);
+                container.innerHTML = '<p style="text-align: center; padding: 20px; color: #ef4444;">Error loading snapshots</p>';
+            }
+        }
+
+        async function deleteFallSnapshot(id) {
+            if (!confirm('Delete this fall alert?')) return;
+            try {
+                const response = await fetch(`/api/delete_fall_snapshot/${id}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) loadFallSnapshots();
+                else alert('Error: ' + data.error);
+            } catch (e) {
+                console.error(e);
+                alert('Failed to delete snapshot');
+            }
+        }
+
+        // Unauthorized Entry Monitor Functions
+        async function loadUnauthorizedEntrySnapshots() {
+            const container = document.getElementById('unauthorized-snapshots-grid');
+            if (!container) return;
+
+            container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 40px;">Loading detection history...</p>';
+
+            try {
+                // Fetch alerts from API
+                // We use the common alert_gifs table with type 'unauthorized_entry_alert'
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&store_id=${selectedStore}`);
+                const data = await response.json();
+
+                if (data.success && data.alert_gifs && data.alert_gifs.length > 0) {
+                    container.innerHTML = '';
+
+                    data.alert_gifs.forEach(alert => {
+                        const date = new Date(alert.created_at);
+                        const timeStr = date.toLocaleTimeString();
+                        const dateStr = date.toLocaleDateString();
+
+                        // Parse alert data if available
+                        let personCount = '?';
+                        let details = '';
+
+                        if (alert.alert_data) {
+                            try {
+                                const alertData = typeof alert.alert_data === 'string' ? JSON.parse(alert.alert_data) : alert.alert_data;
+                                if (alertData.person_count !== undefined) {
+                                    personCount = alertData.person_count;
+                                }
+                            } catch (e) {
+                                console.error('Error parsing alert data', e);
+                            }
+                        }
+
+                        // Use a placeholder image if gif_filename is empty (which might be the case for these logic-generated alerts)
+                        // or verify if we have actual GIFs. The debug script showed filenames, so we should be good.
+                        // If filename is empty, show a nice placeholder
+                        let mediaContent = '';
+                        if (alert.gif_filename) {
+                            mediaContent = `<div class="gif-preview" onclick="openLightbox('/static/alerts/${alert.gif_filename}', 'Unauthorized Entry - ${alert.channel_id}', 'Detected ${personCount} person(s) at ${timeStr}')">
+                                <img src="/static/alerts/${alert.gif_filename}" alt="Entry Alert" loading="lazy">
+                                <div class="play-icon">▶</div>
+                            </div>`;
+                        } else {
+                            mediaContent = `<div class="gif-preview" style="background: #333; display: flex; align-items: center; justify-content: center; height: 150px;">
+                                <span style="font-size: 3em;">🚫</span>
+                            </div>`;
+                        }
+
+                        const card = document.createElement('div');
+                        card.className = 'alert-gif-card';
+                        card.innerHTML = `
+                            ${mediaContent}
+                            <div class="alert-info">
+                                <strong>${alert.channel_id}</strong> • ${dateStr} ${timeStr}
+                            </div>
+                            <div class="alert-message">
+                                ${alert.alert_message || `Unauthorized Entry Detected: ${personCount} Person(s)`}
+                            </div>
+                            <div class="alert-actions">
+                                <button class="btn btn-sm" onclick="deleteAlert(${alert.id}, 'unauthorized_entry_alert')">🗑️ Delete</button>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    });
+                } else {
+                    container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 40px;">No unauthorized entry alerts found.</p>';
+                }
+            } catch (error) {
+                console.error('Error loading unauthorized entry snapshots:', error);
+                container.innerHTML = '<p style="color: #ff6b6b; text-align: center; padding: 40px;">Error loading data. Please try again.</p>';
+            }
+        }
+
+        async function clearOldUnauthorizedEntrySnapshots() {
+            if (!confirm('Are you sure you want to delete snapshots older than 7 days?')) return;
+
+            try {
+                const response = await fetch('/api/clear_old_alerts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        alert_type: 'unauthorized_entry_alert',
+                        days: 7
+                    })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert(`Deleted ${data.count} old snapshots.`);
+                    loadUnauthorizedEntrySnapshots();
+                } else {
+                    alert('Failed to clear old snapshots: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error clearing old snapshots:', error);
+                alert('Error processing request.');
+            }
+        }
+
+        // Restricted Area Monitor Functions
+        async function loadRestrictedAreaSnapshots() {
+            const container = document.getElementById('restricted-snapshots-grid');
+            if (!container) return;
+
+            container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 40px;">Loading restricted area violations...</p>';
+
+            try {
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_restricted_area_snapshots?limit=50&store_id=${selectedStore}`);
+                const data = await response.json();
+
+                if (data.success && data.snapshots && data.snapshots.length > 0) {
+                    container.innerHTML = '';
+                    data.snapshots.forEach(snapshot => {
+                        const date = new Date(snapshot.timestamp || snapshot.created_at);
+                        const timeStr = date.toLocaleTimeString();
+                        const dateStr = date.toLocaleDateString();
+
+                        let mediaContent = '';
+                        const filename = snapshot.snapshot_filename || (snapshot.snapshot_path ? snapshot.snapshot_path.split('/').pop() : '');
+
+                        if (filename) {
+                            const src = `/static/restricted_area_snapshots/${filename}`;
+                            mediaContent = `<div class="gif-preview" onclick="openLightbox('${src}', 'Restricted Area Violation - ${snapshot.channel_id}', 'Time: ${timeStr}')">
+                                <img src="${src}" alt="Restricted Area Violation" loading="lazy">
+                            </div>`;
+                        } else {
+                            mediaContent = `<div class="gif-preview" style="background: #333; display: flex; align-items: center; justify-content: center; height: 150px;">
+                                <span style="font-size: 3em;">🚫</span>
+                            </div>`;
+                        }
+
+                        const card = document.createElement('div');
+                        card.className = 'alert-gif-card';
+                        card.style.borderLeft = '4px solid #ef4444';
+                        card.innerHTML = `
+                            ${mediaContent}
+                            <div class="alert-info">
+                                <strong>${snapshot.channel_id}</strong> • ${dateStr} ${timeStr}
+                            </div>
+                            <div class="alert-message">
+                                ${snapshot.alert_message || 'Restricted Area Violation'}
+                            </div>
+                            <div class="alert-actions">
+                                <button class="btn btn-sm btn-danger" onclick="deleteRestrictedAreaSnapshot(${snapshot.id})">🗑️ Delete</button>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    });
+                } else {
+                    container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 40px;">No restricted area violations found.</p>';
+                }
+            } catch (error) {
+                console.error('Error loading restricted area snapshots:', error);
+                container.innerHTML = '<p style="color: #ff6b6b; text-align: center; padding: 40px;">Error loading data. Please try again.</p>';
+            }
+        }
+
+        async function deleteRestrictedAreaSnapshot(id) {
+            if (!confirm('Delete this violation snapshot?')) return;
+            try {
+                const response = await fetch(`/api/delete_restricted_area_snapshot/${id}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) loadRestrictedAreaSnapshots();
+                else alert('Error: ' + data.error);
+            } catch (e) {
+                console.error(e);
+                alert('Failed to delete snapshot');
+            }
+        }
+
+        async function clearOldRestrictedAreaSnapshots() {
+            if (!confirm('Are you sure you want to delete snapshots older than 7 days?')) return;
+
+            try {
+                const response = await fetch('/api/clear_old_restricted_area_snapshots', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ days: 7 })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert(`Deleted ${data.deleted_count || data.count} old snapshots.`);
+                    loadRestrictedAreaSnapshots();
+                } else {
+                    alert('Failed to clear old snapshots: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error clearing old snapshots:', error);
+                alert('Error processing request.');
+            }
+        }
 
     </script>
     <!-- Image Lightbox Modal -->

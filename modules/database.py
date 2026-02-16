@@ -3180,6 +3180,27 @@ class DatabaseManager:
             
         except Exception as e:
             self.db.session.rollback()
+            
+            # Check for unique constraint violation (sequence out of sync)
+            error_str = str(e)
+            if 'UniqueViolation' in error_str and 'queue_violations_pkey' in error_str:
+                logger.warning(f"Sequence out of sync for queue_violations, attempting to fix...")
+                try:
+                    # Get max ID and reset sequence
+                    max_id_result = self.db.session.execute(
+                        self.db.text("SELECT COALESCE(MAX(id), 0) FROM queue_violations")
+                    ).scalar()
+                    new_seq = max_id_result + 1
+                    self.db.session.execute(
+                        self.db.text(f"SELECT setval('queue_violations_id_seq', {new_seq}, false)")
+                    )
+                    self.db.session.commit()
+                    logger.info(f"Fixed queue_violations sequence to {new_seq}, retrying save...")
+                    # Retry the save
+                    return self.add_queue_violation(channel_id, violation_type, violation_message, queue_count, counter_count, wait_time_seconds, snapshot_path, alert_data)
+                except Exception as fix_error:
+                    logger.error(f"Failed to fix sequence: {fix_error}")
+
             logger.error(f"Error adding queue violation: {e}")
             import traceback
             logger.error(traceback.format_exc())
