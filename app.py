@@ -4769,15 +4769,66 @@ def get_dresscode_alerts():
             target_channels = get_channels_for_request(store_id, channel_id)
             if target_channels is None:
                  return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
-            alerts = db_manager.get_dresscode_alerts(channel_id=target_channels, limit=limit)
+            
+            alerts = db_manager.get_dresscode_alerts(channel_id=target_channels, limit=limit, store_id=store_id)
+            
+            # Serialize alerts
+            alerts_data = []
+            for alert in alerts:
+                alerts_data.append({
+                    'id': alert.id,
+                    'channel_id': alert.channel_id,
+                    'violations': alert.violations.split(', ') if alert.violations else [],
+                    'uniform_color': alert.uniform_color,
+                    'snapshot_path': alert.snapshot_path,
+                    'snapshot_filename': alert.snapshot_filename,
+                    'timestamp': alert.created_at.isoformat() if alert.created_at else None,
+                    'alert_message': f"Violations: {alert.violations}"
+                })
         
         return jsonify({
             'success': True,
-            'alerts': alerts,
-            'count': len(alerts)
+            'alerts': alerts_data,
+            'count': len(alerts_data)
         })
     except Exception as e:
         logger.error(f"Error getting dress code alerts: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/delete_alert_gif/<int:alert_id>', methods=['DELETE'])
+def delete_alert_gif(alert_id):
+    """Delete alert GIF (generic handler for UnauthorizedEntry, MaterialTheft, etc.)"""
+    try:
+        if db_manager.delete_alert_gif(alert_id):
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': 'Alert not found'})
+    except Exception as e:
+        logger.error(f"Error deleting list alert GIF: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/delete_dresscode_alert/<int:alert_id>', methods=['DELETE'])
+@login_required
+def delete_dresscode_alert(alert_id):
+    """Delete a dress code alert"""
+    try:
+        if db_manager.delete_dresscode_alert(alert_id):
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': 'Alert not found'})
+    except Exception as e:
+        logger.error(f"Error deleting dress code alert: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/clear_old_dresscode_alerts', methods=['POST'])
+@login_required
+def clear_old_dresscode_alerts():
+    """Clear old dress code alerts"""
+    try:
+        data = request.json
+        days = data.get('days', 7)
+        count = db_manager.clear_old_dresscode_alerts(days=days)
+        return jsonify({'success': True, 'count': count})
+    except Exception as e:
+        logger.error(f"Error clearing old dress code alerts: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/set_counter_roi', methods=['POST'])
@@ -5202,6 +5253,7 @@ def get_dresscode_stats():
     except Exception as e:
         logger.error(f"Error getting dress code stats: {e}")
         return jsonify({'success': False, 'error': str(e)})
+
 
 @app.route('/api/get_ppe_alerts')
 def get_ppe_alerts():
