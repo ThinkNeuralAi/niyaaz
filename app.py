@@ -4840,29 +4840,6 @@ def get_dresscode_alerts():
         logger.error(f"Error getting dress code alerts: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/api/delete_alert_gif/<int:alert_id>', methods=['DELETE'])
-def delete_alert_gif(alert_id):
-    """Delete alert GIF (generic handler for UnauthorizedEntry, MaterialTheft, etc.)"""
-    try:
-        if db_manager.delete_alert_gif(alert_id):
-            return jsonify({'success': True})
-        return jsonify({'success': False, 'error': 'Alert not found'})
-    except Exception as e:
-        logger.error(f"Error deleting list alert GIF: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
-@app.route('/api/delete_dresscode_alert/<int:alert_id>', methods=['DELETE'])
-@login_required
-def delete_dresscode_alert(alert_id):
-    """Delete a dress code alert"""
-    try:
-        if db_manager.delete_dresscode_alert(alert_id):
-            return jsonify({'success': True})
-        return jsonify({'success': False, 'error': 'Alert not found'})
-    except Exception as e:
-        logger.error(f"Error deleting dress code alert: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
 @app.route('/api/clear_old_dresscode_alerts', methods=['POST'])
 @login_required
 def clear_old_dresscode_alerts():

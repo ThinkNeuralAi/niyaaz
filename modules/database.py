@@ -4446,88 +4446,87 @@ class DatabaseManager:
                 'daily_counts': {},
                 'period_days': days
             }
-        #   D r e s s   C o d e   M o n i t o r i n g   M e t h o d s  
-         d e f   a d d _ d r e s s c o d e _ a l e r t ( s e l f ,   c h a n n e l _ i d ,   v i o l a t i o n s ,   u n i f o r m _ c o l o r = N o n e ,   s n a p s h o t _ p a t h = N o n e ,   e m p l o y e e _ i d = N o n e ) :  
-                 " " " A d d   a   d r e s s   c o d e   v i o l a t i o n " " "  
-                 t r y :  
-                         a l e r t   =   s e l f . D r e s s C o d e V i o l a t i o n (  
-                                 c h a n n e l _ i d = c h a n n e l _ i d ,  
-                                 v i o l a t i o n s = v i o l a t i o n s ,  
-                                 u n i f o r m _ c o l o r = u n i f o r m _ c o l o r ,  
-                                 s n a p s h o t _ p a t h = s n a p s h o t _ p a t h ,  
-                                 e m p l o y e e _ i d = e m p l o y e e _ i d  
-                         )  
-                         i f   s n a p s h o t _ p a t h :  
-                                 a l e r t . s n a p s h o t _ f i l e n a m e   =   o s . p a t h . b a s e n a m e ( s n a p s h o t _ p a t h )  
-                          
-                         s e l f . d b . s e s s i o n . a d d ( a l e r t )  
-                         s e l f . d b . s e s s i o n . c o m m i t ( )  
-                         r e t u r n   a l e r t  
-                 e x c e p t   E x c e p t i o n   a s   e :  
-                         s e l f . d b . s e s s i o n . r o l l b a c k ( )  
-                         l o g g e r . e r r o r ( f " E r r o r   a d d i n g   d r e s s   c o d e   a l e r t :   { e } " )  
-                         r e t u r n   N o n e  
-  
-         d e f   g e t _ d r e s s c o d e _ a l e r t s ( s e l f ,   l i m i t = 1 0 0 ,   o f f s e t = 0 ,   c h a n n e l _ i d = N o n e ,   s t o r e _ i d = N o n e ) :  
-                 " " " G e t   d r e s s   c o d e   a l e r t s   w i t h   p a g i n a t i o n   a n d   f i l t e r i n g " " "  
-                 t r y :  
-                         q u e r y   =   s e l f . D r e s s C o d e V i o l a t i o n . q u e r y  
-                          
-                         i f   s t o r e _ i d :  
-                                 #   J o i n   w i t h   R T S P L i n k   t o   f i l t e r   b y   s t o r e _ i d  
-                                 q u e r y   =   q u e r y . j o i n (  
-                                         s e l f . R T S P L i n k ,    
-                                         s e l f . R T S P L i n k . c h a n n e l _ i d   = =   s e l f . D r e s s C o d e V i o l a t i o n . c h a n n e l _ i d  
-                                 ) . f i l t e r ( s e l f . R T S P L i n k . s t o r e _ i d   = =   s t o r e _ i d )  
-                          
-                         i f   c h a n n e l _ i d :  
-                                 i f   i s i n s t a n c e ( c h a n n e l _ i d ,   l i s t ) :  
-                                         q u e r y   =   q u e r y . f i l t e r ( s e l f . D r e s s C o d e V i o l a t i o n . c h a n n e l _ i d . i n _ ( c h a n n e l _ i d ) )  
-                                 e l s e :  
-                                         q u e r y   =   q u e r y . f i l t e r ( s e l f . D r e s s C o d e V i o l a t i o n . c h a n n e l _ i d   = =   c h a n n e l _ i d )  
-                          
-                         r e t u r n   q u e r y . o r d e r _ b y ( s e l f . D r e s s C o d e V i o l a t i o n . c r e a t e d _ a t . d e s c ( ) ) . o f f s e t ( o f f s e t ) . l i m i t ( l i m i t ) . a l l ( )  
-                 e x c e p t   E x c e p t i o n   a s   e :  
-                         l o g g e r . e r r o r ( f " E r r o r   g e t t i n g   d r e s s   c o d e   a l e r t s :   { e } " )  
-                         r e t u r n   [ ]  
-  
-         d e f   d e l e t e _ d r e s s c o d e _ a l e r t ( s e l f ,   a l e r t _ i d ) :  
-                 " " " D e l e t e   a   d r e s s   c o d e   a l e r t " " "  
-                 t r y :  
-                         a l e r t   =   s e l f . D r e s s C o d e V i o l a t i o n . q u e r y . g e t ( a l e r t _ i d )  
-                         i f   a l e r t :  
-                                 i f   a l e r t . s n a p s h o t _ p a t h   a n d   o s . p a t h . e x i s t s ( a l e r t . s n a p s h o t _ p a t h ) :  
-                                           t r y :  
-                                                   o s . r e m o v e ( a l e r t . s n a p s h o t _ p a t h )  
-                                           e x c e p t   O S E r r o r :  
-                                                   p a s s  
-                                 s e l f . d b . s e s s i o n . d e l e t e ( a l e r t )  
-                                 s e l f . d b . s e s s i o n . c o m m i t ( )  
-                                 r e t u r n   T r u e  
-                         r e t u r n   F a l s e  
-                 e x c e p t   E x c e p t i o n   a s   e :  
-                         s e l f . d b . s e s s i o n . r o l l b a c k ( )  
-                         l o g g e r . e r r o r ( f " E r r o r   d e l e t i n g   d r e s s   c o d e   a l e r t :   { e } " )  
-                         r e t u r n   F a l s e  
-  
-         d e f   c l e a r _ o l d _ d r e s s c o d e _ a l e r t s ( s e l f ,   d a y s = 3 0 ) :  
-                 " " " C l e a r   d r e s s   c o d e   a l e r t s   o l d e r   t h a n   s p e c i f i e d   d a y s " " "  
-                 t r y :  
-                         c u t o f f _ d a t e   =   g e t _ i s t _ n o w ( )   -   t i m e d e l t a ( d a y s = d a y s )  
-                         o l d _ a l e r t s   =   s e l f . D r e s s C o d e V i o l a t i o n . q u e r y . f i l t e r ( s e l f . D r e s s C o d e V i o l a t i o n . c r e a t e d _ a t   <   c u t o f f _ d a t e ) . a l l ( )  
-                         c o u n t   =   0  
-                         f o r   a l e r t   i n   o l d _ a l e r t s :  
-                                 i f   a l e r t . s n a p s h o t _ p a t h   a n d   o s . p a t h . e x i s t s ( a l e r t . s n a p s h o t _ p a t h ) :  
-                                         t r y :  
-                                                 o s . r e m o v e ( a l e r t . s n a p s h o t _ p a t h )  
-                                         e x c e p t   O S E r r o r :  
-                                                 p a s s  
-                                 s e l f . d b . s e s s i o n . d e l e t e ( a l e r t )  
-                                 c o u n t   + =   1  
-                         s e l f . d b . s e s s i o n . c o m m i t ( )  
-                         r e t u r n   c o u n t  
-                 e x c e p t   E x c e p t i o n   a s   e :  
-                         s e l f . d b . s e s s i o n . r o l l b a c k ( )  
-                         l o g g e r . e r r o r ( f " E r r o r   c l e a r i n g   o l d   d r e s s   c o d e   a l e r t s :   { e } " )  
-                         r e t u r n   0  
- 
+    # Dress Code Monitoring Methods
+    def add_dresscode_alert(self, channel_id, violations, uniform_color=None, snapshot_path=None, employee_id=None):
+        """Add a dress code violation"""
+        try:
+            alert = self.DressCodeViolation(
+                channel_id=channel_id,
+                violations=violations,
+                uniform_color=uniform_color,
+                snapshot_path=snapshot_path,
+                employee_id=employee_id
+            )
+            if snapshot_path:
+                alert.snapshot_filename = os.path.basename(snapshot_path)
+            
+            self.db.session.add(alert)
+            self.db.session.commit()
+            return alert
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error adding dress code alert: {e}")
+            return None
+
+    def get_dresscode_alerts(self, limit=100, offset=0, channel_id=None, store_id=None):
+        """Get dress code alerts with pagination and filtering"""
+        try:
+            query = self.DressCodeViolation.query
+            
+            if store_id:
+                # Join with RTSPLink to filter by store_id
+                query = query.join(
+                    self.RTSPLink, 
+                    self.RTSPLink.channel_id == self.DressCodeViolation.channel_id
+                ).filter(self.RTSPLink.store_id == store_id)
+            
+            if channel_id:
+                if isinstance(channel_id, list):
+                    query = query.filter(self.DressCodeViolation.channel_id.in_(channel_id))
+                else:
+                    query = query.filter(self.DressCodeViolation.channel_id == channel_id)
+            
+            return query.order_by(self.DressCodeViolation.created_at.desc()).offset(offset).limit(limit).all()
+        except Exception as e:
+            logger.error(f"Error getting dress code alerts: {e}")
+            return []
+
+    def delete_dresscode_alert(self, alert_id):
+        """Delete a dress code alert"""
+        try:
+            alert = self.DressCodeViolation.query.get(alert_id)
+            if alert:
+                if alert.snapshot_path and os.path.exists(alert.snapshot_path):
+                     try:
+                         os.remove(alert.snapshot_path)
+                     except OSError:
+                         pass
+                self.db.session.delete(alert)
+                self.db.session.commit()
+                return True
+            return False
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error deleting dress code alert: {e}")
+            return False
+
+    def clear_old_dresscode_alerts(self, days=30):
+        """Clear dress code alerts older than specified days"""
+        try:
+            cutoff_date = get_ist_now() - timedelta(days=days)
+            old_alerts = self.DressCodeViolation.query.filter(self.DressCodeViolation.created_at < cutoff_date).all()
+            count = 0
+            for alert in old_alerts:
+                if alert.snapshot_path and os.path.exists(alert.snapshot_path):
+                    try:
+                        os.remove(alert.snapshot_path)
+                    except OSError:
+                        pass
+                self.db.session.delete(alert)
+                count += 1
+            self.db.session.commit()
+            return count
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error clearing old dress code alerts: {e}")
+            return 0
