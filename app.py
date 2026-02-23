@@ -2430,9 +2430,24 @@ def get_module_analytics(module_name):
             except Exception as e:
                 logger.error(f"Error getting dress code stats: {e}")
             
+            # Also check alert_gifs for dresscode alerts as fallback
+            # (pipeline may write to alert_gifs instead of dresscode_alerts)
+            alert_gifs_count = 0
+            today_alerts = 0
+            try:
+                with app.app_context():
+                    alert_gifs_count = db_manager.get_alert_count('dresscode_alert', days=7) or 0
+                    today_alerts = db_manager.get_alert_count('dresscode_alert', days=1) or 0
+            except Exception as e:
+                logger.error(f"Error getting dresscode alert_gifs count: {e}")
+            
+            # Use the larger of the two sources
+            total_violations = max(db_stats.get('total_violations', 0), alert_gifs_count)
+            
             analytics = {
                 'module': 'Dress Code Monitoring',
-                'total_violations': db_stats.get('total_violations', 0),
+                'total_violations': total_violations,
+                'today_alerts': today_alerts,
                 'violation_types': db_stats.get('violation_types', {}),
                 'uniform_colors': db_stats.get('uniform_colors', {}),
                 'active_channels': len(active_channels),
@@ -2598,9 +2613,24 @@ def get_module_analytics(module_name):
                 logger.error(f"Error getting table cleanliness analytics: {e}")
                 total_alerts = 0
             
+            # Also check alert_gifs for table_cleanliness_alert as fallback
+            # (pipeline may write to alert_gifs instead of table_cleanliness_violations)
+            alert_gifs_count = 0
+            today_alerts = 0
+            try:
+                with app.app_context():
+                    alert_gifs_count = db_manager.get_alert_count('table_cleanliness_alert', days=7) or 0
+                    today_alerts = db_manager.get_alert_count('table_cleanliness_alert', days=1) or 0
+            except Exception as e:
+                logger.error(f"Error getting table cleanliness alert_gifs count: {e}")
+            
+            # Use the larger of the two sources for total count
+            total_alerts = max(total_alerts, alert_gifs_count)
+            
             analytics = {
                 'module': 'Table Cleanliness',
                 'total_alerts_7days': total_alerts,
+                'today_alerts': today_alerts,
                 'active_channels': len(active_channels),
                 'channels': active_channels,
                 'avg_unclean_time': round(avg_unclean_time, 1),  # Average time tables remain unclean (seconds)
@@ -2851,9 +2881,24 @@ def get_module_analytics(module_name):
                 avg_service_wait_time = 0
                 max_service_wait_time = 0
             
+            # Also check alert_gifs for service_discipline_alert as fallback
+            # (pipeline may write to alert_gifs instead of table_service_violations)
+            alert_gifs_count = 0
+            today_alerts = 0
+            try:
+                with app.app_context():
+                    alert_gifs_count = db_manager.get_alert_count('service_discipline_alert', days=7) or 0
+                    today_alerts = db_manager.get_alert_count('service_discipline_alert', days=1) or 0
+            except Exception as e:
+                logger.error(f"Error getting service discipline alert_gifs count: {e}")
+            
+            # Use the larger of the two sources for total count
+            total_alerts = max(total_alerts, alert_gifs_count)
+            
             analytics = {
                 'module': 'Service Discipline',
                 'total_alerts_7days': total_alerts,
+                'today_alerts': today_alerts,
                 'avg_wait_time': round(avg_wait_time, 1),
                 'max_wait_time': round(max_wait_time, 1),
                 'avg_order_wait_time': round(avg_order_wait_time, 1),
