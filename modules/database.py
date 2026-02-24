@@ -10,7 +10,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-def _send_telegram_alert(channel_id, alert_type, alert_message, snapshot_path=None, alert_data=None):
+def _send_telegram_alert(channel_id, alert_type, alert_message, snapshot_path=None, alert_data=None, store_name=None):
     """Helper function to send Telegram alert notification"""
     try:
         from modules.telegram_notifier import get_telegram_notifier
@@ -23,7 +23,8 @@ def _send_telegram_alert(channel_id, alert_type, alert_message, snapshot_path=No
             alert_type=alert_type,
             alert_message=alert_message or f"Alert from {channel_id}",
             image_path=snapshot_path,  # Pass as-is, let notifier resolve
-            alert_data=alert_data
+            alert_data=alert_data,
+            store_name=store_name
         )
     except Exception as tg_error:
         logger.warning(f"Failed to send Telegram notification: {tg_error}", exc_info=True)
@@ -335,6 +336,76 @@ class DatabaseManager:
             alert_data = self.db.Column(self.db.Text)  # JSON data with detailed violation info
             file_size = self.db.Column(self.db.Integer)  # File size in bytes (if snapshot exists)
             created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+
+        # Dress Code Violations
+        class DressCodeViolation(self.db.Model):
+            __tablename__ = 'dresscode_violations'
+
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            channel_id = self.db.Column(self.db.String(50), nullable=False)
+            violations = self.db.Column(self.db.Text, nullable=False)  # Comma-separated list of violations
+            uniform_color = self.db.Column(self.db.String(50))
+            snapshot_filename = self.db.Column(self.db.String(255))
+            snapshot_path = self.db.Column(self.db.String(500))
+            employee_id = self.db.Column(self.db.String(50))  # Optional: if we can identify employee
+            created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+        
+        # Store Management
+        class Store(self.db.Model):
+            __tablename__ = 'stores'
+            
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            store_id = self.db.Column(self.db.String(50), unique=True, nullable=False)
+            name = self.db.Column(self.db.String(100), nullable=False)
+            location = self.db.Column(self.db.String(200), nullable=False)
+            description = self.db.Column(self.db.Text)
+            is_active = self.db.Column(self.db.Boolean, default=True)
+            is_default = self.db.Column(self.db.Boolean, default=False)
+            excluded_modules = self.db.Column(self.db.Text)  # JSON array of module names to exclude
+            created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+            updated_at = self.db.Column(self.db.DateTime, default=get_ist_now, onupdate=get_ist_now)
+        
+        # RTSP Link Configuration
+        class RTSPLink(self.db.Model):
+            __tablename__ = 'rtsp_links'
+            
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            channel_id = self.db.Column(self.db.String(50), unique=True, nullable=False)
+            store_id = self.db.Column(self.db.String(50), nullable=False)
+            channel_name = self.db.Column(self.db.String(100), nullable=False)
+            rtsp_url = self.db.Column(self.db.String(500), nullable=False)
+            description = self.db.Column(self.db.Text)
+            is_active = self.db.Column(self.db.Boolean, default=True)
+            resolution = self.db.Column(self.db.String(50))  # e.g., '1920x1080'
+            fps = self.db.Column(self.db.Integer)  # Frames per second
+            codec = self.db.Column(self.db.String(50))  # e.g., 'h264', 'h265'
+            created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+            updated_at = self.db.Column(self.db.DateTime, default=get_ist_now, onupdate=get_ist_now)
+            
+            # Foreign key relationship
+            __table_args__ = (self.db.ForeignKeyConstraint(['store_id'], ['stores.store_id']),)
+        
+        # Channel Modules Configuration
+        class ChannelModule(self.db.Model):
+            __tablename__ = 'channel_modules'
+            
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            channel_id = self.db.Column(self.db.String(50), nullable=False)
+            store_id = self.db.Column(self.db.String(50), nullable=False)
+            module_name = self.db.Column(self.db.String(100), nullable=False)  # e.g., 'QueueMonitor', 'PPEMonitoring'
+            module_type = self.db.Column(self.db.String(50), nullable=False)  # Type of module
+            enabled = self.db.Column(self.db.Boolean, default=True)
+            config_data = self.db.Column(self.db.Text)  # JSON data with module-specific configuration (ROI, thresholds, etc.)
+            is_default = self.db.Column(self.db.Boolean, default=False)  # Use default config if true
+            created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+            updated_at = self.db.Column(self.db.DateTime, default=get_ist_now, onupdate=get_ist_now)
+            
+            # Unique constraint to prevent duplicate module configs per channel
+            __table_args__ = (
+                self.db.UniqueConstraint('channel_id', 'module_name'),
+                self.db.ForeignKeyConstraint(['store_id'], ['stores.store_id']),
+                self.db.ForeignKeyConstraint(['channel_id'], ['rtsp_links.channel_id']),
+            )
         
         # Store Management
         class Store(self.db.Model):
@@ -405,6 +476,7 @@ class DatabaseManager:
         self.HeatmapSnapshot = HeatmapSnapshot
         self.TableServiceViolation = TableServiceViolation
         self.TableCleanlinessViolation = TableCleanlinessViolation
+        self.DressCodeViolation = DressCodeViolation
         self.Store = Store
         self.RTSPLink = RTSPLink
         self.ChannelModule = ChannelModule
@@ -418,466 +490,6 @@ class DatabaseManager:
         self.SmokingSnapshot = SmokingSnapshot
         self.PhoneSnapshot = PhoneSnapshot
         self.RestrictedAreaSnapshot = RestrictedAreaSnapshot
-
-    # ==================== Store Management Methods ====================
-    
-    def add_store(self, store_id, name, location, description=None, is_active=True, is_default=False, excluded_modules=None):
-        """Add a new store to the database"""
-        import json
-        try:
-            existing = self.Store.query.filter_by(store_id=store_id).first()
-            if existing:
-                logger.warning(f"Store {store_id} already exists")
-                return None
-            
-            excluded_modules_str = None
-            if excluded_modules:
-                if isinstance(excluded_modules, list):
-                    excluded_modules_str = json.dumps(excluded_modules)
-                else:
-                    excluded_modules_str = excluded_modules
-            
-            store = self.Store(
-                store_id=store_id,
-                name=name,
-                location=location,
-                description=description,
-                is_active=is_active,
-                is_default=is_default,
-                excluded_modules=excluded_modules_str
-            )
-            self.db.session.add(store)
-            self.db.session.commit()
-            logger.info(f"Store added: {store_id} - {name}")
-            return store.id
-        except Exception as e:
-            logger.error(f"Error adding store: {e}")
-            self.db.session.rollback()
-            return None
-    
-    def get_store(self, store_id):
-        """Get store details by store_id"""
-        import json
-        try:
-            store = self.Store.query.filter_by(store_id=store_id).first()
-            if not store:
-                return None
-            
-            excluded_modules = []
-            if store.excluded_modules:
-                try:
-                    excluded_modules = json.loads(store.excluded_modules)
-                except:
-                    excluded_modules = []
-            
-            return {
-                'id': store.id,
-                'store_id': store.store_id,
-                'name': store.name,
-                'location': store.location,
-                'description': store.description,
-                'is_active': store.is_active,
-                'is_default': store.is_default,
-                'excluded_modules': excluded_modules,
-                'created_at': store.created_at.isoformat() if store.created_at else None,
-                'updated_at': store.updated_at.isoformat() if store.updated_at else None,
-            }
-        except Exception as e:
-            logger.error(f"Error getting store: {e}")
-            return None
-    
-    def get_all_stores(self):
-        """Get all stores from database"""
-        import json
-        try:
-            stores = self.Store.query.all()
-            result = []
-            for store in stores:
-                excluded_modules = []
-                if store.excluded_modules:
-                    try:
-                        excluded_modules = json.loads(store.excluded_modules)
-                    except:
-                        excluded_modules = []
-                
-                result.append({
-                    'id': store.id,
-                    'store_id': store.store_id,
-                    'name': store.name,
-                    'location': store.location,
-                    'description': store.description,
-                    'is_active': store.is_active,
-                    'is_default': store.is_default,
-                    'excluded_modules': excluded_modules,
-                    'created_at': store.created_at.isoformat() if store.created_at else None,
-                    'updated_at': store.updated_at.isoformat() if store.updated_at else None,
-                })
-            return result
-        except Exception as e:
-            logger.error(f"Error getting all stores: {e}")
-            return []
-    
-    def update_store(self, store_id, **kwargs):
-        """Update store details"""
-        import json
-        try:
-            store = self.Store.query.filter_by(store_id=store_id).first()
-            if not store:
-                logger.warning(f"Store {store_id} not found")
-                return False
-            
-            for key, value in kwargs.items():
-                if key == 'excluded_modules' and value is not None:
-                    if isinstance(value, list):
-                        setattr(store, key, json.dumps(value))
-                    else:
-                        setattr(store, key, value)
-                elif key in ['name', 'location', 'description', 'is_active', 'is_default']:
-                    setattr(store, key, value)
-            
-            store.updated_at = get_ist_now()
-            self.db.session.commit()
-            logger.info(f"Store updated: {store_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating store: {e}")
-            self.db.session.rollback()
-            return False
-    
-    def delete_store(self, store_id):
-        """Delete a store"""
-        try:
-            store = self.Store.query.filter_by(store_id=store_id).first()
-            if not store:
-                logger.warning(f"Store {store_id} not found")
-                return False
-            
-            self.db.session.delete(store)
-            self.db.session.commit()
-            logger.info(f"Store deleted: {store_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error deleting store: {e}")
-            self.db.session.rollback()
-            return False
-    
-    # ==================== RTSP Link Management Methods ====================
-    
-    def add_rtsp_link(self, channel_id, store_id, channel_name, rtsp_url, description=None, 
-                      is_active=True, resolution=None, fps=None, codec=None):
-        """Add a new RTSP link/channel to the database"""
-        try:
-            existing = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
-            if existing:
-                logger.warning(f"RTSP link {channel_id} already exists")
-                return None
-            
-            rtsp_link = self.RTSPLink(
-                channel_id=channel_id,
-                store_id=store_id,
-                channel_name=channel_name,
-                rtsp_url=rtsp_url,
-                description=description,
-                is_active=is_active,
-                resolution=resolution,
-                fps=fps,
-                codec=codec
-            )
-            self.db.session.add(rtsp_link)
-            self.db.session.commit()
-            logger.info(f"RTSP link added: {channel_id} for store {store_id}")
-            return rtsp_link.id
-        except Exception as e:
-            logger.error(f"Error adding RTSP link: {e}")
-            self.db.session.rollback()
-            return None
-    
-    def get_rtsp_link(self, channel_id):
-        """Get RTSP link details by channel_id"""
-        try:
-            link = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
-            if not link:
-                return None
-            
-            return {
-                'id': link.id,
-                'channel_id': link.channel_id,
-                'store_id': link.store_id,
-                'channel_name': link.channel_name,
-                'rtsp_url': link.rtsp_url,
-                'description': link.description,
-                'is_active': link.is_active,
-                'resolution': link.resolution,
-                'fps': link.fps,
-                'codec': link.codec,
-                'created_at': link.created_at.isoformat() if link.created_at else None,
-                'updated_at': link.updated_at.isoformat() if link.updated_at else None,
-            }
-        except Exception as e:
-            logger.error(f"Error getting RTSP link: {e}")
-            return None
-    
-    def get_rtsp_links_by_store(self, store_id):
-        """Get all RTSP links for a specific store"""
-        try:
-            links = self.RTSPLink.query.filter_by(store_id=store_id).all()
-            result = []
-            for link in links:
-                result.append({
-                    'id': link.id,
-                    'channel_id': link.channel_id,
-                    'store_id': link.store_id,
-                    'channel_name': link.channel_name,
-                    'rtsp_url': link.rtsp_url,
-                    'description': link.description,
-                    'is_active': link.is_active,
-                    'resolution': link.resolution,
-                    'fps': link.fps,
-                    'codec': link.codec,
-                    'created_at': link.created_at.isoformat() if link.created_at else None,
-                    'updated_at': link.updated_at.isoformat() if link.updated_at else None,
-                })
-            return result
-        except Exception as e:
-            logger.error(f"Error getting RTSP links for store {store_id}: {e}")
-            return []
-    
-    def get_all_rtsp_links(self):
-        """Get all RTSP links from database"""
-        try:
-            links = self.RTSPLink.query.all()
-            result = []
-            for link in links:
-                result.append({
-                    'id': link.id,
-                    'channel_id': link.channel_id,
-                    'store_id': link.store_id,
-                    'channel_name': link.channel_name,
-                    'rtsp_url': link.rtsp_url,
-                    'description': link.description,
-                    'is_active': link.is_active,
-                    'resolution': link.resolution,
-                    'fps': link.fps,
-                    'codec': link.codec,
-                    'created_at': link.created_at.isoformat() if link.created_at else None,
-                    'updated_at': link.updated_at.isoformat() if link.updated_at else None,
-                })
-            return result
-        except Exception as e:
-            logger.error(f"Error getting all RTSP links: {e}")
-            return []
-    
-    def update_rtsp_link(self, channel_id, **kwargs):
-        """Update RTSP link details"""
-        try:
-            link = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
-            if not link:
-                logger.warning(f"RTSP link {channel_id} not found")
-                return False
-            
-            for key, value in kwargs.items():
-                if key in ['channel_name', 'rtsp_url', 'description', 'is_active', 'resolution', 'fps', 'codec']:
-                    setattr(link, key, value)
-            
-            link.updated_at = get_ist_now()
-            self.db.session.commit()
-            logger.info(f"RTSP link updated: {channel_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating RTSP link: {e}")
-            self.db.session.rollback()
-            return False
-    
-    def delete_rtsp_link(self, channel_id):
-        """Delete an RTSP link"""
-        try:
-            link = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
-            if not link:
-                logger.warning(f"RTSP link {channel_id} not found")
-                return False
-            
-            self.db.session.delete(link)
-            self.db.session.commit()
-            logger.info(f"RTSP link deleted: {channel_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error deleting RTSP link: {e}")
-            self.db.session.rollback()
-            return False
-    
-    # ==================== Channel Module Management Methods ====================
-    
-    def add_channel_module(self, channel_id, store_id, module_name, module_type, enabled=True, 
-                          config_data=None, is_default=False):
-        """Add a module configuration to a channel"""
-        import json
-        try:
-            existing = self.ChannelModule.query.filter_by(channel_id=channel_id, module_name=module_name).first()
-            if existing:
-                logger.warning(f"Module {module_name} already configured for channel {channel_id}")
-                return None
-            
-            config_data_str = None
-            if config_data:
-                if isinstance(config_data, dict):
-                    config_data_str = json.dumps(config_data)
-                else:
-                    config_data_str = config_data
-            
-            module = self.ChannelModule(
-                channel_id=channel_id,
-                store_id=store_id,
-                module_name=module_name,
-                module_type=module_type,
-                enabled=enabled,
-                config_data=config_data_str,
-                is_default=is_default
-            )
-            self.db.session.add(module)
-            self.db.session.commit()
-            logger.info(f"Channel module added: {module_name} for channel {channel_id}")
-            return module.id
-        except Exception as e:
-            logger.error(f"Error adding channel module: {e}")
-            self.db.session.rollback()
-            return None
-    
-    def get_channel_module(self, channel_id, module_name):
-        """Get module configuration for a channel"""
-        import json
-        try:
-            module = self.ChannelModule.query.filter_by(channel_id=channel_id, module_name=module_name).first()
-            if not module:
-                return None
-            
-            config_data = None
-            if module.config_data:
-                try:
-                    config_data = json.loads(module.config_data)
-                except:
-                    config_data = module.config_data
-            
-            return {
-                'id': module.id,
-                'channel_id': module.channel_id,
-                'store_id': module.store_id,
-                'module_name': module.module_name,
-                'module_type': module.module_type,
-                'enabled': module.enabled,
-                'config_data': config_data,
-                'is_default': module.is_default,
-                'created_at': module.created_at.isoformat() if module.created_at else None,
-                'updated_at': module.updated_at.isoformat() if module.updated_at else None,
-            }
-        except Exception as e:
-            logger.error(f"Error getting channel module: {e}")
-            return None
-    
-    def get_channel_modules(self, channel_id):
-        """Get all modules configured for a channel"""
-        import json
-        try:
-            modules = self.ChannelModule.query.filter_by(channel_id=channel_id).all()
-            result = []
-            for module in modules:
-                config_data = None
-                if module.config_data:
-                    try:
-                        config_data = json.loads(module.config_data)
-                    except:
-                        config_data = module.config_data
-                
-                result.append({
-                    'id': module.id,
-                    'channel_id': module.channel_id,
-                    'store_id': module.store_id,
-                    'module_name': module.module_name,
-                    'module_type': module.module_type,
-                    'enabled': module.enabled,
-                    'config_data': config_data,
-                    'is_default': module.is_default,
-                    'created_at': module.created_at.isoformat() if module.created_at else None,
-                    'updated_at': module.updated_at.isoformat() if module.updated_at else None,
-                })
-            return result
-        except Exception as e:
-            logger.error(f"Error getting channel modules: {e}")
-            return []
-    
-    def get_modules_by_store(self, store_id):
-        """Get all modules configured for a store (across all channels)"""
-        import json
-        try:
-            modules = self.ChannelModule.query.filter_by(store_id=store_id).all()
-            result = []
-            for module in modules:
-                config_data = None
-                if module.config_data:
-                    try:
-                        config_data = json.loads(module.config_data)
-                    except:
-                        config_data = module.config_data
-                
-                result.append({
-                    'id': module.id,
-                    'channel_id': module.channel_id,
-                    'store_id': module.store_id,
-                    'module_name': module.module_name,
-                    'module_type': module.module_type,
-                    'enabled': module.enabled,
-                    'config_data': config_data,
-                    'is_default': module.is_default,
-                    'created_at': module.created_at.isoformat() if module.created_at else None,
-                    'updated_at': module.updated_at.isoformat() if module.updated_at else None,
-                })
-            return result
-        except Exception as e:
-            logger.error(f"Error getting modules for store {store_id}: {e}")
-            return []
-    
-    def update_channel_module(self, channel_id, module_name, **kwargs):
-        """Update module configuration for a channel"""
-        import json
-        try:
-            module = self.ChannelModule.query.filter_by(channel_id=channel_id, module_name=module_name).first()
-            if not module:
-                logger.warning(f"Module {module_name} not found for channel {channel_id}")
-                return False
-            
-            for key, value in kwargs.items():
-                if key == 'config_data' and value is not None:
-                    if isinstance(value, dict):
-                        setattr(module, key, json.dumps(value))
-                    else:
-                        setattr(module, key, value)
-                elif key in ['enabled', 'is_default']:
-                    setattr(module, key, value)
-            
-            module.updated_at = get_ist_now()
-            self.db.session.commit()
-            logger.info(f"Channel module updated: {module_name} for channel {channel_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating channel module: {e}")
-            self.db.session.rollback()
-            return False
-    
-    def delete_channel_module(self, channel_id, module_name):
-        """Delete a module configuration from a channel"""
-        try:
-            module = self.ChannelModule.query.filter_by(channel_id=channel_id, module_name=module_name).first()
-            if not module:
-                logger.warning(f"Module {module_name} not found for channel {channel_id}")
-                return False
-            
-            self.db.session.delete(module)
-            self.db.session.commit()
-            logger.info(f"Channel module deleted: {module_name} from channel {channel_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error deleting channel module: {e}")
-            self.db.session.rollback()
-            return False
 
     def add_table_cleanliness_violation(
         self,
@@ -931,12 +543,14 @@ class DatabaseManager:
             # Send Telegram notification (can be disabled via environment variable)
             if not os.getenv("DISABLE_TABLE_SERVICE_ALERTS", "").lower() in ("true", "1", "yes"):
                 violation_msg = "Unclean table" if violation_type == 'unclean_table' else "Slow table reset"
+                store_name = self.get_store_name_for_channel(channel_id)
                 _send_telegram_alert(
                     channel_id=channel_id,
                     alert_type='table_cleanliness_violation',
                     alert_message=f"Table {table_id}: {violation_msg}",
                     snapshot_path=snapshot_path,
-                    alert_data={'table_id': table_id, 'violation_type': violation_type}
+                    alert_data={'table_id': table_id, 'violation_type': violation_type},
+                    store_name=store_name
                 )
             else:
                 logger.debug(f"Table cleanliness violation alerts disabled via DISABLE_TABLE_SERVICE_ALERTS environment variable")
@@ -1552,7 +1166,7 @@ class DatabaseManager:
                     'date': d.report_date.isoformat(),
                     'in_count': d.in_count,
                     'out_count': d.out_count,
-                    'total': d.in_count + d.out_count
+                    'total': d.in_count + d.in_count
                 } for d in daily_data
             ]
         }
@@ -1707,20 +1321,24 @@ class DatabaseManager:
                         full_gif_path = None
                 
                 if full_gif_path:
+                    store_name = self.get_store_name_for_channel(channel_id)
                     notifier.send_alert(
                         channel_id=channel_id,
                         alert_type=alert_type,
                         alert_message=alert_message or f"Alert from {channel_id}",
                         image_path=full_gif_path,
-                        alert_data=alert_data
+                        alert_data=alert_data,
+                        store_name=store_name
                     )
                 else:
                     # Send text-only if GIF path not found
+                    store_name = self.get_store_name_for_channel(channel_id)
                     notifier.send_alert(
                         channel_id=channel_id,
                         alert_type=alert_type,
                         alert_message=alert_message or f"Alert from {channel_id}",
-                        alert_data=alert_data
+                        alert_data=alert_data,
+                        store_name=store_name
                     )
             except Exception as tg_error:
                 logger.warning(f"Failed to send Telegram notification: {tg_error}")
@@ -1773,11 +1391,13 @@ class DatabaseManager:
             try:
                 from modules.telegram_notifier import get_telegram_notifier
                 notifier = get_telegram_notifier()
+                store_name = self.get_store_name_for_channel(channel_id)
                 notifier.send_alert(
                     channel_id=channel_id,
                     alert_type=alert_type,
                     alert_message=alert_message,
-                    alert_data=alert_data
+                    alert_data=alert_data,
+                    store_name=store_name
                 )
             except Exception as tg_error:
                 logger.warning(f"Failed to send Telegram notification: {tg_error}")
@@ -1918,18 +1538,7 @@ class DatabaseManager:
                 date_threshold = datetime.now() - timedelta(days=days)
                 query = query.filter(self.AlertGif.created_at >= date_threshold)
             
-            # If store_id is provided but not channel_id, filter by store
-            if store_id and not channel_id:
-                # Import here to avoid circular imports
-                from app import channel_store_map
-                # Get all channels for this store
-                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
-                if store_channels:
-                    query = query.filter(self.AlertGif.channel_id.in_(store_channels))
-                else:
-                    # No channels for this store, return empty
-                    return []
-            elif channel_id:
+            if channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             if alert_type:
@@ -2078,7 +1687,10 @@ class DatabaseManager:
             query = self.HeatmapSnapshot.query
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.HeatmapSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(
                 self.HeatmapSnapshot.created_at.desc()
@@ -2235,12 +1847,14 @@ class DatabaseManager:
             logger.info(f"Cash snapshot saved to database: ID {snapshot.id}")
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='cash_alert',
                 alert_message=alert_message or f"Cash detected: {detection_count} instance(s)",
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return snapshot.id
@@ -2416,7 +2030,10 @@ class DatabaseManager:
             query = self.CashSnapshot.query
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.CashSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(
                 self.CashSnapshot.created_at.desc()
@@ -2516,12 +2133,14 @@ class DatabaseManager:
             self.db.session.commit()
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='fall_alert',
                 alert_message=alert_message or f"Fall detected (duration: {fall_duration:.1f}s)",
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return snapshot.id
@@ -2536,18 +2155,7 @@ class DatabaseManager:
         try:
             query = self.FallSnapshot.query
             
-            # If store_id is provided but not channel_id, filter by store
-            if store_id and not channel_id:
-                # Import here to avoid circular imports
-                from app import channel_store_map
-                # Get all channels for this store
-                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
-                if store_channels:
-                    query = query.filter(self.FallSnapshot.channel_id.in_(store_channels))
-                else:
-                    # No channels for this store, return empty
-                    return []
-            elif channel_id:
+            if channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(self.FallSnapshot.created_at.desc()).limit(limit).all()
@@ -2648,12 +2256,14 @@ class DatabaseManager:
             self.db.session.commit()
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='grooming_alert',
                 alert_message=alert_message or f"Grooming violation: {violation_type} - {violation_item}",
                 snapshot_path=snapshot_path,
-                alert_data={'violation_type': violation_type, 'violation_item': violation_item}
+                alert_data={'violation_type': violation_type, 'violation_item': violation_item},
+                store_name=store_name
             )
             
             return snapshot.id
@@ -2669,7 +2279,10 @@ class DatabaseManager:
             query = self.GroomingSnapshot.query
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.GroomingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.order_by(self.GroomingSnapshot.created_at.desc()).limit(limit).all()
             
@@ -2849,12 +2462,14 @@ class DatabaseManager:
             
             # Send Telegram notification
             violations_str = violations if isinstance(violations, str) else ', '.join(violations) if isinstance(violations, list) else str(violations)
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='dresscode_alert',
                 alert_message=f"Dress code violation: {violations_str}",
                 snapshot_path=snapshot_path,
-                alert_data={'violations': violations_str, 'uniform_color': uniform_color}
+                alert_data={'violations': violations_str, 'uniform_color': uniform_color},
+                store_name=store_name
             )
             
             return alert
@@ -2939,7 +2554,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.DressCodeAlert.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             alerts = query.all()
             
@@ -3026,12 +2644,14 @@ class DatabaseManager:
             logger.info(f"PPE alert saved: {violations_str} for channel {channel_id}")
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='ppe_alert',
                 alert_message=f"PPE violation: {violations_str}",
                 snapshot_path=snapshot_path,
-                alert_data={'violations': violations_str, 'violation_types': violation_types}
+                alert_data={'violations': violations_str, 'violation_types': violation_types},
+                store_name=store_name
             )
             return alert
             
@@ -3169,18 +2789,41 @@ class DatabaseManager:
                 wait_min = wait_time_seconds / 60
                 alert_message += f" (Wait: {wait_min:.1f} min)"
             
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='queue_violation',
                 alert_message=alert_message,
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return violation.id
             
         except Exception as e:
             self.db.session.rollback()
+            
+            # Check for unique constraint violation (sequence out of sync)
+            error_str = str(e)
+            if 'UniqueViolation' in error_str and 'queue_violations_pkey' in error_str:
+                logger.warning(f"Sequence out of sync for queue_violations, attempting to fix...")
+                try:
+                    # Get max ID and reset sequence
+                    max_id_result = self.db.session.execute(
+                        self.db.text("SELECT COALESCE(MAX(id), 0) FROM queue_violations")
+                    ).scalar()
+                    new_seq = max_id_result + 1
+                    self.db.session.execute(
+                        self.db.text(f"SELECT setval('queue_violations_id_seq', {new_seq}, false)")
+                    )
+                    self.db.session.commit()
+                    logger.info(f"Fixed queue_violations sequence to {new_seq}, retrying save...")
+                    # Retry the save
+                    return self.add_queue_violation(channel_id, violation_type, violation_message, queue_count, counter_count, wait_time_seconds, snapshot_path, alert_data)
+                except Exception as fix_error:
+                    logger.error(f"Failed to fix sequence: {fix_error}")
+
             logger.error(f"Error adding queue violation: {e}")
             import traceback
             logger.error(traceback.format_exc())
@@ -3193,18 +2836,7 @@ class DatabaseManager:
         try:
             query = self.QueueViolation.query
             
-            # If store_id is provided but not channel_id, filter by store
-            if store_id and not channel_id:
-                # Import here to avoid circular imports
-                from app import channel_store_map
-                # Get all channels for this store
-                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
-                if store_channels:
-                    query = query.filter(self.QueueViolation.channel_id.in_(store_channels))
-                else:
-                    # No channels for this store, return empty
-                    return []
-            elif channel_id:
+            if channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             violations = query.order_by(self.QueueViolation.created_at.desc()).limit(limit).all()
@@ -3388,12 +3020,14 @@ class DatabaseManager:
                     if resolved_snapshot_path and os.path.exists(resolved_snapshot_path) and not is_placeholder:
                         file_size_check = os.path.getsize(resolved_snapshot_path)
                         if file_size_check > 0:
+                            store_name = self.get_store_name_for_channel(channel_id)
                             _send_telegram_alert(
                                 channel_id=channel_id,
                                 alert_type='table_service_violation',
                                 alert_message=alert_message,
                                 snapshot_path=resolved_snapshot_path,
-                                alert_data=alert_data_for_telegram
+                                alert_data=alert_data_for_telegram,
+                                store_name=store_name
                             )
                         else:
                             logger.warning(f"⚠️ Snapshot file is empty (0 bytes) for table {table_id} - skipping Telegram notification")
@@ -3465,20 +3099,8 @@ class DatabaseManager:
                 date_threshold = datetime.now() - timedelta(days=days)
                 query = query.filter(self.TableServiceViolation.created_at >= date_threshold)
             
-            # If store_id is provided but not channel_id, filter by store
-            if store_id and not channel_id:
-                # Import here to avoid circular imports
-                from app import channel_store_map
-                # Get all channels for this store
-                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
-                if store_channels:
-                    query = query.filter(self.TableServiceViolation.channel_id.in_(store_channels))
-                else:
-                    # No channels for this store, return empty
-                    return []
-            elif channel_id:
+            if channel_id:
                 query = query.filter_by(channel_id=channel_id)
-                
             if table_id:
                 query = query.filter_by(table_id=table_id)
             
@@ -3655,7 +3277,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.PPEAlert.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             alerts = query.all()
             
@@ -3719,6 +3344,18 @@ class DatabaseManager:
             self.db.session.commit()
             
             logger.info(f"Mopping snapshot saved: {snapshot_filename} (ID: {snapshot.id})")
+
+            # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
+            _send_telegram_alert(
+                channel_id=channel_id,
+                alert_type='mopping_alert',
+                alert_message=alert_message or f"Mopping detected: {detection_count} instance(s)",
+                snapshot_path=snapshot_path,
+                alert_data=alert_data,
+                store_name=store_name
+            )
+            
             return snapshot.id
             
         except Exception as e:
@@ -3746,7 +3383,10 @@ class DatabaseManager:
             query = self.MoppingSnapshot.query.order_by(self.MoppingSnapshot.created_at.desc())
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.MoppingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.limit(limit).offset(offset).all()
             
@@ -3791,7 +3431,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.MoppingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.all()
             
@@ -3903,12 +3546,14 @@ class DatabaseManager:
             logger.info(f"Smoking snapshot saved: {snapshot_filename}")
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='smoking_alert',
                 alert_message=alert_message or f"Smoke/Fire detected: {detection_count} instance(s)",
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return snapshot.id
@@ -3925,18 +3570,7 @@ class DatabaseManager:
                 self.SmokingSnapshot.created_at.desc()
             )
             
-            # If store_id is provided but not channel_id, filter by store
-            if store_id and not channel_id:
-                # Import here to avoid circular imports
-                from app import channel_store_map
-                # Get all channels for this store
-                store_channels = [ch_id for ch_id, st_id in channel_store_map.items() if st_id == store_id]
-                if store_channels:
-                    query = query.filter(self.SmokingSnapshot.channel_id.in_(store_channels))
-                else:
-                    # No channels for this store, return empty
-                    return []
-            elif channel_id:
+            if channel_id:
                 query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.limit(limit).all()
@@ -3969,7 +3603,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.SmokingSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.all()
             
@@ -4083,12 +3720,14 @@ class DatabaseManager:
             logger.info(f"Phone snapshot saved: {snapshot_filename} (ID: {snapshot.id})")
             
             # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
             _send_telegram_alert(
                 channel_id=channel_id,
                 alert_type='phone_alert',
                 alert_message=alert_message or f"Phone usage detected: {detection_count} instance(s)",
                 snapshot_path=snapshot_path,
-                alert_data=alert_data
+                alert_data=alert_data,
+                store_name=store_name
             )
             
             return snapshot.id
@@ -4212,7 +3851,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.PhoneSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.all()
             
@@ -4374,7 +4016,10 @@ class DatabaseManager:
             )
             
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.RestrictedAreaSnapshot.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             snapshots = query.all()
             
@@ -4401,3 +4046,87 @@ class DatabaseManager:
                 'daily_counts': {},
                 'period_days': days
             }
+    # Dress Code Monitoring Methods
+    def add_dresscode_alert(self, channel_id, violations, uniform_color=None, snapshot_path=None, employee_id=None):
+        """Add a dress code violation"""
+        try:
+            alert = self.DressCodeViolation(
+                channel_id=channel_id,
+                violations=violations,
+                uniform_color=uniform_color,
+                snapshot_path=snapshot_path,
+                employee_id=employee_id
+            )
+            if snapshot_path:
+                alert.snapshot_filename = os.path.basename(snapshot_path)
+            
+            self.db.session.add(alert)
+            self.db.session.commit()
+            return alert
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error adding dress code alert: {e}")
+            return None
+
+    def get_dresscode_alerts(self, limit=100, offset=0, channel_id=None, store_id=None):
+        """Get dress code alerts with pagination and filtering"""
+        try:
+            query = self.DressCodeViolation.query
+            
+            if store_id:
+                # Join with RTSPLink to filter by store_id
+                query = query.join(
+                    self.RTSPLink, 
+                    self.RTSPLink.channel_id == self.DressCodeViolation.channel_id
+                ).filter(self.RTSPLink.store_id == store_id)
+            
+            if channel_id:
+                if isinstance(channel_id, list):
+                    query = query.filter(self.DressCodeViolation.channel_id.in_(channel_id))
+                else:
+                    query = query.filter(self.DressCodeViolation.channel_id == channel_id)
+            
+            return query.order_by(self.DressCodeViolation.created_at.desc()).offset(offset).limit(limit).all()
+        except Exception as e:
+            logger.error(f"Error getting dress code alerts: {e}")
+            return []
+
+    def delete_dresscode_alert(self, alert_id):
+        """Delete a dress code alert"""
+        try:
+            alert = self.DressCodeViolation.query.get(alert_id)
+            if alert:
+                if alert.snapshot_path and os.path.exists(alert.snapshot_path):
+                     try:
+                         os.remove(alert.snapshot_path)
+                     except OSError:
+                         pass
+                self.db.session.delete(alert)
+                self.db.session.commit()
+                return True
+            return False
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error deleting dress code alert: {e}")
+            return False
+
+    def clear_old_dresscode_alerts(self, days=30):
+        """Clear dress code alerts older than specified days"""
+        try:
+            cutoff_date = get_ist_now() - timedelta(days=days)
+            old_alerts = self.DressCodeViolation.query.filter(self.DressCodeViolation.created_at < cutoff_date).all()
+            count = 0
+            for alert in old_alerts:
+                if alert.snapshot_path and os.path.exists(alert.snapshot_path):
+                    try:
+                        os.remove(alert.snapshot_path)
+                    except OSError:
+                        pass
+                self.db.session.delete(alert)
+                count += 1
+            self.db.session.commit()
+            return count
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error clearing old dress code alerts: {e}")
+            return 0
