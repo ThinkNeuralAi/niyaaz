@@ -6,7 +6,8 @@
       "location": "Belagavi",
       "description": "Primary location with all monitoring modules",
       "enabled": true,
-      "default": true
+      "default": true,
+      "excluded_modules": ["IdleTimeMonitoring"]
     },
     {
       "store_id": "store_2",
