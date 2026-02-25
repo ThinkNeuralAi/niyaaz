@@ -1381,6 +1381,59 @@
         </div>
     </div>
 
+    <!-- Idle Time Monitoring Template -->
+    <div id="IdleTimeMonitor-template" class="module-template">
+        <div class="tab-nav">
+            <button class="tab-button active" onclick="switchLiveTab(event, 'IdleTimeMonitor-live')">Live
+                Monitoring</button>
+            <button class="tab-button"
+                onclick="switchLiveTab(event, 'IdleTimeMonitor-reports')">Violations</button>
+        </div>
+
+        <div id="IdleTimeMonitor-live" class="tab-content active">
+            <div id="itm-video-grid" class="video-grid">
+                <!-- Video streams will be added here dynamically -->
+            </div>
+            <div id="itm-video-pagination" class="video-pagination" style="display: none;">
+                <button class="btn" onclick="changeVideoPage('IdleTimeMonitor', -1)">◀ Previous</button>
+                <span class="pagination-info">
+                    <span id="itm-page-info">Page 1 of 1</span>
+                    (Showing <span id="itm-showing-count">0</span> of <span id="itm-total-count">0</span> channels)
+                </span>
+                <button class="btn" onclick="changeVideoPage('IdleTimeMonitor', 1)">Next ▶</button>
+            </div>
+        </div>
+
+        <div id="IdleTimeMonitor-reports" class="tab-content">
+            <h3>⏱️ Idle Time Monitoring Reports</h3>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="itm-max-idle-time">0.0 min</div>
+                    <div class="stat-label">Max Idle Time (7d)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="itm-alerts-today">0</div>
+                    <div class="stat-label">Alerts Today</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="itm-alerts-7d">0</div>
+                    <div class="stat-label">Alerts (7d)</div>
+                </div>
+            </div>
+            <div class="alerts-section" style="margin-top: 30px;">
+                <h4>⏱️ Recent Idle Time Alerts</h4>
+                <div class="alert-controls">
+                    <button class="btn" onclick="loadIdleTimeAlerts()">🔄 Refresh Alerts</button>
+                    <button class="btn btn-danger" onclick="clearAllIdleTimeData()"
+                        style="margin-left: 10px;">🗑️ Clear All Data</button>
+                </div>
+                <div id="idle-time-alerts-grid" class="alert-gifs-grid">
+                    <!-- Idle time alerts will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- PPE Monitoring Template -->
     <div id="PPEMonitoring-template" class="module-template">
         <div class="tab-nav">
@@ -2560,7 +2613,8 @@
             'ServiceDisciplineMonitor': { currentPage: 1, streamsPerPage: 6, totalStreams: 0, allStreamBoxes: [] },
             'FallDetection': { currentPage: 1, streamsPerPage: 6, totalStreams: 0, allStreamBoxes: [] },
             'UnauthorizedEntryMonitor': { currentPage: 1, streamsPerPage: 6, totalStreams: 0, allStreamBoxes: [] },
-            'MaterialTheftMonitor': { currentPage: 1, streamsPerPage: 6, totalStreams: 0, allStreamBoxes: [] }
+            'MaterialTheftMonitor': { currentPage: 1, streamsPerPage: 6, totalStreams: 0, allStreamBoxes: [] },
+            'IdleTimeMonitor': { currentPage: 1, streamsPerPage: 6, totalStreams: 0, allStreamBoxes: [] }
         };
 
         // Auto-refresh for hourly report
@@ -2815,6 +2869,7 @@
                 { name: 'SmokingDetection', icon: '/static/images/icons/smoking.jpg', title: 'Smoke & Fire Detection' },
                 { name: 'PersonSmokingDetection', icon: '/static/images/icons/cig.jpg', title: 'Smoking Detection' },
                 { name: 'CrowdDetection', icon: '/static/images/icons/crowd.jpg', title: 'Crowd Detection' },
+                { name: 'IdleTimeMonitor', icon: '/static/images/icons/ideal.png', title: 'Idle Time Monitoring' },
             ];
 
             // Filter out excluded modules for this store
@@ -3107,6 +3162,25 @@
                 </div>
                 <div class="stat-row" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
                     <span class="stat-label">🚨 Alerts (7d)</span>
+                    <span class="stat-value">${analytics.total_alerts_7days || 0}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">🟢 Active Channels</span>
+                    <span class="stat-value">${analytics.active_channels || 0}</span>
+                </div>
+            `;
+            } else if (module.name === 'IdleTimeMonitor') {
+                statsHTML = `
+                <div class="stat-row">
+                    <span class="stat-label">⏱️ Max Idle Time (min)</span>
+                    <span class="stat-value large">${(analytics.max_idle_minutes || 0).toFixed(1)}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">🚨 Alerts Today</span>
+                    <span class="stat-value">${analytics.today_alerts || 0}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">📊 Alerts (7d)</span>
                     <span class="stat-value">${analytics.total_alerts_7days || 0}</span>
                 </div>
                 <div class="stat-row">
@@ -3942,6 +4016,7 @@
                     'UnauthorizedEntryMonitor': 'uem-video-grid',
                     'MaterialTheftMonitor': 'mtm-video-grid',
                     'PersonSmokingDetection': 'psmoking-video-grid',
+                    'IdleTimeMonitor': 'itm-video-grid',
                 };
 
                 const gridId = gridMap[moduleName];
@@ -4143,6 +4218,8 @@
                 loadFallSnapshots();
             } else if (tabId === 'RestrictedAreaMonitor-reports') {
                 loadRestrictedAreaSnapshots();
+            } else if (tabId === 'IdleTimeMonitor-reports') {
+                loadIdleTimeAlerts();
             }
         }
 
@@ -7467,6 +7544,156 @@
             loadServiceDisciplineAlerts();
         }
 
+        // ==================== Idle Time Monitoring ====================
+
+        async function loadIdleTimeAlerts() {
+            try {
+                const selectedStore = localStorage.getItem('selected_store') || 'store_1';
+                const response = await fetch(`/api/get_idle_time_violations?limit=100&days=7&store_id=${selectedStore}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const violations = result.violations || [];
+                    displayIdleTimeAlerts(violations);
+                    updateIdleTimeStats(violations);
+                } else {
+                    const grid = document.getElementById('idle-time-alerts-grid');
+                    if (grid) grid.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">Failed to load alerts</p>';
+                }
+            } catch (error) {
+                console.error('Error loading idle time alerts:', error);
+                const grid = document.getElementById('idle-time-alerts-grid');
+                if (grid) grid.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">Error loading alerts</p>';
+            }
+        }
+
+        function displayIdleTimeAlerts(violations) {
+            const grid = document.getElementById('idle-time-alerts-grid');
+            if (!grid) return;
+
+            if (!violations || violations.length === 0) {
+                grid.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No idle time alerts found in the last 7 days</p>';
+                return;
+            }
+
+            let html = '';
+            violations.forEach(violation => {
+                const idleMins = violation.idle_minutes || (violation.idle_time ? (violation.idle_time / 60).toFixed(1) : 0);
+                const thresholdMins = violation.alert_data?.threshold ? (violation.alert_data.threshold / 60).toFixed(0) : 30;
+
+                // Color based on idle time severity
+                let borderColor = '#ffa500'; // orange
+                if (idleMins >= 60) borderColor = '#ff4444'; // red for 1hr+
+                else if (idleMins >= 45) borderColor = '#ff6b6b'; // light red
+
+                // Snapshot URL
+                let snapshotUrl = '/static/icon.png';
+                if (violation.snapshot_path) {
+                    let normalizedPath = violation.snapshot_path.replace(/\\\\/g, '/');
+                    if (normalizedPath.startsWith('static/')) {
+                        normalizedPath = normalizedPath.substring(7);
+                    }
+                    snapshotUrl = `/static/${normalizedPath}`;
+                }
+
+                const createdAt = violation.created_at
+                    ? new Date(violation.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+                    : 'Unknown';
+
+                html += `
+                    <div class="alert-gif-card" style="border-left: 4px solid ${borderColor};">
+                        <div class="gif-preview">
+                            <img src="${snapshotUrl}" alt="Idle Time Alert"
+                                style="width: 100%; height: auto; max-height: 200px; object-fit: cover; cursor: pointer; border-radius: 4px;"
+                                onclick="openLightboxFromImage(this)"
+                                onerror="this.src='/static/icon.png'">
+                        </div>
+                        <div class="gif-info">
+                            <div style="font-weight: 600; margin-bottom: 5px;">📹 ${violation.channel_id}</div>
+                            <div style="font-size: 0.85em; color: var(--text-secondary);">🕐 ${createdAt}</div>
+                            <div style="margin-top: 8px;">
+                                <span style="font-weight: 600; color: ${borderColor};">⏱️ Idle Time: ${idleMins} min</span>
+                            </div>
+                            <div style="font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
+                                Threshold: ${thresholdMins} min
+                            </div>
+                        </div>
+                        <div class="gif-actions">
+                            <button class="btn" onclick="deleteIdleTimeViolation(${violation.id})" style="font-size: 0.8em;">🗑️ Delete</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            grid.innerHTML = html;
+        }
+
+        function updateIdleTimeStats(violations) {
+            const maxIdleEl = document.getElementById('itm-max-idle-time');
+            const todayEl = document.getElementById('itm-alerts-today');
+            const weekEl = document.getElementById('itm-alerts-7d');
+
+            if (!violations || violations.length === 0) {
+                if (maxIdleEl) maxIdleEl.textContent = '0.0 min';
+                if (todayEl) todayEl.textContent = '0';
+                if (weekEl) weekEl.textContent = '0';
+                return;
+            }
+
+            const idleTimes = violations
+                .map(v => v.idle_time || 0)
+                .filter(t => t > 0 && t <= 7200); // cap at 2 hours
+            const maxIdle = idleTimes.length > 0 ? Math.max(...idleTimes) : 0;
+
+            // Today's alerts
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const todayCount = violations.filter(v => {
+                if (!v.created_at) return false;
+                return new Date(v.created_at) >= todayStart;
+            }).length;
+
+            if (maxIdleEl) maxIdleEl.textContent = `${(maxIdle / 60).toFixed(1)} min`;
+            if (todayEl) todayEl.textContent = todayCount;
+            if (weekEl) weekEl.textContent = violations.length;
+        }
+
+        async function deleteIdleTimeViolation(violationId) {
+            if (!confirm('Delete this idle time alert?')) return;
+            try {
+                const response = await fetch(`/api/delete_idle_time_violation/${violationId}`, { method: 'DELETE' });
+                const result = await response.json();
+                if (result.success) {
+                    loadIdleTimeAlerts();
+                } else {
+                    alert('Error: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error deleting idle time violation:', error);
+            }
+        }
+
+        async function clearAllIdleTimeData() {
+            if (!confirm('⚠️ WARNING: This will delete ALL idle time monitoring data!\n\nThis action cannot be undone. Are you sure?')) {
+                return;
+            }
+            try {
+                const response = await fetch('/api/clear_all_idle_time_violations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert(`✅ Deleted ${result.deleted_count} idle time records`);
+                    loadIdleTimeAlerts();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error clearing idle time data:', error);
+            }
+        }
+
         // ==================== Service Discipline ROI Configuration ====================
 
         let sdmRoiState = {
@@ -9339,6 +9566,7 @@
                                                                     appName === 'ServiceDisciplineMonitor' ? 'sdm-video-grid' :
                                                                         appName === 'UnauthorizedEntryMonitor' ? 'uem-video-grid' :
                                                                             appName === 'MaterialTheftMonitor' ? 'mtm-video-grid' :
+                                                                                appName === 'IdleTimeMonitor' ? 'itm-video-grid' :
                                                                                 'bd-video-grid';
             // Safety fallback in case mapping failed
             if (appName === 'UnauthorizedEntryMonitor' && gridId === 'bd-video-grid') {
@@ -9447,7 +9675,9 @@
                                                                                 ? `Violations: <span id="dcm-violations-${channelId}">0</span> | Alerts: <span id="dcm-alerts-${channelId}">0</span>`
                                                                                 : appName === 'PPEMonitoring'
                                                                                     ? `Violations: <span id="ppe-violations-${channelId}">0</span> | Alerts: <span id="ppe-alerts-${channelId}">0</span>`
-                                                                                    : `Bags: <span id="bags-tracked-${channelId}">0</span> | Alerts: <span id="active-alerts-${channelId}">0</span>`
+                                                                                    : appName === 'IdleTimeMonitor'
+                                                                                        ? `In Zone: <span id="itm-in-zone-${channelId}">0</span> | Alerts: <span id="itm-alerts-${channelId}">0</span>`
+                                                                                        : `Bags: <span id="bags-tracked-${channelId}">0</span> | Alerts: <span id="active-alerts-${channelId}">0</span>`
                 }
             </div>
             <div style="padding: 10px; border-top: 1px solid var(--border-color);">
@@ -9821,7 +10051,8 @@
                 'ServiceDisciplineMonitor': 'sdm',
                 'FallDetection': 'fd',
                 'UnauthorizedEntryMonitor': 'uem',
-                'MaterialTheftMonitor': 'mtm'
+                'MaterialTheftMonitor': 'mtm',
+                'IdleTimeMonitor': 'itm'
             };
             const prefix = prefixes[appName] || 'undefined';
             return `${prefix}-video-grid`;
@@ -9839,7 +10070,8 @@
                 'ServiceDisciplineMonitor': 'sdm',
                 'FallDetection': 'fd',
                 'UnauthorizedEntryMonitor': 'uem',
-                'MaterialTheftMonitor': 'mtm'
+                'MaterialTheftMonitor': 'mtm',
+                'IdleTimeMonitor': 'itm'
             };
             const prefix = prefixes[appName] || 'undefined';
             return `${prefix}-video-pagination`;

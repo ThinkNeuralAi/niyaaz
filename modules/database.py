@@ -323,6 +323,19 @@ class DatabaseManager:
             file_size = self.db.Column(self.db.Integer)  # File size in bytes (if snapshot exists)
             created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
 
+        # Idle Time violations (staff idle in break/dining areas)
+        class IdleTimeViolation(self.db.Model):
+            __tablename__ = 'idle_time_violations'
+
+            id = self.db.Column(self.db.Integer, primary_key=True)
+            channel_id = self.db.Column(self.db.String(50), nullable=False)
+            idle_time = self.db.Column(self.db.Float, nullable=False)  # Idle duration in seconds
+            snapshot_filename = self.db.Column(self.db.String(255), nullable=True)
+            snapshot_path = self.db.Column(self.db.String(500), nullable=True)
+            alert_data = self.db.Column(self.db.Text)  # JSON data with alert details
+            file_size = self.db.Column(self.db.Integer)  # File size in bytes
+            created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
+
         # Table Cleanliness violations (unclean tables / slow reset only)
         class TableCleanlinessViolation(self.db.Model):
             __tablename__ = 'table_cleanliness_violations'
@@ -433,6 +446,7 @@ class DatabaseManager:
         self.SmokingSnapshot = SmokingSnapshot
         self.PhoneSnapshot = PhoneSnapshot
         self.RestrictedAreaSnapshot = RestrictedAreaSnapshot
+        self.IdleTimeViolation = IdleTimeViolation
 
     # ==================== Store Management Methods ====================
     
@@ -3661,7 +3675,131 @@ class DatabaseManager:
             self.db.session.rollback()
             logger.error(f"Error clearing old table service violations: {e}")
             return 0
-    
+
+    # ==================== Idle Time Violation Methods ====================
+
+    def add_idle_time_violation(self, channel_id, idle_time, snapshot_path=None, timestamp=None, alert_data=None):
+        """Save an idle time violation to the database and optionally send Telegram alert."""
+        import json
+        import os
+        try:
+            alert_data_json = json.dumps(alert_data) if alert_data else None
+            snapshot_filename = os.path.basename(snapshot_path) if snapshot_path else None
+
+            violation = self.IdleTimeViolation(
+                channel_id=channel_id,
+                idle_time=idle_time,
+                snapshot_filename=snapshot_filename,
+                snapshot_path=snapshot_path,
+                alert_data=alert_data_json,
+                file_size=None,
+                created_at=timestamp or get_ist_now(),
+            )
+            self.db.session.add(violation)
+            self.db.session.commit()
+
+            logger.info(f"Saved idle time violation for {channel_id}: {idle_time:.1f}s (ID={violation.id})")
+            return violation.id
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error saving idle time violation: {e}", exc_info=True)
+            return None
+
+    def get_idle_time_violations(self, channel_id=None, limit=50, days=None):
+        """Get recent idle time violations."""
+        import json
+        from datetime import datetime, timedelta
+
+        try:
+            query = self.IdleTimeViolation.query
+
+            if days is not None and isinstance(days, (int, float)) and days > 0:
+                date_threshold = datetime.now() - timedelta(days=days)
+                query = query.filter(self.IdleTimeViolation.created_at >= date_threshold)
+
+            if channel_id:
+                if isinstance(channel_id, list):
+                    query = query.filter(self.IdleTimeViolation.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
+
+            violations = query.order_by(self.IdleTimeViolation.created_at.desc()).limit(limit).all()
+
+            result = []
+            for v in violations:
+                alert_data = None
+                if v.alert_data:
+                    try:
+                        alert_data = json.loads(v.alert_data)
+                    except Exception:
+                        alert_data = v.alert_data
+
+                result.append({
+                    'id': v.id,
+                    'channel_id': v.channel_id,
+                    'idle_time': v.idle_time,
+                    'idle_minutes': round(v.idle_time / 60.0, 1) if v.idle_time else 0,
+                    'snapshot_filename': v.snapshot_filename,
+                    'snapshot_path': v.snapshot_path,
+                    'alert_data': alert_data,
+                    'file_size': v.file_size,
+                    'created_at': v.created_at.isoformat() if v.created_at else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Error getting idle time violations: {e}")
+            return []
+
+    def delete_idle_time_violation(self, violation_id):
+        """Delete an idle time violation by ID."""
+        import os
+        try:
+            violation = self.IdleTimeViolation.query.get(violation_id)
+            if violation:
+                if violation.snapshot_path:
+                    full_path = violation.snapshot_path
+                    if not os.path.isabs(full_path):
+                        full_path = os.path.join("static", full_path)
+                    if os.path.exists(full_path):
+                        try:
+                            os.remove(full_path)
+                        except Exception:
+                            pass
+                self.db.session.delete(violation)
+                self.db.session.commit()
+                return True
+            return False
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error deleting idle time violation {violation_id}: {e}")
+            return False
+
+    def clear_all_idle_time_violations(self):
+        """Delete ALL idle time violations."""
+        try:
+            import os
+            all_violations = self.IdleTimeViolation.query.all()
+            deleted_count = 0
+            for v in all_violations:
+                if v.snapshot_path:
+                    full_path = v.snapshot_path
+                    if not os.path.isabs(full_path):
+                        full_path = os.path.join("static", full_path)
+                    if os.path.exists(full_path):
+                        try:
+                            os.remove(full_path)
+                        except Exception:
+                            pass
+                self.db.session.delete(v)
+                deleted_count += 1
+            self.db.session.commit()
+            logger.info(f"Deleted ALL {deleted_count} idle time violations")
+            return deleted_count
+        except Exception as e:
+            self.db.session.rollback()
+            logger.error(f"Error clearing idle time violations: {e}")
+            return 0
+
     def get_ppe_stats(self, channel_id=None, days=7):
         """Get PPE violation statistics"""
         try:

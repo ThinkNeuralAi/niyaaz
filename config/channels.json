@@ -1936,6 +1936,17 @@
             "alert_cooldown": 30.0,
             "detection_duration_threshold": 2.0
           }
+        },
+        {
+          "type": "IdleTimeMonitor",
+          "config": {
+            "monitoring_roi": {},
+            "settings": {
+              "idle_time_threshold": 1800.0,
+              "alert_cooldown": 600.0,
+              "track_timeout": 30.0
+            }
+          }
         }
       ]
     },

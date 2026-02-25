@@ -40,6 +40,7 @@ from modules.ppe_monitoring import PPEMonitoring
 from modules.crowd_detection import CrowdDetection
 from modules.table_service_monitor import TableServiceMonitor
 from modules.service_discipline_monitor import ServiceDisciplineMonitor
+from modules.idle_time_monitor import IdleTimeMonitor
 from modules.unauthorized_entry_monitor import UnauthorizedEntryMonitor
 from modules.video_processor import VideoProcessor
 from modules.multi_module_processor import MultiModuleVideoProcessor
@@ -210,6 +211,13 @@ app_configs = {
     'ServiceDisciplineMonitor': {
         'name': 'Service Discipline',
         'description': 'Order wait time: seated to first waiter visit',
+        'channels': {},
+        'status': 'online'
+    },
+    # 12) Idle Time Monitoring
+    'IdleTimeMonitor': {
+        'name': 'Idle Time Monitoring',
+        'description': 'Monitor staff idle time in dining/break areas',
         'channels': {},
         'status': 'online'
     },
@@ -539,6 +547,13 @@ def start_channel_processing(channel_id, app_name, source_type, video_source=Non
             module = UnauthorizedEntryMonitor(channel_id, socketio, db_manager, app)
         elif app_name == 'PersonSmokingDetection':
             module = PersonSmokingDetection(channel_id, socketio, db_manager, app)
+        elif app_name == 'IdleTimeMonitor':
+            module = IdleTimeMonitor(channel_id, socketio, db_manager, app)
+            try:
+                with app.app_context():
+                    module.load_configuration()
+            except Exception:
+                pass
         else:
             logger.error(f"Unknown app type: {app_name}")
             return False
@@ -783,13 +798,27 @@ def get_active_channels():
                     })
                 else:
                     logger.debug(f"📊 Channel {channel_id}: Running but no modules configured")
+            elif is_running and not has_frames:
+                # Channel is running but no frames yet (RTSP connected, awaiting stream data)
+                # Still include so it appears in the dashboard with "No Signal" state
+                if channel_id in channel_modules and channel_modules[channel_id]:
+                    active_modules = processor.get_active_modules() if hasattr(processor, 'get_active_modules') else list(channel_modules[channel_id].keys())
+                    
+                    logger.info(f"📊 Channel {channel_id}: CONNECTED (no frames) - modules={active_modules}")
+                    
+                    active_channels.append({
+                        'channel_id': channel_id,
+                        'modules': active_modules,
+                        'is_running': True,
+                        'has_frames': False
+                    })
             else:
                 logger.debug(f"📊 Channel {channel_id}: NOT ACTIVE - is_running={is_running}, has_frames={has_frames}")
         
         # Don't include channels that are just configured but not running
         # (They will appear when the processor actually starts)
         
-        logger.info(f"📊 Returning {len(active_channels)} ACTIVE channels (only running with valid frames){'for store ' + store_id if store_id else ''}")
+        logger.info(f"📊 Returning {len(active_channels)} channels (running processors){'for store ' + store_id if store_id else ''}")
         
         return jsonify({
             'success': True,
@@ -2909,6 +2938,66 @@ def get_module_analytics(module_name):
                 'channels': active_channels
             }
         
+        elif module_name == 'IdleTimeMonitor':
+            all_active_channels = []
+            total_alerts = 0
+            today_alerts = 0
+            max_idle_time = 0
+
+            for channel_id, processor in shared_video_processors.items():
+                if processor.is_running and 'IdleTimeMonitor' in processor.get_active_modules():
+                    all_active_channels.append(channel_id)
+
+            active_channels = filter_channels_by_store(all_active_channels, store_id)
+
+            # Also check configured but not-yet-running channels
+            configured_channels = []
+            for channel_id, modules_dict in channel_modules.items():
+                if 'IdleTimeMonitor' in modules_dict and channel_id not in all_active_channels:
+                    configured_channels.append(channel_id)
+            configured_channels = filter_channels_by_store(configured_channels, store_id)
+            active_channels.extend(configured_channels)
+
+            try:
+                with app.app_context():
+                    violations = db_manager.get_idle_time_violations(
+                        channel_id=active_channels if active_channels else None,
+                        limit=500, days=7
+                    )
+                    total_alerts = len(violations)
+                    if violations:
+                        idle_times = [v['idle_time'] for v in violations if v.get('idle_time')]
+                        max_idle_time = max(idle_times) if idle_times else 0
+                        # Today's alerts
+                        from datetime import datetime, timedelta
+                        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                        today_alerts = sum(
+                            1 for v in violations
+                            if v.get('created_at') and datetime.fromisoformat(v['created_at']) >= today_start
+                        )
+            except Exception as e:
+                logger.error(f"Error getting idle time analytics: {e}")
+
+            # Also check alert_gifs for idle_time_alert
+            try:
+                with app.app_context():
+                    alert_gifs_count = db_manager.get_alert_count('idle_time_alert', days=7) or 0
+                    today_gifs = db_manager.get_alert_count('idle_time_alert', days=1) or 0
+                    total_alerts = max(total_alerts, alert_gifs_count)
+                    today_alerts = max(today_alerts, today_gifs)
+            except Exception:
+                pass
+
+            analytics = {
+                'module': 'Idle Time Monitoring',
+                'total_alerts_7days': total_alerts,
+                'today_alerts': today_alerts,
+                'max_idle_time': round(max_idle_time, 1),
+                'max_idle_minutes': round(max_idle_time / 60.0, 1) if max_idle_time else 0,
+                'active_channels': len(active_channels),
+                'channels': active_channels,
+            }
+
         else:
             analytics = {
                 'module': module_name,
@@ -5177,6 +5266,88 @@ def clear_old_table_service_violations():
             })
     except Exception as e:
         logger.error(f"Error clearing old table service violations: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+# ==================== Idle Time Monitoring API Routes ====================
+
+@app.route('/api/get_idle_time_violations')
+@login_required
+def get_idle_time_violations():
+    """Get idle time violations for dashboard"""
+    channel_id = request.args.get('channel_id')
+    limit = int(request.args.get('limit', 50))
+    days = request.args.get('days')
+    days = int(days) if days else None
+    store_id = request.args.get('store_id', 'store_1')
+    try:
+        with app.app_context():
+            target_channels = get_channels_for_request(store_id, channel_id)
+            if target_channels is None:
+                return jsonify({'success': False, 'error': 'Channel does not belong to selected store'})
+            violations = db_manager.get_idle_time_violations(
+                channel_id=target_channels, limit=limit, days=days
+            )
+        return jsonify({'success': True, 'violations': violations, 'count': len(violations)})
+    except Exception as e:
+        logger.error(f"Error getting idle time violations: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/delete_idle_time_violation/<int:violation_id>', methods=['DELETE'])
+@login_required
+def delete_idle_time_violation(violation_id):
+    """Delete a single idle time violation"""
+    try:
+        with app.app_context():
+            result = db_manager.delete_idle_time_violation(violation_id)
+        if result:
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': 'Violation not found'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/clear_all_idle_time_violations', methods=['POST'])
+@login_required
+def clear_all_idle_time_violations():
+    """Delete ALL idle time violations"""
+    try:
+        with app.app_context():
+            deleted_count = db_manager.clear_all_idle_time_violations()
+            return jsonify({
+                'success': True,
+                'deleted_count': deleted_count,
+                'message': f'Deleted {deleted_count} idle time violations'
+            })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/set_idle_time_roi', methods=['POST'])
+@login_required
+def set_idle_time_roi():
+    """Set the monitoring ROI for IdleTimeMonitor"""
+    data = request.json
+    channel_id = data.get('channel_id')
+    roi_points = data.get('roi_points', [])
+
+    if not channel_id:
+        return jsonify({'success': False, 'error': 'channel_id is required'})
+
+    try:
+        module = None
+        if channel_id in channel_modules and 'IdleTimeMonitor' in channel_modules[channel_id]:
+            module = channel_modules[channel_id]['IdleTimeMonitor']
+        elif channel_id in shared_video_processors:
+            processor = shared_video_processors[channel_id]
+            if hasattr(processor, 'modules') and 'IdleTimeMonitor' in processor.modules:
+                module = processor.modules['IdleTimeMonitor']
+            elif hasattr(processor, 'get_module'):
+                module = processor.get_module('IdleTimeMonitor')
+
+        if module:
+            module.set_monitoring_roi(roi_points)
+            return jsonify({'success': True, 'message': 'ROI updated'})
+        else:
+            return jsonify({'success': False, 'error': 'IdleTimeMonitor not running on this channel'})
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/set_allowed_uniforms', methods=['POST'])
