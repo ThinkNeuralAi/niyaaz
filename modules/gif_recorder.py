@@ -1,6 +1,6 @@
 """
-GIF Recorder Module
-Records video frames as GIF for alert scenarios
+GIF/Video Recorder Module
+Records video frames as GIF or MP4 video for alert scenarios
 """
 import cv2
 import numpy as np
@@ -378,4 +378,279 @@ class AlertGifRecorder:
             
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
+            return {}
+
+
+class AlertVideoRecorder:
+    """Records alert video clips as MP4 files (e.g., 1-minute violation recordings)"""
+
+    def __init__(self, video_duration=60.0, fps=15, video_width=640, video_height=480):
+        """
+        Initialize video recorder for alert recordings.
+
+        Args:
+            video_duration: Duration of video recording in seconds (default: 60 = 1 minute)
+            fps: Target FPS for recording
+            video_width: Width of output video
+            video_height: Height of output video
+        """
+        self.video_duration = video_duration
+        self.fps = fps
+        self.video_width = video_width
+        self.video_height = video_height
+
+        # Recording state
+        self.is_recording = False
+        self.video_writer = None
+        self.recording_start_time = None
+        self.recording_frame_count = 0
+        self.current_video_path = None
+        self.current_alert_info = None
+        self.last_video_info = None
+        self._lock = threading.Lock()
+
+        # Storage
+        self.alerts_dir = "static/alerts"
+        os.makedirs(self.alerts_dir, exist_ok=True)
+
+        logger.info(f"AlertVideoRecorder initialized: duration={video_duration}s, fps={fps}, "
+                     f"resolution={video_width}x{video_height}")
+
+    def start_recording(self, alert_info=None):
+        """
+        Start recording an alert video.
+
+        Args:
+            alert_info: Dictionary containing alert information (type, message, etc.)
+
+        Returns:
+            Video file path if started successfully, None otherwise
+        """
+        with self._lock:
+            if self.is_recording:
+                logger.warning("Video recording already in progress, skipping new recording request")
+                return None
+
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                channel_id = alert_info.get('channel_id', 'unknown') if alert_info else 'unknown'
+                video_filename = f"unauthorized_entry_{channel_id}_{timestamp}.mp4"
+                video_path = os.path.join(self.alerts_dir, video_filename)
+
+                # Try different codecs for compatibility (mp4v, X264, MJPG)
+                codecs_to_try = ['mp4v', 'X264', 'MJPG', 'WMV1']
+                self.video_writer = None
+                
+                for codec_code in codecs_to_try:
+                    try:
+                        fourcc = cv2.VideoWriter_fourcc(*codec_code)
+                        writer = cv2.VideoWriter(
+                            video_path, fourcc, self.fps,
+                            (self.video_width, self.video_height)
+                        )
+                        if writer.isOpened():
+                            self.video_writer = writer
+                            logger.info(f"VideoWriter initialized with codec: {codec_code}")
+                            break
+                    except Exception as codec_err:
+                        logger.debug(f"Codec {codec_code} failed: {codec_err}, trying next...")
+                        continue
+
+                if self.video_writer is None:
+                    logger.warning(f"Could not initialize VideoWriter with any available codec, trying with default...")
+                    try:
+                        # Try with -1 (automatic codec selection)
+                        self.video_writer = cv2.VideoWriter(
+                            video_path, -1, self.fps,
+                            (self.video_width, self.video_height)
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to open VideoWriter for: {video_path} - {e}")
+                        self.video_writer = None
+                        return None
+
+                if not self.video_writer or not self.video_writer.isOpened():
+                    logger.error(f"Failed to open VideoWriter for: {video_path}")
+                    self.video_writer = None
+                    return None
+
+                self.is_recording = True
+                self.recording_start_time = datetime.now()
+                self.recording_frame_count = 0
+                self.current_video_path = video_path
+                self.current_alert_info = alert_info
+
+                logger.info(f"Started alert video recording: {video_path} "
+                           f"(duration={self.video_duration}s, fps={self.fps})")
+                return video_path
+
+            except Exception as e:
+                logger.error(f"Error starting video recording: {e}")
+                self.is_recording = False
+                self.video_writer = None
+                return None
+
+    def add_frame(self, frame):
+        """
+        Add a frame to the ongoing video recording.
+
+        Args:
+            frame: OpenCV frame (BGR format)
+
+        Returns:
+            True if frame was added, False if recording finished or not active
+        """
+        if not self.is_recording or self.video_writer is None:
+            return False
+
+        if frame is None or frame.size == 0:
+            return False
+
+        with self._lock:
+            try:
+                # Resize frame to target resolution
+                resized = cv2.resize(frame, (self.video_width, self.video_height))
+                self.video_writer.write(resized)
+                self.recording_frame_count += 1
+
+                # Check if recording duration exceeded
+                elapsed = (datetime.now() - self.recording_start_time).total_seconds()
+                if elapsed >= self.video_duration:
+                    self._finalize_recording()
+                    return False
+
+                return True
+
+            except Exception as e:
+                logger.error(f"Error adding frame to video: {e}")
+                return False
+
+    def _finalize_recording(self):
+        """Finalize the current video recording (must be called with lock held)."""
+        if self.video_writer is not None:
+            self.video_writer.release()
+            self.video_writer = None
+
+        recording_end_time = datetime.now()
+        duration = (recording_end_time - self.recording_start_time).total_seconds() if self.recording_start_time else 0
+
+        # Get file size
+        file_size = 0
+        if self.current_video_path and os.path.exists(self.current_video_path):
+            file_size = os.path.getsize(self.current_video_path)
+
+        video_filename = os.path.basename(self.current_video_path) if self.current_video_path else ""
+
+        self.last_video_info = {
+            'video_path': self.current_video_path,
+            'video_filename': video_filename,
+            'frame_count': self.recording_frame_count,
+            'duration': round(duration, 2),
+            'file_size': file_size,
+            'file_size_mb': round(file_size / (1024 * 1024), 2) if file_size > 0 else 0,
+            'alert_info': self.current_alert_info,
+            'start_time': self.recording_start_time.isoformat() if self.recording_start_time else None,
+            'end_time': recording_end_time.isoformat()
+        }
+
+        logger.info(f"Alert video recording finalized: {video_filename} "
+                    f"({self.recording_frame_count} frames, {duration:.1f}s, "
+                    f"{self.last_video_info['file_size_mb']:.2f}MB)")
+
+        self.is_recording = False
+        self.current_video_path = None
+        self.current_alert_info = None
+        self.recording_start_time = None
+        self.recording_frame_count = 0
+
+    def stop_recording(self):
+        """
+        Manually stop the current video recording.
+
+        Returns:
+            Video info dictionary or None if not recording
+        """
+        with self._lock:
+            if not self.is_recording:
+                return None
+            self._finalize_recording()
+            return self.last_video_info
+
+    def get_last_video_info(self):
+        """Get info about the last completed video recording."""
+        return self.last_video_info
+
+    def cleanup_old_videos(self, max_age_days=7, max_count=50):
+        """
+        Clean up old video files to save storage space.
+
+        Args:
+            max_age_days: Maximum age of videos to keep (in days)
+            max_count: Maximum number of videos to keep
+        """
+        try:
+            if not os.path.exists(self.alerts_dir):
+                return
+
+            video_files = []
+            cutoff_time = datetime.now().timestamp() - (max_age_days * 24 * 3600)
+
+            for filename in os.listdir(self.alerts_dir):
+                if filename.endswith('.mp4'):
+                    file_path = os.path.join(self.alerts_dir, filename)
+                    file_stat = os.stat(file_path)
+                    video_files.append({
+                        'path': file_path,
+                        'filename': filename,
+                        'created': file_stat.st_ctime
+                    })
+
+            video_files.sort(key=lambda x: x['created'])
+            removed_count = 0
+
+            for vf in video_files:
+                if vf['created'] < cutoff_time:
+                    os.remove(vf['path'])
+                    removed_count += 1
+                    logger.info(f"Removed old alert video: {vf['filename']}")
+
+            remaining = [f for f in video_files if f['created'] >= cutoff_time]
+            if len(remaining) > max_count:
+                for vf in remaining[:-max_count]:
+                    os.remove(vf['path'])
+                    removed_count += 1
+                    logger.info(f"Removed excess alert video: {vf['filename']}")
+
+            if removed_count > 0:
+                logger.info(f"Cleaned up {removed_count} old alert video files")
+
+        except Exception as e:
+            logger.error(f"Error cleaning up alert videos: {e}")
+
+    def get_stats(self):
+        """Get recorder statistics."""
+        try:
+            video_count = 0
+            total_size = 0
+
+            if os.path.exists(self.alerts_dir):
+                for filename in os.listdir(self.alerts_dir):
+                    if filename.endswith('.mp4'):
+                        file_path = os.path.join(self.alerts_dir, filename)
+                        total_size += os.path.getsize(file_path)
+                        video_count += 1
+
+            return {
+                'video_duration': self.video_duration,
+                'video_resolution': f"{self.video_width}x{self.video_height}",
+                'fps': self.fps,
+                'stored_videos': video_count,
+                'total_storage': total_size,
+                'storage_mb': round(total_size / (1024 * 1024), 2),
+                'is_recording': self.is_recording,
+                'current_frame_count': self.recording_frame_count
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting video stats: {e}")
             return {}

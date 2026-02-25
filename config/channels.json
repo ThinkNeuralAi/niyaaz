@@ -1207,7 +1207,7 @@
       "channel_id": "camera_15",
       "channel_name": "Store Entrance (Weighing Area)",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:570/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@132.154.208.136:572/cam/realmonitor?channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {

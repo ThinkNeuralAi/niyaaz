@@ -180,6 +180,57 @@ class TelegramNotifier:
             logger.error(f"Error sending Telegram document: {e}", exc_info=True)
             return False
     
+    def send_video(self, video_path: str, caption: str = "", parse_mode: str = "HTML") -> bool:
+        """
+        Send a video file to Telegram using the sendVideo API.
+
+        Args:
+            video_path: Path to video file (MP4)
+            caption: Optional caption text
+            parse_mode: 'HTML' or 'Markdown'
+
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        if not self.enabled:
+            return False
+
+        try:
+            if not os.path.exists(video_path):
+                logger.warning(f"Video file not found: {video_path}")
+                return False
+
+            file_size = os.path.getsize(video_path)
+            # Telegram video limit: 50MB
+            if file_size > 50 * 1024 * 1024:
+                logger.warning(f"Video file too large ({file_size / 1024 / 1024:.1f}MB), sending as document instead")
+                return self.send_document(video_path, caption=caption, parse_mode=parse_mode)
+
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendVideo"
+
+            with open(video_path, 'rb') as video:
+                files = {'video': video}
+                data = {
+                    "chat_id": self.chat_id,
+                    "caption": caption[:1024] if len(caption) > 1024 else caption,
+                    "parse_mode": parse_mode,
+                    "supports_streaming": True
+                }
+                resp = requests.post(url, files=files, data=data, timeout=120)
+
+            if resp.status_code == 200:
+                logger.info(f"✅ Telegram video sent successfully: {os.path.basename(video_path)} ({file_size / 1024:.1f}KB)")
+                return True
+            else:
+                logger.warning(f"Telegram sendVideo API error: {resp.status_code} - {resp.text}")
+                # Fallback: try sending as document
+                logger.info("Retrying as document...")
+                return self.send_document(video_path, caption=caption, parse_mode=parse_mode)
+
+        except Exception as e:
+            logger.error(f"Error sending Telegram video: {e}", exc_info=True)
+            return False
+
     def send_alert(
         self,
         channel_id: str,
@@ -276,10 +327,12 @@ class TelegramNotifier:
                 
                 if resolved_path and os.path.exists(resolved_path):
                     logger.info(f"Sending Telegram alert with image: {resolved_path}")
-                    # Determine if it's a GIF or image
+                    # Determine file type: GIF, video, or image
                     file_ext = Path(resolved_path).suffix.lower()
                     if file_ext == '.gif':
                         return self.send_document(resolved_path, caption=message)
+                    elif file_ext in ('.mp4', '.avi', '.mkv', '.mov'):
+                        return self.send_video(resolved_path, caption=message)
                     else:
                         # Send as photo for better display (jpg, png, etc.)
                         return self.send_photo(resolved_path, caption=message)
