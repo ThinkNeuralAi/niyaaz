@@ -3361,6 +3361,8 @@ def get_cash_snapshots():
     channel_id = request.args.get('channel_id')
     store_id = request.args.get('store_id', 'store_1')
     limit = int(request.args.get('limit', 50))
+    days = request.args.get('days')
+    days = int(days) if days else None
     
     try:
         # Get all channels from config file
@@ -3376,7 +3378,7 @@ def get_cash_snapshots():
         if target_channels is None:
              return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
              
-        snapshots = db_manager.get_cash_snapshots(target_channels, limit)
+        snapshots = db_manager.get_cash_snapshots(target_channels, limit, days=days)
         
         return jsonify({
             'success': True,
@@ -3865,12 +3867,14 @@ def get_fall_snapshots():
         channel_id = request.args.get('channel_id')
         store_id = request.args.get('store_id', 'store_1')
         limit = int(request.args.get('limit', 50))
+        days = request.args.get('days')
+        days = int(days) if days else None
         
         target_channels = get_channels_for_request(store_id, channel_id)
         if target_channels is None:
              return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
         
-        snapshots = db_manager.get_fall_snapshots(channel_id=target_channels, limit=limit)
+        snapshots = db_manager.get_fall_snapshots(channel_id=target_channels, limit=limit, days=days)
         
         return jsonify({
             'success': True,
@@ -4188,8 +4192,10 @@ def get_restricted_area_snapshots():
         channel_id = request.args.get('channel_id')
         limit = int(request.args.get('limit', 50))
         offset = int(request.args.get('offset', 0))
+        days = request.args.get('days')
+        days = int(days) if days else None
         
-        snapshots = db_manager.get_restricted_area_snapshots(channel_id, limit, offset)
+        snapshots = db_manager.get_restricted_area_snapshots(channel_id, limit, offset, days=days)
         return jsonify({'success': True, 'snapshots': snapshots})
     except Exception as e:
         logger.error(f"Error getting restricted area snapshots: {e}")
@@ -4896,6 +4902,8 @@ def get_dresscode_alerts():
     """Get dress code violation alerts"""
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
+    days = request.args.get('days')
+    days = int(days) if days else None
     
     store_id = request.args.get('store_id', 'store_1')
     try:
@@ -4904,7 +4912,7 @@ def get_dresscode_alerts():
             if target_channels is None:
                  return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
             
-            alerts = db_manager.get_dresscode_alerts(channel_id=target_channels, limit=limit, store_id=store_id)
+            alerts = db_manager.get_dresscode_alerts(channel_id=target_channels, limit=limit, store_id=store_id, days=days)
             
             # Serialize alerts
             alerts_data = []
@@ -5453,6 +5461,8 @@ def get_ppe_alerts():
     """Get PPE violation alerts"""
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
+    days = request.args.get('days')
+    days = int(days) if days else None
     
     store_id = request.args.get('store_id', 'store_1')
     try:
@@ -5460,7 +5470,7 @@ def get_ppe_alerts():
             target_channels = get_channels_for_request(store_id, channel_id)
             if target_channels is None:
                  return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
-            alerts = db_manager.get_ppe_alerts(channel_id=target_channels, limit=limit)
+            alerts = db_manager.get_ppe_alerts(channel_id=target_channels, limit=limit, days=days)
         
         return jsonify({
             'success': True,
@@ -5514,6 +5524,8 @@ def get_queue_violations():
     """Get queue violation alerts"""
     channel_id = request.args.get('channel_id')
     limit = int(request.args.get('limit', 50))
+    days = request.args.get('days')
+    days = int(days) if days else None
     
     store_id = request.args.get('store_id', 'store_1')
     try:
@@ -5521,7 +5533,7 @@ def get_queue_violations():
             target_channels = get_channels_for_request(store_id, channel_id)
             if target_channels is None:
                  return jsonify({'success': False, 'error': 'Channel does not belong to the selected store'})
-            violations = db_manager.get_queue_violations(channel_id=target_channels, limit=limit)
+            violations = db_manager.get_queue_violations(channel_id=target_channels, limit=limit, days=days)
         
         logger.info(f"Retrieved {len(violations)} queue violations (channel_id={channel_id}, limit={limit})")
         

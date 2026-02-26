@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from ultralytics import YOLO
 from .model_manager import get_shared_model, release_shared_model
-from .gif_recorder import AlertGifRecorder, AlertVideoRecorder
+from .gif_recorder import AlertGifRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -67,30 +67,13 @@ class UnauthorizedEntryMonitor:
             logger.error(f"Failed to load shared unauthorized entry detection model: {e}")
             raise
         
-        # Initialize GIF recorder for violation snapshots
-        self.gif_recorder = AlertGifRecorder(buffer_size=90, gif_duration=3.0, fps=5)
-        
-        # Initialize 1-minute video recorder for unauthorized entry violations
-        try:
-            self.video_recorder = AlertVideoRecorder(
-                video_duration=60.0,  # 1 minute video
-                fps=15,
-                video_width=640,
-                video_height=480
-            )
-        except Exception as e:
-            logger.warning(f"Failed to initialize video recorder: {e}. Continuing without video recording.")
-            self.video_recorder = None
+        # Initialize GIF recorder for 1-minute violation GIFs
+        self.gif_recorder = AlertGifRecorder(buffer_size=300, gif_duration=60.0, fps=5)
         
         # Track recording state for GIF management
         self._was_recording_alert = False
         self._last_alert_message = None
         self._last_alert_data = None
-        
-        # Track video recording state
-        self._was_recording_video = False
-        self._video_alert_message = None
-        self._video_alert_data = None
         
         # State storage
         self.last_alert_time = 0.0
@@ -112,13 +95,7 @@ class UnauthorizedEntryMonitor:
         logger.info(f"UnauthorizedEntryMonitor initialized for channel {channel_id}")
     
     def __del__(self):
-        """Cleanup: Release shared model reference and stop video recording when monitor is destroyed"""
-        try:
-            if hasattr(self, 'video_recorder') and self.video_recorder and self.video_recorder.is_recording:
-                self.video_recorder.stop_recording()
-                logger.debug("Stopped video recording during cleanup")
-        except Exception as e:
-            logger.warning(f"Error stopping video recorder: {e}")
+        """Cleanup: Release shared model reference when monitor is destroyed"""
         try:
             if hasattr(self, 'model_weight'):
                 release_shared_model(self.model_weight, device='auto')
@@ -151,10 +128,6 @@ class UnauthorizedEntryMonitor:
         
         # Add frame to GIF recorder buffer (always running)
         self.gif_recorder.add_frame(frame)
-        
-        # Feed frame to video recorder if recording is active
-        if self.video_recorder and self.video_recorder.is_recording:
-            self.video_recorder.add_frame(frame)
         
         # YOLO inference
         try:
@@ -202,9 +175,7 @@ class UnauthorizedEntryMonitor:
                     self.last_alert_time = now_ts
             
             # Handle GIF recording
-            was_recording = self.gif_recorder.is_recording_alert
-            
-            if was_recording:
+            if self.gif_recorder.is_recording_alert:
                 self.gif_recorder.add_alert_frame(frame)
                 # stop_alert_recording() is called automatically by add_alert_frame when duration is reached
             
@@ -218,9 +189,22 @@ class UnauthorizedEntryMonitor:
                         gif_path = gif_info.get('gif_path', '')
                         gif_filename = os.path.basename(gif_path) if gif_path else f"unauthorized_entry_{self.channel_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.gif"
                         
+                        # Normalize path for database storage
+                        if gif_path:
+                            normalized_path = gif_path.replace('\\', '/')
+                            if 'static/' in normalized_path:
+                                relative_path = normalized_path.split('static/')[1]
+                                normalized_gif_path = f"static/{relative_path}"
+                            elif normalized_path.startswith('/'):
+                                normalized_gif_path = normalized_path.lstrip('/')
+                            else:
+                                normalized_gif_path = normalized_path
+                        else:
+                            normalized_gif_path = None
+                        
                         gif_payload = {
                             'gif_filename': gif_filename,
-                            'gif_path': gif_path,
+                            'gif_path': normalized_gif_path or gif_path,
                             'frame_count': gif_info.get('frame_count', 0),
                             'duration': gif_info.get('duration', 0.0)
                         }
@@ -241,27 +225,15 @@ class UnauthorizedEntryMonitor:
                                 alert_message=self._last_alert_message,
                                 alert_data=self._last_alert_data
                             )
-                        logger.info(f"Unauthorized entry alert GIF saved to database: {gif_filename}")
+                        logger.info(f"[{self.channel_id}] ✅ Unauthorized entry alert GIF saved to database: {gif_filename}")
                         # Clear stored alert info
                         self._last_alert_message = None
                         self._last_alert_data = None
                     except Exception as e:
-                        logger.error(f"Failed to save unauthorized entry alert GIF to DB: {e}")
+                        logger.error(f"[{self.channel_id}] ❌ Failed to save unauthorized entry alert GIF to DB: {e}")
             
-            # Track recording state for next frame
-            self._was_recording_alert = was_recording
-            
-            # Handle video recording completion
-            was_recording_video = self._was_recording_video
-            is_recording_video = self.video_recorder.is_recording if self.video_recorder else False
-            
-            if was_recording_video and not is_recording_video and self.video_recorder:
-                # Video recording just finished
-                video_info = self.video_recorder.get_last_video_info()
-                if video_info:
-                    self._handle_video_complete(video_info)
-            
-            self._was_recording_video = is_recording_video
+            # Track recording state for next frame (use current state, not stale captured value)
+            self._was_recording_alert = self.gif_recorder.is_recording_alert
             
             # Draw annotations
             annotated_frame = self._draw_annotations(frame, detections, person_detected)
@@ -287,7 +259,7 @@ class UnauthorizedEntryMonitor:
             
             logger.warning(f"[{self.channel_id}] {alert_message}")
             
-            # Start GIF recording
+            # Start GIF recording (only update tracking data if recording actually starts)
             alert_info = {
                 'type': 'unauthorized_entry_alert',
                 'message': alert_message,
@@ -295,13 +267,12 @@ class UnauthorizedEntryMonitor:
                 'channel_id': self.channel_id,
                 'timestamp': current_time.isoformat()
             }
-            self.gif_recorder.start_alert_recording(alert_info)
-            
-            # Start 1-minute video recording (if available)
-            if self.video_recorder and not self.video_recorder.is_recording:
-                self.video_recorder.start_recording(alert_info)
-                self._video_alert_message = alert_message
-                self._video_alert_data = {
+            gif_recording_started = False
+            if not self.gif_recorder.is_recording_alert:
+                self.gif_recorder.start_alert_recording(alert_info)
+                # Store alert info for database saving when GIF completes
+                self._last_alert_message = alert_message
+                self._last_alert_data = {
                     'person_count': person_count,
                     'detections': [
                         {
@@ -310,19 +281,10 @@ class UnauthorizedEntryMonitor:
                         } for d in detections
                     ]
                 }
-                logger.info(f"[{self.channel_id}] Started 1-minute alert video recording")
-            
-            # Store alert info for database saving
-            self._last_alert_message = alert_message
-            self._last_alert_data = {
-                'person_count': person_count,
-                'detections': [
-                    {
-                        'bbox': d['bbox'],
-                        'confidence': d['confidence']
-                    } for d in detections
-                ]
-            }
+                gif_recording_started = True
+                logger.info(f"[{self.channel_id}] 📹 Started 1-minute GIF recording for unauthorized entry alert")
+            else:
+                logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this alert")
             
             # Emit socket event
             if self.socketio:
@@ -383,73 +345,6 @@ class UnauthorizedEntryMonitor:
         except Exception as e:
             logger.error(f"Error triggering unauthorized entry alert: {e}")
     
-    def _handle_video_complete(self, video_info):
-        """
-        Handle completed video recording: save to database and send via Telegram.
-        
-        Args:
-            video_info: Dictionary with video recording details from AlertVideoRecorder
-        """
-        try:
-            video_path = video_info.get('video_path', '')
-            video_filename = video_info.get('video_filename', '')
-            
-            if not video_path or not os.path.exists(video_path):
-                logger.warning(f"Video file not found after recording: {video_path}")
-                return
-            
-            logger.info(f"[{self.channel_id}] Alert video recording completed: {video_filename} "
-                       f"({video_info.get('duration', 0):.1f}s, {video_info.get('file_size_mb', 0):.2f}MB)")
-            
-            # 1. Save video info to database (save_alert_gif also sends Telegram notification)
-            if self.db_manager and self._video_alert_message:
-                try:
-                    video_payload = {
-                        'gif_filename': video_filename,
-                        'gif_path': video_path,
-                        'frame_count': video_info.get('frame_count', 0),
-                        'duration': video_info.get('duration', 0.0)
-                    }
-                    if self.app:
-                        with self.app.app_context():
-                            self.db_manager.save_alert_gif(
-                                self.channel_id,
-                                'unauthorized_entry_alert',
-                                video_payload,
-                                alert_message=self._video_alert_message,
-                                alert_data=self._video_alert_data
-                            )
-                    else:
-                        self.db_manager.save_alert_gif(
-                            self.channel_id,
-                            'unauthorized_entry_alert',
-                            video_payload,
-                            alert_message=self._video_alert_message,
-                            alert_data=self._video_alert_data
-                        )
-                    logger.info(f"Unauthorized entry alert video saved to database: {video_filename}")
-                except Exception as e:
-                    logger.error(f"Failed to save alert video to database: {e}")
-            
-            # 2. Emit socket event for video completion
-            if self.socketio:
-                self.socketio.emit("unauthorized_entry_video_ready", {
-                    "channel_id": self.channel_id,
-                    "video_path": video_path,
-                    "video_filename": video_filename,
-                    "duration": video_info.get('duration', 0),
-                    "file_size_mb": video_info.get('file_size_mb', 0),
-                    "timestamp": datetime.now().isoformat(),
-                    "message": self._video_alert_message
-                })
-            
-            # Clear stored video alert info
-            self._video_alert_message = None
-            self._video_alert_data = None
-            
-        except Exception as e:
-            logger.error(f"Error handling completed alert video: {e}")
-
     def _draw_annotations(self, frame, detections, person_detected):
         """
         Draw annotations on frame
@@ -492,12 +387,12 @@ class UnauthorizedEntryMonitor:
         cv2.putText(annotated, status_text, (20, annotated.shape[0] - 20),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
-        # Draw video recording indicator
-        if self.video_recorder and self.video_recorder.is_recording:
+        # Draw GIF recording indicator
+        if self.gif_recorder.is_recording_alert:
             elapsed = 0
-            if self.video_recorder.recording_start_time:
-                elapsed = (datetime.now() - self.video_recorder.recording_start_time).total_seconds()
-            rec_text = f"[REC] Video {int(elapsed)}s / {int(self.video_recorder.video_duration)}s"
+            if self.gif_recorder.alert_start_time:
+                elapsed = (datetime.now() - self.gif_recorder.alert_start_time).total_seconds()
+            rec_text = f"[REC] GIF {int(elapsed)}s / {int(self.gif_recorder.gif_duration)}s"
             cv2.putText(annotated, rec_text, (annotated.shape[1] - 350, 40),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
             # Blinking red circle indicator
@@ -524,7 +419,6 @@ class UnauthorizedEntryMonitor:
             "avg_confidence": round(self.avg_detection_confidence, 2),
             "highest_confidence": round(self.highest_confidence, 2),
             "is_recording": self.gif_recorder.is_recording_alert,
-            "is_recording_video": self.video_recorder.is_recording,
             "last_alert_time": self.last_alert_time
         }
 

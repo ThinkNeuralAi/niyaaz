@@ -240,8 +240,8 @@ class MaterialTheftMonitor:
                 except Exception as e:
                     logger.error(f"[{self.channel_id}] ❌ Failed to save material theft alert GIF to DB: {e}", exc_info=True)
         
-        # Track recording state for next frame
-        self._was_recording_alert = was_recording
+        # Track recording state for next frame (use current state, not pre-add_alert_frame state)
+        self._was_recording_alert = self.gif_recorder.is_recording_alert
 
         # Use YOLO to detect weighing_machine_item class (like Material_theft.py)
         item_detected = False
@@ -533,11 +533,16 @@ class MaterialTheftMonitor:
                 'timestamp': current_time.isoformat(),
                 'alert_data': alert_data
             }
-            self.gif_recorder.start_alert_recording(alert_info)
-            # Store alert_info for database saving when GIF completes
-            self._pending_alert_info = alert_info
+            gif_recording_started = False
+            if not self.gif_recorder.is_recording_alert:
+                self.gif_recorder.start_alert_recording(alert_info)
+                # Store alert_info for database saving when GIF completes
+                self._pending_alert_info = alert_info
+                gif_recording_started = True
+            else:
+                logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this alert")
             
-            logger.info(f"[{self.channel_id}] 📹 Material theft alert GIF recording started: {alert_message}")
+            logger.info(f"[{self.channel_id}] 📹 Material theft alert GIF recording {'started' if gif_recording_started else 'skipped'}: {alert_message}")
 
             # Log alert to database immediately (GIF will be saved when recording completes)
             if self.db_manager:

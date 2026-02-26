@@ -712,16 +712,27 @@ class TableServiceMonitor:
             "message": alert_message
         }
         
-        # Start GIF recording
+        # Start GIF recording (only update tracking data if recording actually starts)
         logger.info(f"[{self.channel_id}] 🎬 Starting GIF recording for unclean table {table_id}")
-        self.gif_recorder.start_alert_recording(alert_info)
-        self._last_alert_message = alert_message
-        self._last_alert_data = alert_info
-        self._pending_violation_id = None  # Will be set when violation is saved
+        gif_recording_started = False
+        if not self.gif_recorder.is_recording_alert:
+            self.gif_recorder.start_alert_recording(alert_info)
+            self._last_alert_message = alert_message
+            self._last_alert_data = alert_info
+            self._pending_violation_id = None  # Will be set when violation is saved
+            gif_recording_started = True
+        else:
+            logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this violation")
         
-        # Use placeholder path initially - will be updated when GIF completes
-        placeholder_filename = f"unclean_table_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
-        snapshot_path = f"static/table_service_violations/{placeholder_filename}"  # Placeholder - will be updated when GIF completes
+        # Save JPG snapshot immediately to alerts folder
+        snapshot_rel_path = self._save_unclean_snapshot(table_id, unclean_duration, current_time, frame)
+        if snapshot_rel_path:
+            snapshot_path = f"static/{snapshot_rel_path}"
+            logger.info(f"[{self.channel_id}] 📸 Unclean table snapshot saved: {snapshot_path}")
+        else:
+            # Fallback to placeholder path - will be updated when GIF completes
+            placeholder_filename = f"unclean_table_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
+            snapshot_path = f"static/table_service_violations/{placeholder_filename}"
 
         # Emit socket event
         if self.socketio:
@@ -753,7 +764,7 @@ class TableServiceMonitor:
                             timestamp=current_time,
                             alert_data=payload,
                         )
-                        if result:
+                        if result and gif_recording_started:
                             self._pending_violation_id = result
                         self.db_manager.log_alert(
                             self.channel_id,
@@ -774,7 +785,7 @@ class TableServiceMonitor:
                         timestamp=current_time,
                         alert_data=payload,
                     )
-                    if result:
+                    if result and gif_recording_started:
                         self._pending_violation_id = result
                     self.db_manager.log_alert(
                         self.channel_id,
@@ -890,16 +901,27 @@ class TableServiceMonitor:
             "message": alert_message
         }
         
-        # Start GIF recording
+        # Start GIF recording (only update tracking data if recording actually starts)
         logger.info(f"[{self.channel_id}] 🎬 Starting GIF recording for slow reset {table_id}")
-        self.gif_recorder.start_alert_recording(alert_info)
-        self._last_alert_message = alert_message
-        self._last_alert_data = alert_info
-        self._pending_violation_id = None  # Will be set when violation is saved
+        gif_recording_started = False
+        if not self.gif_recorder.is_recording_alert:
+            self.gif_recorder.start_alert_recording(alert_info)
+            self._last_alert_message = alert_message
+            self._last_alert_data = alert_info
+            self._pending_violation_id = None  # Will be set when violation is saved
+            gif_recording_started = True
+        else:
+            logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this violation")
         
-        # Use placeholder path initially - will be updated when GIF completes
-        placeholder_filename = f"slow_reset_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
-        snapshot_path = f"static/table_service_violations/{placeholder_filename}"  # Placeholder - will be updated when GIF completes
+        # Save JPG snapshot immediately to alerts folder
+        snapshot_rel_path = self._save_slow_reset_snapshot(table_id, reset_duration, current_time, frame)
+        if snapshot_rel_path:
+            snapshot_path = f"static/{snapshot_rel_path}"
+            logger.info(f"[{self.channel_id}] 📸 Slow reset snapshot saved: {snapshot_path}")
+        else:
+            # Fallback to placeholder path - will be updated when GIF completes
+            placeholder_filename = f"slow_reset_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
+            snapshot_path = f"static/table_service_violations/{placeholder_filename}"
 
         # Emit socket event
         if self.socketio:
@@ -930,7 +952,7 @@ class TableServiceMonitor:
                             timestamp=current_time,
                             alert_data=payload,
                         )
-                        if result:
+                        if result and gif_recording_started:
                             self._pending_violation_id = result
                         self.db_manager.log_alert(
                             self.channel_id,
@@ -951,7 +973,7 @@ class TableServiceMonitor:
                         timestamp=current_time,
                         alert_data=payload,
                     )
-                    if result:
+                    if result and gif_recording_started:
                         self._pending_violation_id = result
                     self.db_manager.log_alert(
                         self.channel_id,
@@ -1306,8 +1328,8 @@ class TableServiceMonitor:
                 except Exception as e:
                     logger.error(f"[{self.channel_id}] ❌ Failed to save table service alert GIF to DB: {e}", exc_info=True)
         
-        # Track recording state for next frame
-        self._was_recording_alert = was_recording
+        # Track recording state for next frame (use CURRENT state, not captured-at-start)
+        self._was_recording_alert = self.gif_recorder.is_recording_alert
 
         # Draw annotations (always draw for smooth visualization)
         annotated_frame = self._draw_annotations(frame, table_detections, current_time)
@@ -1525,16 +1547,27 @@ class TableServiceMonitor:
             "message": alert_message
         }
         
-        # Start GIF recording
+        # Start GIF recording (only update tracking data if recording actually starts)
         logger.info(f"[{self.channel_id}] 🎬 Starting GIF recording for wrong uniform violation")
-        self.gif_recorder.start_alert_recording(alert_info)
-        self._last_alert_message = alert_message
-        self._last_alert_data = alert_info
-        self._pending_violation_id = None  # Will be set when violation is saved
+        gif_recording_started = False
+        if not self.gif_recorder.is_recording_alert:
+            self.gif_recorder.start_alert_recording(alert_info)
+            self._last_alert_message = alert_message
+            self._last_alert_data = alert_info
+            self._pending_violation_id = None  # Will be set when violation is saved
+            gif_recording_started = True
+        else:
+            logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this violation")
         
-        # Use placeholder path initially - will be updated when GIF completes
-        placeholder_filename = f"wrong_uniform_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
-        snapshot_path = f"static/table_service_violations/{placeholder_filename}"  # Placeholder - will be updated when GIF completes
+        # Save JPG snapshot immediately to alerts folder
+        snapshot_rel_path = self._save_uniform_violation_snapshot(wrong_uniforms, current_time, frame)
+        if snapshot_rel_path:
+            snapshot_path = f"static/{snapshot_rel_path}"
+            logger.info(f"[{self.channel_id}] 📸 Uniform violation snapshot saved: {snapshot_path}")
+        else:
+            # Fallback to placeholder path - will be updated when GIF completes
+            placeholder_filename = f"wrong_uniform_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
+            snapshot_path = f"static/table_service_violations/{placeholder_filename}"
         
         # Emit socket event
         if self.socketio:
@@ -1563,7 +1596,7 @@ class TableServiceMonitor:
                                 "message": alert_message
                             }
                         )
-                        if result:
+                        if result and gif_recording_started:
                             self._pending_violation_id = result
                         # Also log to general alerts table
                         self.db_manager.log_alert(
@@ -1589,7 +1622,7 @@ class TableServiceMonitor:
                             "message": alert_message
                         }
                     )
-                    if result:
+                    if result and gif_recording_started:
                         self._pending_violation_id = result
                     # Also log to general alerts table
                     self.db_manager.log_alert(

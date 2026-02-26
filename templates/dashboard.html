@@ -5500,11 +5500,11 @@
                 // Load cash detection snapshots for the selected store
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
                 // First, try to load from cash_snapshots
-                const cashResponse = await fetch(`/api/get_cash_snapshots?limit=50&store_id=${selectedStore}`);
+                const cashResponse = await fetch(`/api/get_cash_snapshots?limit=50&days=7&store_id=${selectedStore}`);
                 const cashResult = await cashResponse.json();
 
                 // Also load from alert_gifs table for cash_detection_alert type
-                const gifResponse = await fetch(`/api/get_alert_gifs?alert_type=cash_detection_alert&limit=50&store_id=${selectedStore}`);
+                const gifResponse = await fetch(`/api/get_alert_gifs?alert_type=cash_detection_alert&limit=50&days=7&store_id=${selectedStore}`);
                 const gifResult = await gifResponse.json();
 
                 // Merge results, prioritizing cash_snapshots but including alert_gifs that might not be in cash_snapshots
@@ -7337,7 +7337,7 @@
                 grid.innerHTML = `
                 <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                     <h3>🕒 No Service Discipline Violations</h3>
-                    <p>No violations detected in the last 7 days.</p>
+                    <p>No violations detected yet.</p>
                 </div>
             `;
                 return;
@@ -11773,7 +11773,7 @@
             try {
                 // Fetch cleanliness violations from dedicated table (unclean_table / slow_reset only)
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_table_cleanliness_violations?limit=100&store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_table_cleanliness_violations?limit=100&days=7&store_id=${selectedStore}`);
                 const result = await response.json();
 
                 console.log('📊 Table service violations response:', result);
@@ -11814,9 +11814,15 @@
             }
 
             grid.innerHTML = violations.map(violation => {
-                const snapshotUrl = violation.snapshot_path
-                    ? `/static/${violation.snapshot_path}`
-                    : '/static/icon.png';
+                let snapshotUrl = '/static/icon.png';
+                if (violation.snapshot_path) {
+                    let normalizedPath = violation.snapshot_path.replace(/\\/g, '/');
+                    normalizedPath = normalizedPath.replace(/^\/+|\/+$/g, '');
+                    if (normalizedPath.toLowerCase().startsWith('static/')) {
+                        normalizedPath = normalizedPath.substring(7);
+                    }
+                    snapshotUrl = `/static/${normalizedPath}`;
+                }
 
                 const timestamp = violation.timestamp || violation.created_at || new Date().toISOString();
 
@@ -11986,7 +11992,7 @@
 
             try {
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_dresscode_alerts?limit=50&store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_dresscode_alerts?limit=50&days=7&store_id=${selectedStore}`);
                 const result = await response.json();
 
                 console.log('📊 Dress code alerts response:', result);
@@ -12115,7 +12121,7 @@
             try {
                 console.log('🛡️ Loading PPE alerts...');
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_ppe_alerts?limit=50&store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_ppe_alerts?limit=50&days=7&store_id=${selectedStore}`);
                 const result = await response.json();
 
                 console.log('🛡️ PPE alerts response:', result);
@@ -12401,7 +12407,7 @@
 
             try {
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&days=7&limit=50&store_id=${selectedStore}`);
                 const data = await response.json();
 
                 if (data.success && data.alert_gifs && data.alert_gifs.length > 0) {
@@ -12496,7 +12502,7 @@
 
             try {
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_queue_violations?store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_queue_violations?days=7&limit=50&store_id=${selectedStore}`);
                 const data = await response.json();
 
                 if (data.success && data.violations && data.violations.length > 0) {
@@ -12583,7 +12589,7 @@
 
             try {
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_fall_snapshots?store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_fall_snapshots?days=7&limit=50&store_id=${selectedStore}`);
                 const data = await response.json();
 
                 if (data.success && data.snapshots && data.snapshots.length > 0) {
@@ -12661,7 +12667,7 @@
                 // Fetch alerts from API
                 // We use the common alert_gifs table with type 'unauthorized_entry_alert'
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_alert_gifs?alert_type=unauthorized_entry_alert&days=7&limit=50&store_id=${selectedStore}`);
                 const data = await response.json();
 
                 if (data.success && data.alert_gifs && data.alert_gifs.length > 0) {
@@ -12764,7 +12770,7 @@
 
             try {
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_restricted_area_snapshots?limit=50&store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_restricted_area_snapshots?limit=50&days=7&store_id=${selectedStore}`);
                 const data = await response.json();
 
                 if (data.success && data.snapshots && data.snapshots.length > 0) {

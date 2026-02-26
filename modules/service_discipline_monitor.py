@@ -961,8 +961,8 @@ class ServiceDisciplineMonitor:
                     except Exception as e:
                         logger.error(f"[{self.channel_id}] ❌ Failed to save service discipline alert GIF to DB: {e}", exc_info=True)
             
-            # Track recording state for next frame
-            self._was_recording_alert = was_recording
+            # Track recording state for next frame (use CURRENT state, not captured-at-start)
+            self._was_recording_alert = self.gif_recorder.is_recording_alert
             
             # Draw annotations
             annotated = self._draw_annotations_new(frame, current_time)
@@ -1444,15 +1444,26 @@ class ServiceDisciplineMonitor:
             "timestamp": current_time.isoformat()
         }
         
-        # Start GIF recording
+        # Start GIF recording (only update tracking data if recording actually starts)
         logger.info(f"[{self.channel_id}] 🎬 Starting GIF recording for table {table_id}, violation={violation_type}")
-        self.gif_recorder.start_alert_recording(alert_info)
-        self._pending_alert_info = alert_info
-        self._pending_snapshot_id = None  # Will be set when violation is saved
+        gif_recording_started = False
+        if not self.gif_recorder.is_recording_alert:
+            self.gif_recorder.start_alert_recording(alert_info)
+            self._pending_alert_info = alert_info
+            self._pending_snapshot_id = None  # Will be set when violation is saved
+            gif_recording_started = True
+        else:
+            logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this violation")
         
-        # Use placeholder path initially - will be updated when GIF completes
-        placeholder_filename = f"service_{violation_type}_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
-        snapshot_path = f"static/service_discipline/{placeholder_filename}"  # Placeholder - will be updated when GIF completes
+        # Save JPG snapshot immediately to alerts folder
+        snapshot_rel_path = self._save_snapshot(table_id, customer, wait_time, current_time, frame)
+        if snapshot_rel_path:
+            snapshot_path = f"static/{snapshot_rel_path}"
+            logger.info(f"[{self.channel_id}] 📸 Service discipline snapshot saved: {snapshot_path}")
+        else:
+            # Fallback to placeholder path - will be updated when GIF completes
+            placeholder_filename = f"service_{violation_type}_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
+            snapshot_path = f"static/service_discipline/{placeholder_filename}"
         
         # Calculate order_wait_time and service_wait_time at violation time
         # These might not be set in customer dict yet if violation happens before events occur
@@ -1501,8 +1512,9 @@ class ServiceDisciplineMonitor:
             "service_wait_time": service_wait_time  # Use calculated value
         }
         
-        # Update pending alert info with full data
-        self._pending_alert_info.update(alert_data)
+        # Update pending alert info with full data (only if GIF recording started for this violation)
+        if gif_recording_started and self._pending_alert_info:
+            self._pending_alert_info.update(alert_data)
         
         self.total_alerts += 1
         
@@ -1535,8 +1547,9 @@ class ServiceDisciplineMonitor:
                             alert_data=alert_data
                         )
                         if result:
-                            self._pending_snapshot_id = result  # Store ID to update with GIF path later
-                            logger.info(f"[{self.channel_id}] ✅ Violation saved to table_service_violations: ID={result}, order_wait={order_wait_time}, service_wait={service_wait_time} (GIF recording in progress)")
+                            if gif_recording_started:
+                                self._pending_snapshot_id = result  # Store ID to update with GIF path later
+                            logger.info(f"[{self.channel_id}] ✅ Violation saved to table_service_violations: ID={result}, order_wait={order_wait_time}, service_wait={service_wait_time} (GIF recording {'in progress' if gif_recording_started else 'skipped'})")
                         else:
                             logger.error(f"[{self.channel_id}] ❌ Failed to save violation: add_table_service_violation returned None")
                 else:

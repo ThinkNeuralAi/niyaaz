@@ -942,10 +942,14 @@ class DatabaseManager:
             file_size = 0
             snapshot_filename = None
             if snapshot_path:
-                full_path = os.path.join("static", snapshot_path)
+                # Handle paths that already include 'static/' prefix
+                if snapshot_path.startswith('static/'):
+                    full_path = snapshot_path
+                else:
+                    full_path = os.path.join("static", snapshot_path)
                 if os.path.exists(full_path):
                     file_size = os.path.getsize(full_path)
-                    snapshot_filename = os.path.basename(snapshot_path)
+                snapshot_filename = os.path.basename(snapshot_path)
 
             # Convert alert_data to JSON string if provided
             alert_data_str = None
@@ -1008,7 +1012,10 @@ class DatabaseManager:
                 query = query.filter(self.TableCleanlinessViolation.created_at >= date_threshold)
 
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.TableCleanlinessViolation.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             if table_id:
                 query = query.filter_by(table_id=table_id)
 
@@ -2448,10 +2455,15 @@ class DatabaseManager:
                 'period_days': days
             }
     
-    def get_cash_snapshots(self, channel_id=None, limit=50):
+    def get_cash_snapshots(self, channel_id=None, limit=50, days=None):
         """Get cash detection snapshots from database"""
         try:
+            from datetime import datetime, timedelta
             query = self.CashSnapshot.query
+            
+            if days is not None and isinstance(days, (int, float)) and days > 0:
+                date_threshold = datetime.now() - timedelta(days=days)
+                query = query.filter(self.CashSnapshot.created_at >= date_threshold)
             
             if channel_id:
                 if isinstance(channel_id, list):
@@ -2574,10 +2586,15 @@ class DatabaseManager:
             logger.error(f"Error saving fall snapshot: {e}")
             raise e
     
-    def get_fall_snapshots(self, channel_id=None, limit=50):
+    def get_fall_snapshots(self, channel_id=None, limit=50, days=None):
         """Get fall detection snapshots from database"""
         try:
+            from datetime import datetime, timedelta
             query = self.FallSnapshot.query
+            
+            if days is not None and isinstance(days, (int, float)) and days > 0:
+                date_threshold = datetime.now() - timedelta(days=days)
+                query = query.filter(self.FallSnapshot.created_at >= date_threshold)
             
             if channel_id:
                 if isinstance(channel_id, list):
@@ -3076,15 +3093,23 @@ class DatabaseManager:
             logger.error(f"Error saving PPE alert: {e}")
             return None
     
-    def get_ppe_alerts(self, channel_id=None, limit=50):
+    def get_ppe_alerts(self, channel_id=None, limit=50, days=None):
         """Get recent PPE violation alerts"""
         import json
+        from datetime import datetime, timedelta
         
         try:
             query = self.PPEAlert.query
             
+            if days is not None and isinstance(days, (int, float)) and days > 0:
+                date_threshold = datetime.now() - timedelta(days=days)
+                query = query.filter(self.PPEAlert.created_at >= date_threshold)
+            
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.PPEAlert.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             alerts = query.order_by(self.PPEAlert.created_at.desc()).limit(limit).all()
             
@@ -3234,12 +3259,17 @@ class DatabaseManager:
             logger.error(traceback.format_exc())
             return None
     
-    def get_queue_violations(self, channel_id=None, limit=50):
+    def get_queue_violations(self, channel_id=None, limit=50, days=None):
         """Get recent queue violations"""
         import json
+        from datetime import datetime, timedelta
         
         try:
             query = self.QueueViolation.query
+            
+            if days is not None and isinstance(days, (int, float)) and days > 0:
+                date_threshold = datetime.now() - timedelta(days=days)
+                query = query.filter(self.QueueViolation.created_at >= date_threshold)
             
             if channel_id:
                 if isinstance(channel_id, list):
@@ -3312,10 +3342,14 @@ class DatabaseManager:
             file_size = 0
             snapshot_filename = None
             if snapshot_path:
-                full_path = os.path.join("static", snapshot_path)
+                # Handle paths that already include 'static/' prefix
+                if snapshot_path.startswith('static/'):
+                    full_path = snapshot_path
+                else:
+                    full_path = os.path.join("static", snapshot_path)
                 if os.path.exists(full_path):
                     file_size = os.path.getsize(full_path)
-                    snapshot_filename = os.path.basename(snapshot_path)
+                snapshot_filename = os.path.basename(snapshot_path)
             
             # Extract order_wait_time and service_wait_time from alert_data if available
             order_wait_time = None
@@ -4448,12 +4482,19 @@ class DatabaseManager:
             self.db.session.rollback()
             return None
     
-    def get_restricted_area_snapshots(self, channel_id=None, limit=50, offset=0):
+    def get_restricted_area_snapshots(self, channel_id=None, limit=50, offset=0, days=None):
         """Get restricted area violation snapshots"""
         import json
+        from datetime import datetime, timedelta
         
         try:
-            query = self.RestrictedAreaSnapshot.query.order_by(self.RestrictedAreaSnapshot.created_at.desc())
+            query = self.RestrictedAreaSnapshot.query
+            
+            if days is not None and isinstance(days, (int, float)) and days > 0:
+                date_threshold = datetime.now() - timedelta(days=days)
+                query = query.filter(self.RestrictedAreaSnapshot.created_at >= date_threshold)
+            
+            query = query.order_by(self.RestrictedAreaSnapshot.created_at.desc())
             
             if channel_id:
                 query = query.filter_by(channel_id=channel_id)
@@ -4606,10 +4647,15 @@ class DatabaseManager:
             logger.error(f"Error adding dress code alert: {e}")
             return None
 
-    def get_dresscode_alerts(self, limit=100, offset=0, channel_id=None, store_id=None):
+    def get_dresscode_alerts(self, limit=100, offset=0, channel_id=None, store_id=None, days=None):
         """Get dress code alerts with pagination and filtering"""
         try:
+            from datetime import datetime, timedelta
             query = self.DressCodeViolation.query
+            
+            if days is not None and isinstance(days, (int, float)) and days > 0:
+                date_threshold = datetime.now() - timedelta(days=days)
+                query = query.filter(self.DressCodeViolation.created_at >= date_threshold)
             
             if store_id:
                 # Join with RTSPLink to filter by store_id
