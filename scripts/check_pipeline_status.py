@@ -33,13 +33,19 @@ def main():
     # 1. Check which modules are assigned to channels
     print('\n[1] MODULE ASSIGNMENTS (channel_modules table)')
     print('-' * 70)
+    # First check what columns exist
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'channel_modules' ORDER BY ordinal_position")
+    columns = [r[0] for r in cur.fetchall()]
+    print(f'  Table columns: {columns}')
+    print()
+
     target_modules = [
         'DressCodeMonitoring', 'PPEMonitoring',
         'TableServiceMonitor', 'ServiceDisciplineMonitor',
         'TableCleanlinessMonitor'
     ]
     cur.execute('''
-        SELECT channel_id, module_name, is_active, created_at
+        SELECT channel_id, module_name, created_at
         FROM channel_modules
         WHERE module_name IN %s
         ORDER BY module_name, channel_id
@@ -47,8 +53,7 @@ def main():
     rows = cur.fetchall()
     if rows:
         for r in rows:
-            status = 'ACTIVE' if r[2] else 'INACTIVE'
-            print(f'  {r[0]:25s} | {r[1]:30s} | {status:10s} | {r[3]}')
+            print(f'  {r[0]:25s} | {r[1]:30s} | Created: {r[2]}')
     else:
         print('  >> NONE of these modules are assigned to any channels!')
         print('  >> This is likely the root cause - modules need to be assigned first.')
@@ -57,28 +62,45 @@ def main():
     print('\n[2] ALL MODULE TYPES IN channel_modules')
     print('-' * 70)
     cur.execute('''
-        SELECT module_name, COUNT(*) as cnt,
-               SUM(CASE WHEN is_active THEN 1 ELSE 0 END) as active_cnt
+        SELECT module_name, COUNT(*) as cnt
         FROM channel_modules
         GROUP BY module_name
         ORDER BY module_name
     ''')
     for r in cur.fetchall():
-        print(f'  {r[0]:35s} | {r[1]:3d} total | {r[2]:3d} active')
+        print(f'  {r[0]:35s} | {r[1]:3d} channels')
 
-    # 3. Active channels
+    # 3. Active channels - discover table name first
     print('\n[3] ACTIVE CHANNELS')
     print('-' * 70)
-    cur.execute('''
-        SELECT channel_id, store_id, is_active
-        FROM channels
-        WHERE is_active = true
-        ORDER BY store_id, channel_id
-    ''')
-    rows = cur.fetchall()
-    print(f'  Total active channels: {len(rows)}')
-    for r in rows:
-        print(f'  {r[0]:25s} | Store: {r[1]}')
+    try:
+        cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE '%channel%'")
+        channel_tables = [r[0] for r in cur.fetchall()]
+        print(f'  Channel-related tables: {channel_tables}')
+        # Try common table names
+        for tbl in ['channels', 'channel_configs', 'camera_channels']:
+            if tbl in channel_tables:
+                try:
+                    cur.execute(f'SELECT * FROM {tbl} LIMIT 1')
+                    cols = [desc[0] for desc in cur.description]
+                    print(f'  Using table: {tbl} (columns: {cols})')
+                    cur.execute(f'SELECT channel_id, store_id FROM {tbl} ORDER BY store_id, channel_id')
+                    rows = cur.fetchall()
+                    print(f'  Total channels: {len(rows)}')
+                    for r in rows:
+                        print(f'    {r[0]:25s} | Store: {r[1]}')
+                    break
+                except Exception as e2:
+                    conn.rollback()
+                    print(f'  Error reading {tbl}: {e2}')
+        # Also check channel_modules for store mapping
+        print('\n  Channel-to-Store from channel_modules:')
+        cur.execute('SELECT DISTINCT channel_id, store_id FROM channel_modules ORDER BY store_id, channel_id')
+        for r in cur.fetchall():
+            print(f'    {r[0]:25s} | Store: {r[1]}')
+    except Exception as e:
+        conn.rollback()
+        print(f'  ERROR: {e}')
 
     # 4. Recent data in alert tables
     print('\n[4] DATABASE TABLES - Record counts and last entry')
@@ -128,6 +150,23 @@ def main():
         for r in cur.fetchall():
             excluded = r[2] if r[2] else 'None'
             print(f'  {r[0]:15s} | {r[1]:20s} | Excluded: {excluded}')
+    except Exception as e:
+        conn.rollback()
+        print(f'  ERROR: {e}')
+
+    # 7. Check enabled status of our target modules
+    print('\n[7] ENABLED STATUS of target modules')
+    print('-' * 70)
+    try:
+        cur.execute('''
+            SELECT channel_id, store_id, module_name, enabled
+            FROM channel_modules
+            WHERE module_name IN ('DressCodeMonitoring', 'PPEMonitoring', 'TableServiceMonitor', 'ServiceDisciplineMonitor')
+            ORDER BY module_name, channel_id
+        ''')
+        for r in cur.fetchall():
+            status = 'ENABLED' if r[3] else 'DISABLED'
+            print(f'  {r[0]:20s} | {r[1]:10s} | {r[2]:30s} | {status}')
     except Exception as e:
         conn.rollback()
         print(f'  ERROR: {e}')

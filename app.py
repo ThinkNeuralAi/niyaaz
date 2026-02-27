@@ -1576,20 +1576,27 @@ def get_module_analytics(module_name):
                     current_queue_total += status.get('queue_count', 0)
                     current_counter_total += status.get('counter_count', 0)
             
-            # Get alert count from database (queue_alert type)
+            # Get alert count from database (queue_alert type) - filtered by store channels
             try:
                 with app.app_context():
-                    alert_count = db_manager.get_alert_count('queue_alert', days=7)
-                    total_alerts = alert_count if alert_count is not None else 0
+                    alert_count = 0
+                    # Sum alerts only for channels in this store
+                    if active_channels:
+                        for ch_id in active_channels:
+                            alert_count += db_manager.get_alert_count('queue_alert', days=7, channel_id=ch_id) or 0
+                    total_alerts = alert_count
             except Exception as e:
                 logger.error(f"Error getting queue alert count: {e}")
                 total_alerts = 0
             
-            # Get queue violation count from database
+            # Get queue violation count from database - filtered by store channels
             violation_count = 0
             try:
                 with app.app_context():
-                    violations = db_manager.get_queue_violations(limit=1000)
+                    violations = db_manager.get_queue_violations(
+                        channel_id=active_channels if active_channels else None,
+                        limit=1000
+                    )
                     violation_count = len(violations) if violations else 0
             except Exception as e:
                 logger.error(f"Error getting queue violations: {e}")
@@ -2981,8 +2988,13 @@ def get_module_analytics(module_name):
             # Also check alert_gifs for idle_time_alert
             try:
                 with app.app_context():
-                    alert_gifs_count = db_manager.get_alert_count('idle_time_alert', days=7) or 0
-                    today_gifs = db_manager.get_alert_count('idle_time_alert', days=1) or 0
+                    alert_gifs_count = 0
+                    today_gifs = 0
+                    # Sum alerts only for channels in this store
+                    if active_channels:
+                        for ch_id in active_channels:
+                            alert_gifs_count += db_manager.get_alert_count('idle_time_alert', days=7, channel_id=ch_id) or 0
+                            today_gifs += db_manager.get_alert_count('idle_time_alert', days=1, channel_id=ch_id) or 0
                     total_alerts = max(total_alerts, alert_gifs_count)
                     today_alerts = max(today_alerts, today_gifs)
             except Exception:

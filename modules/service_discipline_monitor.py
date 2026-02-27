@@ -169,7 +169,32 @@ class ServiceDisciplineMonitor:
                     self.channel_id, "ServiceDisciplineMonitor", "table_rois"
                 )
                 if roi_config:
-                    self.table_rois = roi_config
+                    # Normalize database ROI data to ensure 'polygon' and 'bbox' keys exist
+                    self.table_rois = {}
+                    for table_id, roi_data in roi_config.items():
+                        if isinstance(roi_data, dict):
+                            # Get polygon from 'polygon' or 'points' key
+                            polygon = roi_data.get("polygon") or roi_data.get("points", [])
+                            # Normalize points to list of tuples
+                            normalized_points = []
+                            for p in polygon:
+                                if isinstance(p, dict) and 'x' in p and 'y' in p:
+                                    normalized_points.append((float(p['x']), float(p['y'])))
+                                elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                                    normalized_points.append((float(p[0]), float(p[1])))
+                            if len(normalized_points) >= 3:
+                                min_x = min(pt[0] for pt in normalized_points)
+                                min_y = min(pt[1] for pt in normalized_points)
+                                max_x = max(pt[0] for pt in normalized_points)
+                                max_y = max(pt[1] for pt in normalized_points)
+                                self.table_rois[table_id] = {
+                                    "polygon": normalized_points,
+                                    "bbox": (min_x, min_y, max_x, max_y)
+                                }
+                            else:
+                                logger.warning(f"[{self.channel_id}] Skipping table '{table_id}' from DB: insufficient points ({len(normalized_points)})")
+                        else:
+                            logger.warning(f"[{self.channel_id}] Skipping table '{table_id}' from DB: invalid format ({type(roi_data)})")
                     logger.info(f"[{self.channel_id}] Loaded {len(self.table_rois)} table ROIs from database (fallback)")
             
             # Load settings from channels.json or database
@@ -491,8 +516,10 @@ class ServiceDisciplineMonitor:
             point_to_check = (x2 / w, y2 / h)  # bottom-right normalized (feet position)
 
             for table_id, roi_info in self.table_rois.items():
-                polygon = roi_info["polygon"]
-                bbox_norm = roi_info["bbox"]
+                polygon = roi_info.get("polygon")
+                bbox_norm = roi_info.get("bbox")
+                if polygon is None or bbox_norm is None:
+                    continue
                 if self._point_in_polygon(point_to_check, polygon, bbox_norm):
                     # Check if this is a person detection (from YOLOv11n, class_id=0)
                     if class_id == self.person_class_id_yolo11n or class_name == "Person":
@@ -1003,8 +1030,11 @@ class ServiceDisciplineMonitor:
             point_to_check = (track_center[0] / w, track_center[1] / h)  # Normalized
             
             for tid, roi_info in self.table_rois.items():
-                polygon = roi_info["polygon"]
-                bbox_norm = roi_info["bbox"]
+                polygon = roi_info.get("polygon")
+                bbox_norm = roi_info.get("bbox")
+                if polygon is None or bbox_norm is None:
+                    logger.warning(f"[{self.channel_id}] Skipping table '{tid}': missing 'polygon' or 'bbox' in ROI info (keys: {list(roi_info.keys())})")
+                    continue
                 if self._point_in_polygon(point_to_check, polygon, bbox_norm):
                     table_id = tid
                     break

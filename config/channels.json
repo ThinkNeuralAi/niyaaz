@@ -131,8 +131,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -338,8 +338,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -425,8 +425,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -548,8 +548,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -643,8 +643,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -730,8 +730,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -821,8 +821,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -941,8 +941,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -1004,8 +1004,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -1051,8 +1051,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -1098,8 +1098,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -1134,8 +1134,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
@@ -1188,16 +1188,16 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
         {
           "type": "PersonSmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 180.0,
+            "conf_threshold": 0.7,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -1252,16 +1252,16 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         },
         {
           "type": "PersonSmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.7,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -1412,8 +1412,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -1556,8 +1556,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -1674,7 +1674,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
+            "conf_threshold": 0.8,
             "alert_cooldown": 30.0,
             "detection_duration_threshold": 2.0
           }
@@ -1776,8 +1776,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -1838,8 +1838,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -1867,7 +1867,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
+            "conf_threshold": 0.8,
             "alert_cooldown": 30.0,
             "detection_duration_threshold": 2.0
           }
@@ -1952,8 +1952,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -2038,8 +2038,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -2074,8 +2074,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -2136,8 +2136,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -2198,8 +2198,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
@@ -2260,8 +2260,8 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
-            "alert_cooldown": 30.0,
+            "conf_threshold": 0.8,
+            "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
         }
