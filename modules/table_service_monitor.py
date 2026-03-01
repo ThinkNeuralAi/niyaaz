@@ -1300,7 +1300,7 @@ class TableServiceMonitor:
                         with self.app.app_context():
                             self.db_manager.save_alert_gif(
                                 self.channel_id,
-                                'table_service_alert',
+                                'table_cleanliness_alert' if violation_type in ['unclean_table', 'slow_reset'] else 'table_service_alert',
                                 gif_payload,
                                 alert_message=alert_message,
                                 alert_data=alert_data

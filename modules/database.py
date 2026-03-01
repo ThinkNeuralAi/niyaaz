@@ -997,20 +997,53 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error adding table cleanliness violation: {e}")
             self.db.session.rollback()
+            # Auto-fix sequence if UniqueViolation on primary key
+            error_str = str(e)
+            if 'UniqueViolation' in error_str and 'table_cleanliness_violations_pkey' in error_str:
+                logger.warning("Sequence out of sync for table_cleanliness_violations, attempting to fix...")
+                try:
+                    max_id_result = self.db.session.execute(
+                        self.db.text("SELECT COALESCE(MAX(id), 0) FROM table_cleanliness_violations")
+                    ).scalar()
+                    new_seq = max_id_result + 1
+                    self.db.session.execute(
+                        self.db.text(f"SELECT setval('table_cleanliness_violations_id_seq', {new_seq}, false)")
+                    )
+                    self.db.session.commit()
+                    logger.info(f"Fixed table_cleanliness_violations sequence to {new_seq}, retrying save...")
+                    # Retry the save
+                    return self.add_table_cleanliness_violation(
+                        channel_id=channel_id,
+                        table_id=table_id,
+                        violation_type=violation_type,
+                        snapshot_path=snapshot_path,
+                        timestamp=timestamp,
+                        alert_data=alert_data,
+                    )
+                except Exception as fix_error:
+                    logger.error(f"Failed to fix table_cleanliness_violations sequence: {fix_error}")
             return None
 
     def get_table_cleanliness_violations(self, channel_id=None, table_id=None, limit=50, days=None):
-        """Get recent table cleanliness violations"""
+        """Get recent table cleanliness violations.
+        
+        Queries both table_cleanliness_violations (primary) and alert_gifs (fallback)
+        to ensure violations are shown even if the primary table had insert failures.
+        """
         import json
         from datetime import datetime, timedelta
 
         try:
-            query = self.TableCleanlinessViolation.query
-
+            date_threshold = None
             if days is not None and isinstance(days, (int, float)) and days > 0:
-                date_threshold = datetime.now() - timedelta(days=days)
-                query = query.filter(self.TableCleanlinessViolation.created_at >= date_threshold)
+                date_threshold = get_ist_now() - timedelta(days=days)
+                # Use naive datetime for comparison with timestamp without time zone column
+                date_threshold = date_threshold.replace(tzinfo=None)
 
+            # --- Source 1: table_cleanliness_violations (primary) ---
+            query = self.TableCleanlinessViolation.query
+            if date_threshold:
+                query = query.filter(self.TableCleanlinessViolation.created_at >= date_threshold)
             if channel_id:
                 if isinstance(channel_id, list):
                     query = query.filter(self.TableCleanlinessViolation.channel_id.in_(channel_id))
@@ -1022,6 +1055,8 @@ class DatabaseManager:
             violations = query.order_by(self.TableCleanlinessViolation.created_at.desc()).limit(limit).all()
 
             result = []
+            # Track (channel_id, table_id, approx_timestamp) to deduplicate against alert_gifs
+            seen_keys = set()
             for v in violations:
                 alert_data = None
                 if v.alert_data:
@@ -1044,6 +1079,86 @@ class DatabaseManager:
                         "timestamp": v.created_at.isoformat() if v.created_at else None,
                     }
                 )
+                if v.created_at:
+                    # Round to minute to allow fuzzy dedup against alert_gifs
+                    approx_ts = v.created_at.strftime("%Y%m%d%H%M")
+                    seen_keys.add((v.channel_id, v.table_id, approx_ts))
+
+            # --- Source 2: alert_gifs (supplementary / fallback) ---
+            # When table_cleanliness_violations inserts fail (e.g. sequence desync),
+            # violations are still logged to alert_gifs. Pull those in as well.
+            try:
+                ag_query = self.AlertGif.query.filter(
+                    self.AlertGif.alert_type.in_(['table_service_alert', 'table_cleanliness_alert'])
+                )
+                if date_threshold:
+                    ag_query = ag_query.filter(self.AlertGif.created_at >= date_threshold)
+                if channel_id:
+                    if isinstance(channel_id, list):
+                        ag_query = ag_query.filter(self.AlertGif.channel_id.in_(channel_id))
+                    else:
+                        ag_query = ag_query.filter(self.AlertGif.channel_id == channel_id)
+
+                alert_gifs = ag_query.order_by(self.AlertGif.created_at.desc()).limit(limit * 2).all()
+
+                for ag in alert_gifs:
+                    # Parse alert_data to check if this is a cleanliness violation
+                    ag_alert_data = None
+                    if ag.alert_data:
+                        try:
+                            ag_alert_data = json.loads(ag.alert_data) if isinstance(ag.alert_data, str) else ag.alert_data
+                        except Exception:
+                            continue
+
+                    if not ag_alert_data:
+                        continue
+
+                    violation_type = ag_alert_data.get('violation_type', '')
+                    if violation_type not in ('unclean_table', 'slow_reset'):
+                        continue
+
+                    ag_table_id = ag_alert_data.get('table_id', 'Unknown')
+
+                    # Filter by table_id if requested
+                    if table_id and ag_table_id != table_id:
+                        continue
+
+                    # Skip entries with no GIF path (these are the initial log_alert
+                    # placeholders; the real data is in the table_service_alert entry)
+                    snapshot_path = ag.gif_path if ag.gif_path else None
+                    if not snapshot_path:
+                        continue
+
+                    # Deduplicate: skip if already present from primary table
+                    if ag.created_at:
+                        approx_ts = ag.created_at.strftime("%Y%m%d%H%M")
+                        key = (ag.channel_id, ag_table_id, approx_ts)
+                        if key in seen_keys:
+                            continue
+                        seen_keys.add(key)
+
+                    result.append(
+                        {
+                            "id": ag.id,
+                            "channel_id": ag.channel_id,
+                            "table_id": ag_table_id,
+                            "violation_type": violation_type,
+                            "snapshot_filename": ag.gif_filename,
+                            "snapshot_path": snapshot_path,
+                            "alert_data": ag_alert_data,
+                            "file_size": ag.file_size,
+                            "created_at": ag.created_at.isoformat() if ag.created_at else None,
+                            "timestamp": ag.created_at.isoformat() if ag.created_at else None,
+                            "source": "alert_gifs",  # Mark source for delete handler
+                        }
+                    )
+
+            except Exception as ag_err:
+                logger.warning(f"Error querying alert_gifs for cleanliness fallback: {ag_err}")
+
+            # Sort combined results by created_at descending and apply limit
+            result.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+            result = result[:limit]
 
             return result
         except Exception as e:
@@ -1051,15 +1166,34 @@ class DatabaseManager:
             return []
 
     def delete_table_cleanliness_violation(self, violation_id):
-        """Delete a table cleanliness violation"""
+        """Delete a table cleanliness violation (from table_cleanliness_violations or alert_gifs)"""
         import os
         from pathlib import Path
 
         try:
             violation = self.TableCleanlinessViolation.query.get(violation_id)
             if not violation:
-                logger.warning(f"Table cleanliness violation not found: {violation_id}")
-                return False
+                # Fallback: check alert_gifs (violations may come from there)
+                violation = self.AlertGif.query.get(violation_id)
+                if not violation:
+                    logger.warning(f"Table cleanliness violation not found in either table: {violation_id}")
+                    return False
+                
+                # Delete the alert_gifs entry
+                snapshot_path = violation.gif_path
+                if snapshot_path:
+                    full_path = snapshot_path if os.path.isabs(snapshot_path) else snapshot_path
+                    if os.path.exists(full_path):
+                        try:
+                            os.remove(full_path)
+                            logger.info(f"Deleted snapshot file: {full_path}")
+                        except Exception as file_err:
+                            logger.warning(f"Could not delete file {full_path}: {file_err}")
+                
+                self.db.session.delete(violation)
+                self.db.session.commit()
+                logger.info(f"Deleted table cleanliness violation from alert_gifs: {violation_id}")
+                return True
 
             # Delete snapshot file if present - handle both relative and absolute paths
             if violation.snapshot_path:
@@ -1992,7 +2126,7 @@ class DatabaseManager:
                     'file_size_mb': round(gif.file_size / (1024 * 1024), 2) if gif.file_size else 0,
                     'duration_seconds': gif.duration_seconds,
                     'created_at': gif.created_at.isoformat(),
-                    'gif_url': f'/static/alerts/{gif.gif_filename}'
+                    'gif_url': f'/{gif.gif_path}' if gif.gif_path else f'/static/alerts/{gif.gif_filename}'
                 } for gif in alert_gifs
             ]
             
@@ -3131,11 +3265,19 @@ class DatabaseManager:
                     except:
                         alert_data = alert.alert_data
                 
+                # Normalize snapshot path for web compatibility (fix Windows backslashes)
+                snapshot_path = alert.snapshot_path
+                if snapshot_path:
+                    snapshot_path = snapshot_path.replace('\\', '/')
+                    # Ensure path starts with / for proper URL resolution
+                    if not snapshot_path.startswith('/'):
+                        snapshot_path = '/' + snapshot_path
+                
                 result.append({
                     'id': alert.id,
                     'channel_id': alert.channel_id,
                     'employee_id': alert.employee_id,
-                    'snapshot_path': alert.snapshot_path,
+                    'snapshot_path': snapshot_path,
                     'snapshot_filename': alert.snapshot_filename,
                     'violations': alert.violations,
                     'violation_types': violation_types,
@@ -3485,6 +3627,31 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error adding table service violation: {e}")
             self.db.session.rollback()
+            # Auto-fix sequence if UniqueViolation on primary key
+            error_str = str(e)
+            if 'UniqueViolation' in error_str and 'table_service_violations_pkey' in error_str:
+                logger.warning("Sequence out of sync for table_service_violations, attempting to fix...")
+                try:
+                    max_id_result = self.db.session.execute(
+                        self.db.text("SELECT COALESCE(MAX(id), 0) FROM table_service_violations")
+                    ).scalar()
+                    new_seq = max_id_result + 1
+                    self.db.session.execute(
+                        self.db.text(f"SELECT setval('table_service_violations_id_seq', {new_seq}, false)")
+                    )
+                    self.db.session.commit()
+                    logger.info(f"Fixed table_service_violations sequence to {new_seq}, retrying save...")
+                    # Retry the save
+                    return self.add_table_service_violation(
+                        channel_id=channel_id,
+                        table_id=table_id,
+                        waiting_time=waiting_time,
+                        snapshot_path=snapshot_path,
+                        timestamp=timestamp,
+                        alert_data=alert_data,
+                    )
+                except Exception as fix_error:
+                    logger.error(f"Failed to fix table_service_violations sequence: {fix_error}")
             return None
     
     def add_table_service_order(self, channel_id, table_id, order_wait_time, service_wait_time, timestamp=None, alert_data=None):
@@ -3538,7 +3705,9 @@ class DatabaseManager:
             
             # Apply date filter if days is provided
             if days is not None and isinstance(days, (int, float)) and days > 0:
-                date_threshold = datetime.now() - timedelta(days=days)
+                date_threshold = get_ist_now() - timedelta(days=days)
+                # Use naive datetime for comparison with timestamp without time zone column
+                date_threshold = date_threshold.replace(tzinfo=None)
                 query = query.filter(self.TableServiceViolation.created_at >= date_threshold)
             
             if channel_id:
