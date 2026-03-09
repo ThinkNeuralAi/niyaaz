@@ -320,7 +320,7 @@ class TelegramNotifier:
             
             message = "\n".join(message_parts)
             
-            # Send with image if available
+            # Only send alert if an image/GIF/snapshot is available
             if image_path:
                 # Try to resolve the actual file path
                 resolved_path = self._resolve_image_path(image_path)
@@ -337,13 +337,12 @@ class TelegramNotifier:
                         # Send as photo for better display (jpg, png, etc.)
                         return self.send_photo(resolved_path, caption=message)
                 else:
-                    logger.warning(f"Image file not found for Telegram alert: {image_path} (resolved: {resolved_path})")
-                    # Send text only if image not found
-                    return self.send_message(message)
+                    logger.warning(f"Skipping Telegram alert - image file not found: {image_path} (resolved: {resolved_path})")
+                    return False
             else:
-                # Send text only
-                logger.debug("Sending Telegram alert without image")
-                return self.send_message(message)
+                # No image/GIF/snapshot provided - skip sending text-only alert
+                logger.debug("Skipping Telegram alert - no image/GIF/snapshot provided")
+                return False
                 
         except Exception as e:
             logger.error(f"Error sending Telegram alert: {e}")

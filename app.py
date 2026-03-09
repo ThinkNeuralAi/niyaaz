@@ -373,7 +373,7 @@ def load_channels_from_config(config_file='config/channels.json'):
                                 app_configs[app_name] = {'channels': {}}
                                 
                             # Start the channel processing with video_source
-                            result = start_channel_processing(channel_id, app_name, channel_data.get('source_type', 'rtsp'), video_source=video_source)
+                            result = start_channel_processing(channel_id, app_name, channel_data.get('source_type', 'rtsp'), video_source=video_source, config=module.get('config', {}))
                             if result is False and channel_ok:
                                 channel_ok = False
                         
@@ -443,7 +443,7 @@ def load_channels_from_config(config_file='config/channels.json'):
         
     except Exception as e:
         logger.error(f"Error loading config: {e}")
-def start_channel_processing(channel_id, app_name, source_type, video_source=None):
+def start_channel_processing(channel_id, app_name, source_type, video_source=None, config=None):
     """Start processing a channel with a specific module"""
     try:
         if not video_source:
@@ -554,6 +554,21 @@ def start_channel_processing(channel_id, app_name, source_type, video_source=Non
                     module.load_configuration()
             except Exception:
                 pass
+        elif app_name == 'MaterialTheftMonitor':
+            module_config = config or {}
+            # Also try to load config from database if not provided
+            if not module_config:
+                try:
+                    with app.app_context():
+                        db_modules = db_manager.get_channel_modules(channel_id)
+                        for m in db_modules:
+                            if m.get('module_type') == 'MaterialTheftMonitor' and m.get('enabled'):
+                                module_config = m.get('config_data', {})
+                                break
+                except Exception:
+                    pass
+            module = MaterialTheftMonitor(channel_id, socketio, db_manager, app, config=module_config)
+            logger.info(f"  ✓ Added MaterialTheftMonitor to channel {channel_id}")
         else:
             logger.error(f"Unknown app type: {app_name}")
             return False
@@ -667,6 +682,12 @@ def dashboard_clean():
 def serve_alert_gif(filename):
     """Serve alert GIF files"""
     return send_from_directory('static/alerts', filename)
+
+@app.route('/static/ppe_snapshots/<filename>')
+@login_required
+def serve_ppe_snapshot(filename):
+    """Serve PPE violation snapshot files"""
+    return send_from_directory('static/ppe_snapshots', filename)
 
 @app.route('/static/material_theft_snapshots/<filename>')
 @login_required

@@ -444,7 +444,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_2": {
                 "points": [
                   {
                     "x": 0.5363125038146973,
@@ -472,7 +472,7 @@
                   }
                 ]
               },
-              "table_2": {
+              "table_3": {
                 "points": [
                   {
                     "x": 0.7425625038146972,
@@ -567,7 +567,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_4": {
                 "points": [
                   {
                     "x": 0.4690331995487213,
@@ -662,7 +662,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_5": {
                 "points": [
                   {
                     "x": 0.21025390625,
@@ -749,7 +749,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_6": {
                 "points": [
                   {
                     "x": 0.703196027062156,
@@ -840,7 +840,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_7": {
                 "points": [
                   {
                     "x": 0.25295927307822486,
@@ -1584,7 +1584,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_8": {
                 "points": [
                   {
                     "x": 0.004218753178914388,
@@ -1620,7 +1620,7 @@
                   }
                 ]
               },
-              "table_2": {
+              "table_9": {
                 "points": [
                   {
                     "x": 0.31046875317891437,
@@ -1702,7 +1702,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_10": {
                 "points": [
                   {
                     "x": 0.47713541984558105,
@@ -1726,7 +1726,7 @@
                   }
                 ]
               },
-              "table_2": {
+              "table_11": {
                 "points": [
                   {
                     "x": 0.2219270865122477,
@@ -1877,7 +1877,7 @@
           "config": {
             "monitoring_roi": {},
             "settings": {
-              "idle_time_threshold": 1800.0,
+              "idle_time_threshold": 900.0,
               "alert_cooldown": 600.0,
               "track_timeout": 30.0
             }
@@ -1906,7 +1906,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_12": {
                 "points": [
                   {
                     "x": 0.2823437531789144,
@@ -1980,7 +1980,7 @@
           "type": "ServiceDisciplineMonitor",
           "config": {
             "table_rois": {
-              "table_1": {
+              "table_13": {
                 "points": [
                   {
                     "x": 0.18755208651224772,

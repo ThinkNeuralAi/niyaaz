@@ -2,9 +2,12 @@
 Idle Time Monitor
 -----------------
 
-Monitors staff idle time in dining/break areas.
-Triggers an alert if a person remains seated in the monitored ROI
-for longer than a configurable threshold (default: 30 minutes).
+Monitors staff idle time by detecting persons and tracking how long
+they remain present. Triggers an alert if a person is detected for
+longer than a configurable threshold (default: 15 minutes).
+
+If a monitoring ROI is configured, only persons inside the ROI are
+tracked. If no ROI is set, ALL detected persons are tracked.
 
 Uses DeepSORT for persistent person tracking with track IDs.
 Saves alert GIFs, stores alerts in the database, and sends
@@ -87,7 +90,7 @@ class IdleTimeMonitor:
 
         # Settings
         self.settings = {
-            "idle_time_threshold": 1800.0,  # 30 minutes in seconds
+            "idle_time_threshold": 900.0,   # 15 minutes in seconds
             "alert_cooldown": 600.0,        # 10 minutes between repeated alerts per person
             "track_timeout": 30.0,          # seconds before removing stale tracks
         }
@@ -473,7 +476,9 @@ class IdleTimeMonitor:
 
     # --- Tracking ---
     def _process_tracked_persons(self, tracks, current_time, h, w):
-        """Process DeepSORT tracks and check ROI membership."""
+        """Process DeepSORT tracks. Timer starts when a person is detected.
+        If ROI is configured, only persons inside it are monitored.
+        If no ROI is set, ALL detected persons are monitored."""
         now_ts = current_time.timestamp()
 
         active_track_ids = set()
@@ -492,14 +497,16 @@ class IdleTimeMonitor:
             # Check if in monitoring ROI (use bottom-center / feet position)
             feet_x = cx / w
             feet_y = bbox[3] / h  # bottom of bounding box
-            in_roi = False
 
+            # If no ROI is configured, treat every detected person as "in ROI"
             if self.monitoring_roi:
                 in_roi = self._point_in_polygon(
                     (feet_x, feet_y),
                     self.monitoring_roi["polygon"],
                     self.monitoring_roi["bbox"]
                 )
+            else:
+                in_roi = True  # No ROI => monitor all detected persons
 
             if track_id in self.person_tracks:
                 # Update existing track
@@ -510,7 +517,7 @@ class IdleTimeMonitor:
                     "last_seen": now_ts,
                     "in_roi": in_roi,
                 })
-                # If just entered ROI, start idle timer
+                # If just entered ROI (or just detected with no ROI), start idle timer
                 if in_roi and not prev_in_roi:
                     self.person_tracks[track_id]["idle_start"] = now_ts
                     self.person_tracks[track_id]["alerted"] = False
@@ -519,7 +526,7 @@ class IdleTimeMonitor:
                     self.person_tracks[track_id]["idle_start"] = None
                     self.person_tracks[track_id]["alerted"] = False
             else:
-                # New track
+                # New track — timer starts immediately when person is first detected
                 self.person_tracks[track_id] = {
                     "center": (cx, cy),
                     "bbox": bbox,

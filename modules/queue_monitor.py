@@ -1491,18 +1491,8 @@ class QueueMonitor:
             # Socket.IO alert
             self.socketio.emit("queue_alert", alert_info)
 
-            # Optionally send Telegram
-            try:
-                msg_lines = [
-                    "⚠️ Queue Violation",
-                    f"Channel: {self.channel_id}",
-                    f"Queue: {self.queue_count}",
-                    f"Counter: {self.counter_count}",
-                    f"Issues: {alert_info['message']}",
-                ]
-                send_telegram_message("\n".join(msg_lines))
-            except Exception as e:
-                logger.error(f"Failed to send Telegram alert: {e}")
+            # Telegram alert will be sent when GIF recording completes (with the GIF attached)
+            # No text-only Telegram message sent here
 
             # Optional DB logging
             if self.db_manager:

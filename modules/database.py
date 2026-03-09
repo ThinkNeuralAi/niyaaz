@@ -1866,44 +1866,41 @@ class DatabaseManager:
             self.db.session.add(alert_gif)
             self.db.session.commit()
             
-            # Send Telegram notification
-            try:
-                from modules.telegram_notifier import get_telegram_notifier
-                notifier = get_telegram_notifier()
-                # Try to resolve full path for GIF
-                full_gif_path = gif_path
-                if gif_path and not os.path.isabs(gif_path):
-                    # Try relative to static directory
-                    static_path = os.path.join("static", gif_path)
-                    if os.path.exists(static_path):
-                        full_gif_path = static_path
-                    elif os.path.exists(gif_path):
-                        full_gif_path = gif_path
+            # Skip Telegram notification for crowd_alert
+            if alert_type == 'crowd_alert':
+                logger.debug(f"Telegram alert skipped for crowd_alert on {channel_id} (crowd detection Telegram alerts disabled)")
+            else:
+                # Send Telegram notification
+                try:
+                    from modules.telegram_notifier import get_telegram_notifier
+                    notifier = get_telegram_notifier()
+                    # Try to resolve full path for GIF
+                    full_gif_path = gif_path
+                    if gif_path and not os.path.isabs(gif_path):
+                        # Try relative to static directory
+                        static_path = os.path.join("static", gif_path)
+                        if os.path.exists(static_path):
+                            full_gif_path = static_path
+                        elif os.path.exists(gif_path):
+                            full_gif_path = gif_path
+                        else:
+                            full_gif_path = None
+                    
+                    if full_gif_path:
+                        store_name = self.get_store_name_for_channel(channel_id)
+                        notifier.send_alert(
+                            channel_id=channel_id,
+                            alert_type=alert_type,
+                            alert_message=alert_message or f"Alert from {channel_id}",
+                            image_path=full_gif_path,
+                            alert_data=alert_data,
+                            store_name=store_name
+                        )
                     else:
-                        full_gif_path = None
-                
-                if full_gif_path:
-                    store_name = self.get_store_name_for_channel(channel_id)
-                    notifier.send_alert(
-                        channel_id=channel_id,
-                        alert_type=alert_type,
-                        alert_message=alert_message or f"Alert from {channel_id}",
-                        image_path=full_gif_path,
-                        alert_data=alert_data,
-                        store_name=store_name
-                    )
-                else:
-                    # Send text-only if GIF path not found
-                    store_name = self.get_store_name_for_channel(channel_id)
-                    notifier.send_alert(
-                        channel_id=channel_id,
-                        alert_type=alert_type,
-                        alert_message=alert_message or f"Alert from {channel_id}",
-                        alert_data=alert_data,
-                        store_name=store_name
-                    )
-            except Exception as tg_error:
-                logger.warning(f"Failed to send Telegram notification: {tg_error}")
+                        # Skip sending Telegram alert if GIF path not found - only send with media
+                        logger.debug(f"Skipping Telegram alert for {channel_id} - no GIF/snapshot file found")
+                except Exception as tg_error:
+                    logger.warning(f"Failed to send Telegram notification: {tg_error}")
             
             return alert_gif.id
             
@@ -1949,20 +1946,8 @@ class DatabaseManager:
             self.db.session.add(alert_gif)
             self.db.session.commit()
             
-            # Send Telegram notification
-            try:
-                from modules.telegram_notifier import get_telegram_notifier
-                notifier = get_telegram_notifier()
-                store_name = self.get_store_name_for_channel(channel_id)
-                notifier.send_alert(
-                    channel_id=channel_id,
-                    alert_type=alert_type,
-                    alert_message=alert_message,
-                    alert_data=alert_data,
-                    store_name=store_name
-                )
-            except Exception as tg_error:
-                logger.warning(f"Failed to send Telegram notification: {tg_error}")
+            # Skip Telegram notification - no GIF/snapshot file available for this log-only alert
+            logger.debug(f"Alert logged for {channel_id} without media - Telegram notification skipped (only sent with GIF/snapshot)")
             
             return alert_gif.id
             
@@ -3224,7 +3209,36 @@ class DatabaseManager:
             
         except Exception as e:
             self.db.session.rollback()
-            logger.error(f"Error saving PPE alert: {e}")
+            error_str = str(e)
+            # Check if it's a unique constraint violation (sequence out of sync)
+            if 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower():
+                logger.warning(f"Sequence out of sync for ppe_alerts, attempting to fix...")
+                try:
+                    self.db.session.execute(
+                        self.db.text("SELECT setval('ppe_alerts_id_seq', (SELECT COALESCE(MAX(id), 1) FROM ppe_alerts))")
+                    )
+                    self.db.session.commit()
+                    # Retry the insert
+                    alert = self.PPEAlert(
+                        channel_id=channel_id,
+                        employee_id=employee_id or 'unknown',
+                        snapshot_filename=snapshot_filename,
+                        snapshot_path=snapshot_path,
+                        violations=violations_str,
+                        violation_types=violation_types_str,
+                        alert_data=alert_data_str,
+                        is_compliant=False,
+                        file_size=file_size
+                    )
+                    self.db.session.add(alert)
+                    self.db.session.commit()
+                    logger.info(f"PPE alert saved after sequence fix: {violations_str}")
+                    return alert
+                except Exception as retry_error:
+                    self.db.session.rollback()
+                    logger.error(f"Failed to save PPE alert even after sequence fix: {retry_error}")
+            else:
+                logger.error(f"Error saving PPE alert: {e}")
             return None
     
     def get_ppe_alerts(self, channel_id=None, limit=50, days=None):
@@ -4810,6 +4824,23 @@ class DatabaseManager:
             
             self.db.session.add(alert)
             self.db.session.commit()
+            logger.info(f"Dress code alert saved for channel {channel_id}")
+            
+            # Send Telegram notification
+            try:
+                violations_str = violations if isinstance(violations, str) else ', '.join(violations) if isinstance(violations, list) else str(violations)
+                store_name = self.get_store_name_for_channel(channel_id)
+                _send_telegram_alert(
+                    channel_id=channel_id,
+                    alert_type='dresscode_alert',
+                    alert_message=f"Dress code violation: {violations_str}",
+                    snapshot_path=snapshot_path,
+                    alert_data={'violations': violations_str, 'uniform_color': uniform_color},
+                    store_name=store_name
+                )
+            except Exception as tg_error:
+                logger.warning(f"Failed to send Telegram notification for dress code alert: {tg_error}")
+            
             return alert
         except Exception as e:
             self.db.session.rollback()
