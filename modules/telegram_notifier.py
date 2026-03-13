@@ -4,12 +4,48 @@ Sends alerts to Telegram groups/channels
 """
 import os
 import logging
+import socket
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.connection import create_connection as _orig_create_connection
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+def _ipv4_create_connection(address, *args, **kwargs):
+    """Force IPv4 DNS resolution to work around broken IPv6 routing to api.telegram.org"""
+    host, port = address
+    # Resolve hostname to IPv4 only
+    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    if not infos:
+        raise OSError(f"getaddrinfo failed for host {host!r}")
+    # Use the first IPv4 address
+    family, socktype, proto, canonname, sockaddr = infos[0]
+    return _orig_create_connection(sockaddr, *args, **kwargs)
+
+
+class IPv4HTTPAdapter(HTTPAdapter):
+    """HTTP adapter that forces IPv4 connections"""
+    def send(self, *args, **kwargs):
+        import urllib3.util.connection as urllib3_cn
+        old_create = urllib3_cn.create_connection
+        urllib3_cn.create_connection = _ipv4_create_connection
+        try:
+            return super().send(*args, **kwargs)
+        finally:
+            urllib3_cn.create_connection = old_create
+
+
+def _get_telegram_session():
+    """Create a requests.Session that forces IPv4 for Telegram API calls"""
+    s = requests.Session()
+    adapter = IPv4HTTPAdapter()
+    s.mount("https://api.telegram.org", adapter)
+    s.mount("http://api.telegram.org", adapter)
+    return s
 
 # Telegram configuration from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("bot_token")
@@ -34,6 +70,7 @@ class TelegramNotifier:
         self.bot_token = bot_token or TELEGRAM_BOT_TOKEN
         self.chat_id = chat_id or TELEGRAM_CHAT_ID
         self.enabled = bool(self.bot_token and self.chat_id) and not TELEGRAM_DISABLED
+        self.session = _get_telegram_session()  # IPv4-only session for Telegram API
         
         if not self.enabled:
             if not self.bot_token:
@@ -68,7 +105,7 @@ class TelegramNotifier:
                 "text": text,
                 "parse_mode": parse_mode
             }
-            resp = requests.post(url, data=data, timeout=10)
+            resp = self.session.post(url, data=data, timeout=10)
             
             if resp.status_code == 200:
                 logger.info("✅ Telegram message sent successfully")
@@ -123,7 +160,7 @@ class TelegramNotifier:
                     "caption": caption[:1024] if len(caption) > 1024 else caption,  # Telegram caption limit: 1024 chars
                     "parse_mode": parse_mode
                 }
-                resp = requests.post(url, files=files, data=data, timeout=30)
+                resp = self.session.post(url, files=files, data=data, timeout=30)
             
             if resp.status_code == 200:
                 logger.info(f"✅ Telegram photo sent successfully: {os.path.basename(photo_path)} ({file_size / 1024:.1f}KB)")
@@ -166,7 +203,7 @@ class TelegramNotifier:
                     "caption": caption,
                     "parse_mode": parse_mode
                 }
-                resp = requests.post(url, files=files, data=data, timeout=30)
+                resp = self.session.post(url, files=files, data=data, timeout=30)
             
             if resp.status_code == 200:
                 file_size = os.path.getsize(document_path)
@@ -216,7 +253,7 @@ class TelegramNotifier:
                     "parse_mode": parse_mode,
                     "supports_streaming": True
                 }
-                resp = requests.post(url, files=files, data=data, timeout=120)
+                resp = self.session.post(url, files=files, data=data, timeout=120)
 
             if resp.status_code == 200:
                 logger.info(f"✅ Telegram video sent successfully: {os.path.basename(video_path)} ({file_size / 1024:.1f}KB)")
