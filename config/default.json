@@ -12,7 +12,7 @@
     "port": 5432,
     "name": "sakshiai",
     "username": "postgres",
-    "password": "ajmal123",
+    "password": "Postgres123",
     "echo": false,
     "note": "This config file is for reference only. Actual database URL is set in app.py line 33"
   },
@@ -91,5 +91,21 @@
       "enabled": true,
       "max_instances": 15
     }
+  },
+  "deepstream": {
+    "enabled": true,
+    "muxer_width": 1280,
+    "muxer_height": 720,
+    "pgie_config": "config/ds_yolo_primary.yml",
+    "sgie_config": "config/ds_best_detector.yml",
+    "pgie_batch_size": 8,
+    "decode_only": false,
+    "pgie_interval": 0,
+    "enable_tracker": true,
+    "enable_sgie": false,
+    "tracker_lib": "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so",
+    "tracker_config": "/opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvDCF_perf.yml",
+    "frame_extract_interval": 2,
+    "fallback_to_opencv": true
   }
 }

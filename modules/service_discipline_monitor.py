@@ -50,21 +50,29 @@ class ServiceDisciplineMonitor:
         # Model configuration
         # Use YOLOv11n.pt for person detection (better accuracy)
         # Use best.pt for uniform detection (has uniform classes)
-        self.person_model_path = "models/yolo11n.pt"
-        self.uniform_model_path = "models/best.pt"
+        self.person_model_path = "models/yolo11n.engine"
+        self.uniform_model_path = "models/best.engine"
         self.conf_threshold = 0.5
         self.nms_iou = 0.45
 
         # Uniform classes for server detection (from best.pt)
         self.server_uniform_classes = {
-            "Uniform_black",
-            "Uniform_grey",
-            "Uniform_cream"
+            "uniform_black",
+            "uniform_grey",
+            "uniform_cream"
         }
+
+        # Detection thresholds and trackers
+        self.uniform_conf_threshold = 0.25
+        self.uniform_iou = 0.45
+        self.waiter_uniform_distance_threshold = 100
 
         # Person class IDs
         self.person_class_id_yolo11n = 0  # Person class in YOLOv11n.pt
         self.person_class_id_best = 12    # Person class in best.pt (for reference)
+
+        # Keep interaction durations across frames
+        self.ongoing_interactions = {}
 
         # Load both models
         # YOLOv11n for person detection (using YOLODetector for better person detection)
@@ -82,17 +90,22 @@ class ServiceDisciplineMonitor:
 
         # Initialize DeepSORT tracker for persistent person tracking
         if DEEPSORT_AVAILABLE:
-            logger.info(f"[{self.channel_id}] Initializing DeepSORT tracker")
-            self.tracker = DeepSort(
-                max_age=30,
-                n_init=3,
-                max_iou_distance=0.7,
-                max_cosine_distance=0.3,
-                nn_budget=50,
-                embedder="mobilenet",
-                embedder_gpu=True if torch.cuda.is_available() else False
-            )
-            self.tracking_enabled = True
+            try:
+                logger.info(f"[{self.channel_id}] Initializing DeepSORT tracker")
+                self.tracker = DeepSort(
+                    max_age=30,
+                    n_init=3,
+                    max_iou_distance=0.7,
+                    max_cosine_distance=0.3,
+                    nn_budget=50,
+                    embedder="mobilenet",
+                    embedder_gpu=True if torch.cuda.is_available() else False
+                )
+                self.tracking_enabled = True
+            except Exception as e:
+                logger.warning(f"[{self.channel_id}] DeepSORT initialization failed: {e} - using simple tracking")
+                self.tracker = None
+                self.tracking_enabled = False
         else:
             logger.warning(f"[{self.channel_id}] DeepSORT not available - using simple tracking")
             self.tracker = None
@@ -101,6 +114,14 @@ class ServiceDisciplineMonitor:
         # Table ROI configuration
         # {table_id: {"polygon": [(x,y)], "bbox": (min_x, min_y, max_x, max_y)}}
         self.table_rois = {}
+        
+        # DeepStream frame resolution tracking (for ROI coordinate scaling)
+        # DeepStream muxer typically uses 1280x720, but original cameras may be 1920x1080 or higher
+        # We track the actual frame resolution seen from DeepStream to scale ROIs accordingly
+        self.frame_width = None  # Will be detected from first frame in process_frame()
+        self.frame_height = None
+        self.original_camera_resolution = None  # For logging/debugging
+        self._resolution_detected = False
 
         # Settings
         self.settings = {
@@ -163,39 +184,60 @@ class ServiceDisciplineMonitor:
             # Load from channels.json
             self._load_table_rois_from_config()
             
-            # Also try loading from database as fallback
-            if not self.table_rois and self.db_manager:
+            # Also try loading from database ROIs and merge with channels.json (DB has precedence)
+            if self.db_manager:
                 roi_config = self.db_manager.get_channel_config(
                     self.channel_id, "ServiceDisciplineMonitor", "table_rois"
                 )
-                if roi_config:
-                    # Normalize database ROI data to ensure 'polygon' and 'bbox' keys exist
-                    self.table_rois = {}
+                if roi_config and isinstance(roi_config, dict):
+                    logger.info(f"[{self.channel_id}] 📊 Loading {len(roi_config)} table ROIs from database")
+                    merged_rois = self.table_rois.copy()
                     for table_id, roi_data in roi_config.items():
                         if isinstance(roi_data, dict):
-                            # Get polygon from 'polygon' or 'points' key
-                            polygon = roi_data.get("polygon") or roi_data.get("points", [])
-                            # Normalize points to list of tuples
+                            # Handle both database format (dict with bbox) and legacy format (points)
+                            polygon = roi_data.get("polygon") or roi_data.get("points") or []
+                            bbox = roi_data.get("bbox")  # Could be dict or tuple
+                            
                             normalized_points = []
                             for p in polygon:
                                 if isinstance(p, dict) and 'x' in p and 'y' in p:
                                     normalized_points.append((float(p['x']), float(p['y'])))
                                 elif isinstance(p, (list, tuple)) and len(p) >= 2:
                                     normalized_points.append((float(p[0]), float(p[1])))
+                            
                             if len(normalized_points) >= 3:
-                                min_x = min(pt[0] for pt in normalized_points)
-                                min_y = min(pt[1] for pt in normalized_points)
-                                max_x = max(pt[0] for pt in normalized_points)
-                                max_y = max(pt[1] for pt in normalized_points)
-                                self.table_rois[table_id] = {
+                                # Use bbox from database if available, otherwise compute it
+                                if isinstance(bbox, dict) and all(k in bbox for k in ['min_x', 'min_y', 'max_x', 'max_y']):
+                                    bbox_tuple = (bbox['min_x'], bbox['min_y'], bbox['max_x'], bbox['max_y'])
+                                    logger.info(f"[{self.channel_id}]   ✓ Loaded table '{table_id}' from DB: {len(normalized_points)} points, bbox from DB")
+                                elif isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                                    bbox_tuple = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+                                    logger.info(f"[{self.channel_id}]   ✓ Loaded table '{table_id}' from DB: {len(normalized_points)} points, bbox from tuple")
+                                else:
+                                    # Compute bbox if not in database
+                                    min_x = min(pt[0] for pt in normalized_points)
+                                    min_y = min(pt[1] for pt in normalized_points)
+                                    max_x = max(pt[0] for pt in normalized_points)
+                                    max_y = max(pt[1] for pt in normalized_points)
+                                    bbox_tuple = (min_x, min_y, max_x, max_y)
+                                    logger.info(f"[{self.channel_id}]   ✓ Loaded table '{table_id}' from DB: {len(normalized_points)} points, bbox computed")
+                                
+                                merged_rois[table_id] = {
                                     "polygon": normalized_points,
-                                    "bbox": (min_x, min_y, max_x, max_y)
+                                    "bbox": bbox_tuple
                                 }
                             else:
-                                logger.warning(f"[{self.channel_id}] Skipping table '{table_id}' from DB: insufficient points ({len(normalized_points)})")
+                                logger.warning(f"[{self.channel_id}] ⚠️ Skipping DB table ROI '{table_id}': insufficient points ({len(normalized_points)})")
                         else:
-                            logger.warning(f"[{self.channel_id}] Skipping table '{table_id}' from DB: invalid format ({type(roi_data)})")
-                    logger.info(f"[{self.channel_id}] Loaded {len(self.table_rois)} table ROIs from database (fallback)")
+                            logger.warning(f"[{self.channel_id}] ⚠️ Skipping DB table ROI '{table_id}': invalid format {type(roi_data)}")
+                    
+                    if merged_rois != self.table_rois:
+                        self.table_rois = merged_rois
+                        logger.info(f"[{self.channel_id}] ✅ Merged & loaded {len(self.table_rois)} table ROIs from database + channels config")
+                    else:
+                        logger.info(f"[{self.channel_id}] ℹ️ Database ROIs match config ROIs - no merge needed")
+                else:
+                    logger.info(f"[{self.channel_id}] ℹ️ No table ROIs in database (first-time setup)")
             
             # Load settings from channels.json or database
             self._load_settings_from_config()
@@ -455,6 +497,34 @@ class ServiceDisciplineMonitor:
 
         # Ensure tracking structure exists for this table
         self._ensure_table_tracking(table_id)
+
+        # Save to database first (database has precedence)
+        if self.db_manager:
+            try:
+                # Convert ROI data to database format (dict with polygon and bbox)
+                db_roi_data = {
+                    "polygon": [{"x": p[0], "y": p[1]} for p in normalized_points],
+                    "bbox": {"min_x": min_x, "min_y": min_y, "max_x": max_x, "max_y": max_y}
+                }
+                # Build the full table_rois dict for the channel
+                all_table_rois = {}
+                for tid, roi_info in self.table_rois.items():
+                    polygon = roi_info.get('polygon', [])
+                    bbox = roi_info.get('bbox', (0, 0, 1, 1))
+                    all_table_rois[tid] = {
+                        "polygon": [{"x": p[0], "y": p[1]} for p in polygon],
+                        "bbox": {"min_x": bbox[0], "min_y": bbox[1], "max_x": bbox[2], "max_y": bbox[3]}
+                    }
+                
+                self.db_manager.save_channel_config(
+                    self.channel_id,
+                    "ServiceDisciplineMonitor",
+                    "table_rois",
+                    all_table_rois
+                )
+                logger.info(f"[{self.channel_id}] 💾 ✅ Saved table ROI for '{table_id}' to database ({len(normalized_points)} points)")
+            except Exception as e:
+                logger.error(f"[{self.channel_id}] ❌ Failed to save service discipline ROI to database: {e}", exc_info=True)
 
         # Save to channels.json
         try:
@@ -805,20 +875,41 @@ class ServiceDisciplineMonitor:
             return frame
 
         try:
+            # Detect and track frame resolution (critical for DeepStream compatibility)
+            # DeepStream muxer may resize frames (default 1280x720), which affects ROI coordinate scaling
+            h, w = frame.shape[:2]
+            if not self._resolution_detected:
+                self.frame_width = w
+                self.frame_height = h
+                self._resolution_detected = True
+                logger.info(f"[{self.channel_id}] 📐 Detected frame resolution: {w}x{h} "
+                           f"(for ROI coordinate scaling and DeepStream compatibility)")
+            elif (self.frame_width, self.frame_height) != (w, h):
+                # Frame resolution changed (shouldn't happen, but log if it does)
+                logger.warning(f"[{self.channel_id}] ⚠️ Frame resolution changed: "
+                             f"{self.frame_width}x{self.frame_height} → {w}x{h}")
+                self.frame_width = w
+                self.frame_height = h
+            
             # Add frame to GIF recorder buffer (always running)
             self.gif_recorder.add_frame(frame)
             
             # Save a clean copy of the original frame for snapshots
             # This ensures snapshots don't include annotations from other modules (e.g., queue monitor text)
             clean_frame = frame.copy()
-            h, w = frame.shape[:2]
             
             # 1. Detect persons using YOLOv11n.pt
             person_detections = self.person_detector.detect_persons(frame)
             
             # 2. Detect uniforms using best.pt
-            uniform_results = self.uniform_model(frame, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
+            infer_frame = cv2.resize(frame, (640, 640))
+            uniform_results = self.uniform_model(infer_frame, conf=self.uniform_conf_threshold, iou=self.uniform_iou, imgsz=640, verbose=False)
             
+            # Scale factors for uniform detections from resized inference frame back to original frame
+            # Use the tracked frame dimensions for consistency
+            scale_x = self.frame_width / 640.0
+            scale_y = self.frame_height / 640.0
+
             # Prepare detections for DeepSORT tracking
             ds_inputs = []
             person_detections_list = []
@@ -843,17 +934,31 @@ class ServiceDisciplineMonitor:
                 class_names = uniform_results[0].names
                 for box in boxes:
                     class_id = int(box.cls[0])
-                    class_name = class_names[class_id]
+                    class_name = class_names.get(class_id, None)
+                    if class_name is None or (isinstance(class_name, str) and class_name.startswith('class') and class_name[5:].isdigit()):
+                        labels_path = 'config/best_labels.txt'
+                        if os.path.exists(labels_path):
+                            labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                            if class_id < len(labels):
+                                class_name = labels[class_id]
+                    if class_name is None:
+                        continue
+                    class_name_norm = str(class_name).strip().lower().replace(' ', '_')
                     conf = float(box.conf[0])
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    
-                    if class_name in self.server_uniform_classes:
-                        # Add uniform detections as "person" for tracking (we'll classify later)
+                    x1 *= scale_x
+                    y1 *= scale_y
+                    x2 *= scale_x
+                    y2 *= scale_y
+
+                    if class_name_norm in self.server_uniform_classes or class_name_norm.startswith('uniform_'):
+                        logger.debug(f"[{self.channel_id}] Uniform detection: {class_name} -> {class_name_norm} conf={conf:.2f}")
+                        # Add uniform detections as "person" for matching with tracked people.
                         ds_inputs.append(([int(x1), int(y1), int(x2-x1), int(y2-y1)], float(conf), "person"))
                         uniform_detections_list.append({
                             "bbox": [int(x1), int(y1), int(x2), int(y2)],
                             "confidence": conf,
-                            "class_name": class_name,
+                            "class_name": class_name_norm,
                             "center": [(x1 + x2) / 2, (y1 + y2) / 2]
                         })
             
@@ -1021,7 +1126,7 @@ class ServiceDisciplineMonitor:
             for uni_det in uniform_detections:
                 uni_center = uni_det["center"]
                 distance = math.hypot(track_center[0] - uni_center[0], track_center[1] - uni_center[1])
-                if distance < 50:  # Uniform detection is very close to person
+                if distance < self.waiter_uniform_distance_threshold:
                     is_waiter = True
                     break
             
@@ -1138,8 +1243,10 @@ class ServiceDisciplineMonitor:
         food_served_gap = self.settings.get("food_served_gap", 10.0)
         
         # Track ongoing interactions
-        ongoing_interactions = {}  # {(customer_track_id, waiter_track_id): start_time}
-        
+        # Keep persistent across frames to accumulate interaction duration
+        if not hasattr(self, 'ongoing_interactions'):
+            self.ongoing_interactions = {}
+
         for table_id, table_info in self.table_tracking.items():
             customer_ids = table_info.get("customer_track_ids", [])
             waiter_ids = table_info.get("waiter_track_ids", [])
@@ -1173,12 +1280,12 @@ class ServiceDisciplineMonitor:
                     if distance < interaction_distance:
                         waiter_nearby = True
                         # Waiter is near customer
-                        if interaction_key not in ongoing_interactions:
+                        if interaction_key not in self.ongoing_interactions:
                             # Start new interaction
-                            ongoing_interactions[interaction_key] = now_ts
+                            self.ongoing_interactions[interaction_key] = now_ts
                         else:
                             # Interaction ongoing - check duration
-                            interaction_start = ongoing_interactions[interaction_key]
+                            interaction_start = self.ongoing_interactions[interaction_key]
                             interaction_duration_actual = now_ts - interaction_start
                             
                             if interaction_duration_actual >= interaction_duration:
@@ -1251,8 +1358,8 @@ class ServiceDisciplineMonitor:
                                                 logger.error(f"[{self.channel_id}] ❌ Failed to save completed order: {e}", exc_info=True)
                     else:
                         # Waiter moved away - clear interaction
-                        if interaction_key in ongoing_interactions:
-                            del ongoing_interactions[interaction_key]
+                        if interaction_key in self.ongoing_interactions:
+                            del self.ongoing_interactions[interaction_key]
                 
                 # Detect when waiter leaves after taking order (T_order_end)
                 if not waiter_nearby and customer["T_order_start"] is not None and customer["T_order_end"] is None:
@@ -1817,14 +1924,25 @@ class ServiceDisciplineMonitor:
             return None
     
     def _draw_annotations_new(self, frame, current_time):
-        """Draw annotations with event information"""
+        """Draw annotations with event information - DeepStream compatible"""
         h, w = frame.shape[:2]
         annotated = frame.copy()
+        
+        # Log frame resolution if not yet detected (shouldn't happen, but safety check)
+        if self.frame_width is None or self.frame_height is None:
+            self.frame_width = w
+            self.frame_height = h
+            logger.info(f"[{self.channel_id}] 📐 First-time frame resolution detection in annotations: {w}x{h}")
         
         if not self.table_rois:
             cv2.putText(annotated, "No table ROIs configured", (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             return annotated
+        
+        # Log DeepStream frame resolution info on first annotation (helpful for debugging resolution mismatches)
+        if self.frame_count == 1:
+            logger.info(f"[{self.channel_id}] 🎬 DeepStream frame dimensions: {self.frame_width}x{self.frame_height} "
+                       f"(ROI coordinates will be scaled accordingly)")
         
         now_ts = current_time.timestamp()
         
@@ -1832,29 +1950,91 @@ class ServiceDisciplineMonitor:
         for table_id, roi_info in self.table_rois.items():
             polygon = roi_info.get("polygon", [])
             if not polygon or len(polygon) < 3:
+                logger.debug(f"[{self.channel_id}] Skipping table {table_id}: insufficient polygon points ({len(polygon)})")
                 continue
             
-            # Draw ROI polygon
+            # Draw ROI polygon - with improved coordinate handling
             try:
                 polygon_pixels = []
-                for p in polygon:
-                    if isinstance(p, (list, tuple)) and len(p) >= 2:
-                        px = int(float(p[0]) * w)
-                        py = int(float(p[1]) * h)
-                        polygon_pixels.append((px, py))
-                    elif isinstance(p, dict) and 'x' in p and 'y' in p:
-                        px = int(float(p['x']) * w)
-                        py = int(float(p['y']) * h)
-                        polygon_pixels.append((px, py))
+                
+                # Determine if coordinates are normalized (0-1) or pixel coordinates
+                # Check first point - if values are small (< 1.5), likely normalized
+                first_point = polygon[0]
+                if isinstance(first_point, (list, tuple)) and len(first_point) >= 2:
+                    test_x, test_y = float(first_point[0]), float(first_point[1])
+                elif isinstance(first_point, dict) and 'x' in first_point and 'y' in first_point:
+                    test_x, test_y = float(first_point['x']), float(first_point['y'])
+                else:
+                    logger.warning(f"[{self.channel_id}] Invalid point format for table {table_id}: {first_point}")
+                    continue
+                
+                # Heuristic: if values are between 0-2, assume normalized; otherwise pixel coordinates
+                is_normalized = (0 <= test_x <= 2) and (0 <= test_y <= 2)
+                
+                for idx, p in enumerate(polygon):
+                    try:
+                        if isinstance(p, (list, tuple)) and len(p) >= 2:
+                            px, py = float(p[0]), float(p[1])
+                        elif isinstance(p, dict) and 'x' in p and 'y' in p:
+                            px, py = float(p['x']), float(p['y'])
+                        else:
+                            logger.warning(f"[{self.channel_id}] Invalid point at index {idx}: {p}")
+                            continue
+                        
+                        # Convert to pixel coordinates if normalized
+                        # Use the actual frame dimensions from DeepStream for proper scaling
+                        if is_normalized:
+                            px = int(px * self.frame_width)
+                            py = int(py * self.frame_height)
+                        else:
+                            px = int(px)
+                            py = int(py)
+                        
+                        # Validate pixel coordinates are within frame bounds
+                        if 0 <= px <= self.frame_width and 0 <= py <= self.frame_height:
+                            polygon_pixels.append((px, py))
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"[{self.channel_id}] Error converting point {idx} for table {table_id}: {e}")
+                        continue
                 
                 if len(polygon_pixels) >= 3:
-                    cv2.polylines(annotated, [np.array(polygon_pixels, np.int32)], True, (0, 255, 255), 3)
-                    if polygon_pixels:
-                        label_pos = polygon_pixels[0]
-                        cv2.putText(annotated, f"Table {table_id}", label_pos,
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                    polygon_array = np.array(polygon_pixels, np.int32)
+                    
+                    # Draw filled polygon with semi-transparent overlay
+                    overlay = annotated.copy()
+                    cv2.fillPoly(overlay, [polygon_array], (0, 255, 255))
+                    cv2.addWeighted(overlay, 0.2, annotated, 0.8, 0, annotated)
+                    
+                    # Draw polygon outline (thicker for visibility)
+                    cv2.polylines(annotated, [polygon_array], True, (0, 255, 255), 3)
+                    
+                    # Draw table label with background for better readability
+                    label_pos = polygon_pixels[0]
+                    label_text = f"Table {table_id}"
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = 0.7
+                    thickness = 2
+                    
+                    # Get text size for background rectangle
+                    (text_width, text_height), baseline = cv2.getTextSize(label_text, font, font_scale, thickness)
+                    
+                    # Draw background rectangle for text
+                    cv2.rectangle(annotated, 
+                                (label_pos[0] - 5, label_pos[1] - text_height - 10),
+                                (label_pos[0] + text_width + 5, label_pos[1] + baseline + 5),
+                                (0, 0, 0), -1)  # Black background
+                    
+                    # Draw text
+                    cv2.putText(annotated, label_text, label_pos,
+                               font, font_scale, (0, 255, 255), thickness)
+                    
+                    logger.debug(f"[{self.channel_id}] Drew ROI for table {table_id}: {len(polygon_pixels)} pixels, normalized={is_normalized}")
+                else:
+                    logger.warning(f"[{self.channel_id}] Table {table_id} has only {len(polygon_pixels)} valid pixel coordinates (need 3+)")
+                    continue
+                    
             except Exception as e:
-                logger.error(f"Error drawing ROI for table {table_id}: {e}")
+                logger.error(f"[{self.channel_id}] Error drawing ROI for table {table_id}: {e}", exc_info=True)
                 continue
             
             # Draw tracked persons for this table

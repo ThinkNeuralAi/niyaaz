@@ -48,7 +48,7 @@ class BagDetection:
         self.app = app
         
         # Model configuration - Use PyTorch model (TensorRT engines cause segfault)
-        self.model_weight = "models/yolo11n.pt"
+        self.model_weight = "models/yolo11n.engine"
         self.conf_threshold = 0.5
         self.nms_iou = 0.45
         

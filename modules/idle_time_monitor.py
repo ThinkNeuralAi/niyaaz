@@ -50,7 +50,7 @@ class IdleTimeMonitor:
         self.app = app
 
         # Model configuration
-        self.person_model_path = "models/yolo11n.pt"
+        self.person_model_path = "models/yolo11n.engine"
         self.conf_threshold = 0.5
         self.nms_iou = 0.45
 

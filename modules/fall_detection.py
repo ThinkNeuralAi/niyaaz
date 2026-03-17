@@ -198,7 +198,7 @@ class FallDetection:
         self.app = app
         
         # Detection configuration
-        self.model_weight = "models/yolo11n.pt"  # Updated to yolo11n
+        self.model_weight = "models/yolo11n.engine"  # Updated to yolo11n
         self.conf_threshold = 0.5  # Confidence threshold for person detection
         self.nms_iou = 0.45
         
@@ -279,8 +279,12 @@ class FallDetection:
         if torch.cuda.is_available() and self.frame_count % 100 == 0:
             torch.cuda.empty_cache()
         
-        # YOLO inference
-        results = self.model(frame, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
+        # YOLO inference on resized frame
+        original_h, original_w = frame.shape[:2]
+        infer_frame = cv2.resize(frame, (640, 640))
+        results = self.model(infer_frame, imgsz=640, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
+        scale_x = original_w / 640.0
+        scale_y = original_h / 640.0
         
         # Extract person detections
         detections = []
@@ -296,6 +300,10 @@ class FallDetection:
                 # Only process person detections
                 if cls_name.lower() == 'person':
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().tolist()
+                    x1 *= scale_x
+                    y1 *= scale_y
+                    x2 *= scale_x
+                    y2 *= scale_y
                     detections.append((int(x1), int(y1), int(x2), int(y2)))
         
         # Update tracker

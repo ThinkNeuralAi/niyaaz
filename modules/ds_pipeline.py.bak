@@ -1,0 +1,682 @@
+"""
+Sakshi.AI - DeepStream 8.0 Pipeline Manager
+Uses pyservicemaker (DS 8.0 Pipeline API) for GPU-accelerated multi-stream processing.
+
+Architecture:
+  27x RTSP → NVDEC (GPU hw decode) → nvstreammux → nvinfer (TensorRT YOLO)
+  → nvtracker → [tee] → branch1: probe (metadata extraction)
+                       → branch2: nvvideoconvert → capsfilter BGR → appsink (frames)
+"""
+
+import os
+import sys
+import logging
+import threading
+import time
+import json
+import numpy as np
+from typing import Dict, List, Optional, Callable, Tuple
+from collections import defaultdict
+from queue import Queue, Empty
+
+import gi
+gi.require_version('Gst', '1.0')
+from gi.repository import Gst, GLib
+
+try:
+    from pyservicemaker import (
+        Pipeline, Probe, BatchMetadataOperator, BufferRetriever,
+        Receiver, Buffer, ColorFormat, as_tensor
+    )
+    PYSERVICEMAKER_AVAILABLE = True
+except ImportError:
+    PYSERVICEMAKER_AVAILABLE = False
+
+import torch
+
+logger = logging.getLogger(__name__)
+
+# COCO class names for yolo11n (80 classes)
+COCO_NAMES = {
+    0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane',
+    5: 'bus', 6: 'train', 7: 'truck', 8: 'boat', 9: 'traffic light',
+    10: 'fire hydrant', 11: 'stop sign', 12: 'parking meter', 13: 'bench',
+    14: 'bird', 15: 'cat', 16: 'dog', 17: 'horse', 18: 'sheep', 19: 'cow',
+    20: 'elephant', 21: 'bear', 22: 'zebra', 23: 'giraffe', 24: 'backpack',
+    25: 'umbrella', 26: 'handbag', 27: 'tie', 28: 'suitcase', 29: 'frisbee',
+    30: 'skis', 31: 'snowboard', 32: 'sports ball', 33: 'kite',
+    34: 'baseball bat', 35: 'baseball glove', 36: 'skateboard', 37: 'surfboard',
+    38: 'tennis racket', 39: 'bottle', 40: 'wine glass', 41: 'cup', 42: 'fork',
+    43: 'knife', 44: 'spoon', 45: 'bowl', 46: 'banana', 47: 'apple',
+    48: 'sandwich', 49: 'orange', 50: 'broccoli', 51: 'carrot', 52: 'hot dog',
+    53: 'pizza', 54: 'donut', 55: 'cake', 56: 'chair', 57: 'couch',
+    58: 'potted plant', 59: 'bed', 60: 'dining table', 61: 'toilet', 62: 'tv',
+    63: 'laptop', 64: 'mouse', 65: 'remote', 66: 'keyboard', 67: 'cell phone',
+    68: 'microwave', 69: 'oven', 70: 'toaster', 71: 'sink', 72: 'refrigerator',
+    73: 'book', 74: 'clock', 75: 'vase', 76: 'scissors', 77: 'teddy bear',
+    78: 'hair drier', 79: 'toothbrush'
+}
+
+
+class YOLODetectionHandler(BatchMetadataOperator):
+    """
+    DeepStream 8.0 BatchMetadataOperator that processes nvinfer output-tensor-meta
+    from YOLO11n and creates proper object metadata for downstream processing.
+
+    When nvinfer has output-tensor-meta=1, raw tensors are available.
+    This handler parses the YOLO output format and creates object_meta entries.
+    When output-tensor-meta=0, nvinfer handles object creation (if using custom parser).
+    """
+
+    def __init__(self, ds_pipeline_ref, conf_threshold=0.35, iou_threshold=0.45,
+                 network_width=640, network_height=640, use_tensor_meta=True):
+        super().__init__()
+        self._pipeline_ref = ds_pipeline_ref
+        self._conf_threshold = conf_threshold
+        self._iou_threshold = iou_threshold
+        self._network_w = network_width
+        self._network_h = network_height
+        self._use_tensor_meta = use_tensor_meta
+        self._frame_count = 0
+
+    def handle_metadata(self, batch_meta):
+        """Process each frame in the batch."""
+        self._frame_count += 1
+
+        for frame_meta in batch_meta.frame_items:
+            source_id = frame_meta.source_id if hasattr(frame_meta, 'source_id') else frame_meta.pad_index
+            channel_id = self._pipeline_ref.stream_id_to_channel.get(source_id, f"camera_{source_id + 1}")
+            frame_number = frame_meta.frame_number
+            stream_w = self._pipeline_ref.config.get('muxer_width', 1280)
+            stream_h = self._pipeline_ref.config.get('muxer_height', 720)
+
+            detections = []
+
+            if self._use_tensor_meta:
+                # Parse raw tensor output from YOLO
+                for user_meta in frame_meta.tensor_items:
+                    try:
+                        layers = user_meta.as_tensor_output().get_layers()
+                        detections = self._parse_yolo_tensors(layers, stream_w, stream_h, batch_meta, frame_meta)
+                    except Exception as e:
+                        if self._frame_count % 100 == 0:
+                            logger.warning(f"Tensor parse error on {channel_id}: {e}")
+            else:
+                # Use nvinfer-provided object metadata (if custom parser in C++)
+                for object_meta in frame_meta.object_items:
+                    det = {
+                        'class_id': object_meta.class_id,
+                        'class_name': COCO_NAMES.get(object_meta.class_id, str(object_meta.class_id)),
+                        'confidence': object_meta.confidence,
+                        'tracker_id': getattr(object_meta, 'object_id', -1),
+                        'bbox': {
+                            'x': object_meta.rect_params.left,
+                            'y': object_meta.rect_params.top,
+                            'w': object_meta.rect_params.width,
+                            'h': object_meta.rect_params.height,
+                        },
+                        'frame_number': frame_number,
+                        'stream_id': source_id,
+                        'channel_id': channel_id,
+                    }
+                    detections.append(det)
+
+            # Update FPS counter
+            fps_data = self._pipeline_ref._fps_counters[channel_id]
+            fps_data['frame_count'] += 1
+            elapsed = time.time() - fps_data['start_time']
+            if elapsed >= 5.0:
+                fps_data['fps'] = fps_data['frame_count'] / elapsed
+                fps_data['frame_count'] = 0
+                fps_data['start_time'] = time.time()
+
+            # Store detections
+            with self._pipeline_ref._detection_lock:
+                self._pipeline_ref._latest_detections[channel_id] = detections
+
+            # Fire detection callbacks
+            for callback in self._pipeline_ref._detection_callbacks:
+                try:
+                    callback(channel_id, detections, frame_number)
+                except Exception as e:
+                    logger.error(f"Detection callback error on {channel_id}: {e}")
+
+    def _parse_yolo_tensors(self, output_layers, stream_w, stream_h, batch_meta, frame_meta):
+        """
+        Parse YOLO11n/YOLOv8 output tensor.
+        YOLO output shape: [1, 84, 8400] where 84 = 4 (xywh) + 80 (class scores)
+        After transpose: [8400, 84]
+        """
+        detections = []
+
+        # Get the output tensor - YOLO typically has one output named 'output0'
+        output_tensor = None
+        for name, tensor_data in output_layers.items():
+            output_tensor = tensor_data
+            break
+
+        if output_tensor is None:
+            return detections
+
+        try:
+            tensor = torch.utils.dlpack.from_dlpack(output_tensor)
+
+            # YOLO output: [1, 84, 8400] or [84, 8400]
+            if tensor.dim() == 3:
+                tensor = tensor.squeeze(0)  # [84, 8400]
+
+            # Transpose to [8400, 84]
+            if tensor.shape[0] < tensor.shape[1]:
+                tensor = tensor.T  # [8400, 84]
+
+            # Split: first 4 = bbox (cx, cy, w, h), rest = class scores
+            boxes = tensor[:, :4]  # [8400, 4] - cx, cy, w, h
+            scores = tensor[:, 4:]  # [8400, 80]
+
+            # Get max class score and class id for each detection
+            max_scores, class_ids = scores.max(dim=1)
+
+            # Filter by confidence
+            mask = max_scores > self._conf_threshold
+            if mask.sum() == 0:
+                return detections
+
+            boxes = boxes[mask]
+            max_scores = max_scores[mask]
+            class_ids = class_ids[mask]
+
+            # Convert cx, cy, w, h to x1, y1, x2, y2
+            x1 = boxes[:, 0] - boxes[:, 2] / 2
+            y1 = boxes[:, 1] - boxes[:, 3] / 2
+            x2 = boxes[:, 0] + boxes[:, 2] / 2
+            y2 = boxes[:, 1] + boxes[:, 3] / 2
+            xyxy = torch.stack([x1, y1, x2, y2], dim=1)
+
+            # NMS per class
+            import torchvision.ops as ops
+            keep = ops.nms(xyxy, max_scores, self._iou_threshold)
+            xyxy = xyxy[keep]
+            max_scores = max_scores[keep]
+            class_ids = class_ids[keep]
+
+            # Scale from network dims to stream dims
+            scale_x = stream_w / self._network_w
+            scale_y = stream_h / self._network_h
+
+            for i in range(len(xyxy)):
+                bx1 = float(xyxy[i, 0]) * scale_x
+                by1 = float(xyxy[i, 1]) * scale_y
+                bx2 = float(xyxy[i, 2]) * scale_x
+                by2 = float(xyxy[i, 3]) * scale_y
+                conf = float(max_scores[i])
+                cls_id = int(class_ids[i])
+
+                # Clamp to frame bounds
+                bx1 = max(0, min(bx1, stream_w))
+                by1 = max(0, min(by1, stream_h))
+                bx2 = max(0, min(bx2, stream_w))
+                by2 = max(0, min(by2, stream_h))
+                bw = bx2 - bx1
+                bh = by2 - by1
+
+                if bw < 2 or bh < 2:
+                    continue
+
+                det = {
+                    'class_id': cls_id,
+                    'class_name': COCO_NAMES.get(cls_id, str(cls_id)),
+                    'confidence': conf,
+                    'tracker_id': -1,
+                    'bbox': {'x': bx1, 'y': by1, 'w': bw, 'h': bh},
+                    'frame_number': frame_meta.frame_number,
+                    'stream_id': frame_meta.pad_index,
+                    'channel_id': self._pipeline_ref.stream_id_to_channel.get(
+                        frame_meta.pad_index, f"camera_{frame_meta.pad_index + 1}"
+                    ),
+                }
+                detections.append(det)
+
+                # Also create object_meta for nvtracker / nvdsosd downstream
+                try:
+                    from pyservicemaker import osd
+                    object_meta = batch_meta.acquire_object_meta()
+                    object_meta.class_id = cls_id
+                    object_meta.confidence = conf
+                    object_meta.rect_params.left = bx1
+                    object_meta.rect_params.top = by1
+                    object_meta.rect_params.width = bw
+                    object_meta.rect_params.height = bh
+                    object_meta.rect_params.border_width = 2
+                    if cls_id == 0:  # person - green
+                        object_meta.rect_params.border_color = osd.Color(0.0, 1.0, 0.0, 1.0)
+                    else:
+                        object_meta.rect_params.border_color = osd.Color(1.0, 0.0, 0.0, 1.0)
+                    frame_meta.append(object_meta)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            if self._frame_count % 100 == 0:
+                logger.error(f"YOLO tensor parse error: {e}", exc_info=True)
+
+        return detections
+
+
+class FrameExtractionProbe(BatchMetadataOperator):
+    """
+    BatchMetadataOperator that extracts per-stream frames from batched NVMM buffers.
+    Uses the DS 8.0 API to get surface data as numpy arrays.
+    """
+
+    def __init__(self, ds_pipeline_ref, width, height):
+        super().__init__()
+        self._pipeline_ref = ds_pipeline_ref
+        self._width = width
+        self._height = height
+        self._count = 0
+        self._extract_interval = 3  # Extract every Nth frame for efficiency
+
+    def handle_metadata(self, batch_meta):
+        self._count += 1
+        # Only extract frames at interval to reduce CPU load
+        if self._count % self._extract_interval != 0:
+            return
+
+        for frame_meta in batch_meta.frame_items:
+            source_id = frame_meta.pad_index
+            channel_id = self._pipeline_ref.stream_id_to_channel.get(source_id)
+            if not channel_id:
+                continue
+
+            try:
+                # Get surface from frame_meta using DS 8.0 API
+                # Try to get the numpy frame from the buffer surface
+                surface = frame_meta.surface
+                if surface is not None:
+                    # Convert NVMM surface to numpy array
+                    frame_array = np.array(surface, copy=True)
+                    if frame_array is not None and frame_array.size > 0:
+                        # Convert from NV12/RGBA to BGR if needed
+                        if len(frame_array.shape) == 3 and frame_array.shape[2] == 4:
+                            import cv2
+                            frame_bgr = cv2.cvtColor(frame_array, cv2.COLOR_RGBA2BGR)
+                        elif len(frame_array.shape) == 3 and frame_array.shape[2] == 3:
+                            frame_bgr = frame_array
+                        else:
+                            continue
+
+                        with self._pipeline_ref._frame_lock:
+                            self._pipeline_ref._latest_frames[channel_id] = frame_bgr
+
+                        # Update FPS
+                        fps_data = self._pipeline_ref._fps_counters[channel_id]
+                        fps_data['frame_count'] += 1
+                        elapsed = time.time() - fps_data['start_time']
+                        if elapsed >= 5.0:
+                            fps_data['fps'] = fps_data['frame_count'] / elapsed
+                            fps_data['frame_count'] = 0
+                            fps_data['start_time'] = time.time()
+
+                        for cb in self._pipeline_ref._frame_callbacks:
+                            try:
+                                cb(channel_id, frame_bgr)
+                            except Exception as e:
+                                logger.error(f"Frame callback error: {e}")
+
+            except AttributeError:
+                # frame_meta.surface not available in this DS version
+                # Fall through — frames will be extracted via OpenCV fallback
+                if self._count == self._extract_interval:
+                    logger.info("frame_meta.surface not available — using OpenCV fallback for frames")
+            except Exception as e:
+                if self._count % 300 == 0:
+                    logger.error(f"Frame extraction error for {channel_id}: {e}")
+
+
+class FrameExtractor(BufferRetriever):
+    """
+    Extract decoded frames from appsink as numpy arrays.
+    Used for MJPEG streaming and GIF recording.
+    """
+
+    def __init__(self, ds_pipeline_ref, width, height):
+        super().__init__()
+        self._pipeline_ref = ds_pipeline_ref
+        self._width = width
+        self._height = height
+        self._count = 0
+
+    def consume(self, buffer):
+        """Called by DeepStream for each frame batch from appsink."""
+        self._count += 1
+        try:
+            # Extract tensor from buffer - index 0 is the first surface
+            tensor_data = buffer.extract(0)
+            if tensor_data is None:
+                return 1
+
+            # Convert DLPack tensor to torch, then to numpy
+            torch_tensor = torch.utils.dlpack.from_dlpack(tensor_data)
+
+            # The tensor should be in HWC format (Height, Width, Channels)
+            # For batched output, shape might be [batch, H, W, C]
+            if torch_tensor.dim() == 4:
+                # Multiple frames in batch - extract each one
+                batch_size = torch_tensor.shape[0]
+                for i in range(min(batch_size, len(self._pipeline_ref.stream_id_to_channel))):
+                    channel_id = self._pipeline_ref.stream_id_to_channel.get(i)
+                    if channel_id:
+                        frame = torch_tensor[i].cpu().numpy().copy()
+                        if frame.shape[2] == 4:  # RGBA
+                            frame = frame[:, :, :3]  # Drop alpha
+                        with self._pipeline_ref._frame_lock:
+                            self._pipeline_ref._latest_frames[channel_id] = frame
+                        for cb in self._pipeline_ref._frame_callbacks:
+                            try:
+                                cb(channel_id, frame)
+                            except Exception as e:
+                                logger.error(f"Frame callback error: {e}")
+            elif torch_tensor.dim() == 3:
+                # Single frame [H, W, C]
+                frame = torch_tensor.cpu().numpy().copy()
+                if frame.shape[2] == 4:
+                    frame = frame[:, :, :3]
+                # For single frame, we map to the current stream
+                # batch_meta from buffer can tell us source_id
+                batch_meta = buffer.batch_meta
+                if batch_meta:
+                    for frame_meta_item in batch_meta.frame_items:
+                        sid = frame_meta_item.pad_index
+                        channel_id = self._pipeline_ref.stream_id_to_channel.get(sid)
+                        if channel_id:
+                            with self._pipeline_ref._frame_lock:
+                                self._pipeline_ref._latest_frames[channel_id] = frame
+                            break
+            else:
+                # Flat buffer - try to reshape
+                total = torch_tensor.numel()
+                expected = self._height * self._width * 3
+                if total >= expected:
+                    frame = torch_tensor[:expected].reshape(self._height, self._width, 3).cpu().numpy().copy()
+                    for channel_id in self._pipeline_ref.stream_id_to_channel.values():
+                        with self._pipeline_ref._frame_lock:
+                            self._pipeline_ref._latest_frames[channel_id] = frame
+                        break
+
+        except Exception as e:
+            if self._count % 100 == 0:
+                logger.error(f"Frame extraction error: {e}")
+
+        return 1
+
+
+class DeepStreamPipeline:
+    """
+    DeepStream 8.0 Pipeline Manager using pyservicemaker API.
+
+    Manages a single DeepStream pipeline processing all 27 RTSP camera streams:
+    - NVDEC hardware decoding (zero CUDA core usage)
+    - GPU batching via nvstreammux
+    - TensorRT inference via nvinfer
+    - GPU-accelerated tracking via nvtracker
+    - Python probe callbacks for detection metadata
+    - Frame extraction for MJPEG streaming and GIF recording
+    """
+
+    def __init__(self, config: dict):
+        if not PYSERVICEMAKER_AVAILABLE:
+            raise RuntimeError("pyservicemaker not available. Install DeepStream 8.0 SDK.")
+
+        Gst.init(None)
+
+        self.config = config
+        self.pipeline = None
+        self.is_running = False
+
+        # Stream ↔ Channel mappings
+        self.stream_id_to_channel: Dict[int, str] = {}
+        self.channel_to_stream_id: Dict[str, int] = {}
+
+        # Callbacks
+        self._detection_callbacks: List[Callable] = []
+        self._frame_callbacks: List[Callable] = []
+
+        # Frame storage
+        self._latest_frames: Dict[str, np.ndarray] = {}
+        self._frame_lock = threading.Lock()
+
+        # Detection metadata storage
+        self._latest_detections: Dict[str, List[dict]] = defaultdict(list)
+        self._detection_lock = threading.Lock()
+
+        # FPS counters
+        self._fps_counters: Dict[str, dict] = defaultdict(lambda: {
+            'frame_count': 0,
+            'start_time': time.time(),
+            'fps': 0.0
+        })
+
+        self._pipeline_thread = None
+        self._stop_event = threading.Event()
+
+        logger.info("DeepStreamPipeline (DS 8.0) initialized")
+
+    def build_pipeline(self, channels: List[dict]) -> bool:
+        """
+        Build the complete DeepStream pipeline for all channels.
+
+        Args:
+            channels: List of channel configs from channels.json
+        Returns:
+            True if pipeline built successfully
+        """
+        try:
+            enabled_channels = [ch for ch in channels if ch.get('enabled', True) and ch.get('rtsp_url')]
+
+            if not enabled_channels:
+                logger.error("No enabled channels with RTSP URLs found")
+                return False
+
+            num_streams = len(enabled_channels)
+            muxer_w = self.config.get('muxer_width', 1280)
+            muxer_h = self.config.get('muxer_height', 720)
+
+            logger.info(f"Building DeepStream pipeline for {num_streams} streams at {muxer_w}x{muxer_h}")
+
+            # Build channel mappings
+            for idx, channel in enumerate(enabled_channels):
+                channel_id = channel.get('channel_id', f'camera_{idx + 1}')
+                self.stream_id_to_channel[idx] = channel_id
+                self.channel_to_stream_id[channel_id] = idx
+
+            # Create pipeline
+            self.pipeline = Pipeline("sakshiai-pipeline")
+
+            # Add nvstreammux
+            self.pipeline.add("nvstreammux", "mux", {
+                "batch-size": num_streams,
+                "width": muxer_w,
+                "height": muxer_h,
+                "batched-push-timeout": 40000,
+                "live-source": 1,
+                "gpu-id": 0,
+                "nvbuf-memory-type": 0,
+                "enable-padding": 1,
+            })
+
+            # Add RTSP source bins for each camera
+            for idx, channel in enumerate(enabled_channels):
+                rtsp_url = channel['rtsp_url']
+                channel_id = channel.get('channel_id', f'camera_{idx + 1}')
+                src_name = f"src_{idx}"
+
+                # nvurisrcbin handles RTSP + NVDEC decoding automatically
+                self.pipeline.add("nvurisrcbin", src_name, {
+                    "uri": rtsp_url,
+                    "gpu-id": 0,
+                    "cudadec-memtype": 0,
+                    "source-id": idx,
+                })
+
+                # Link source to muxer
+                self.pipeline.link((src_name, "mux"), ("", "sink_%u"))
+
+                logger.info(f"  Added source {idx}: {channel_id} -> {rtsp_url}")
+
+            # Add primary inference (YOLO11n via nvinfer + TensorRT)
+            pgie_config = self.config.get('pgie_config', 'config/ds_yolo_primary.yml')
+            use_nvinfer = self.config.get('use_nvinfer', False) and os.path.exists(pgie_config)
+
+            if use_nvinfer:
+                self.pipeline.add("nvinfer", "pgie", {
+                    "config-file-path": pgie_config,
+                    "batch-size": num_streams,
+                })
+                # Add tracker
+                tracker_lib = "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so"
+                if os.path.exists(tracker_lib):
+                    self.pipeline.add("nvtracker", "tracker", {
+                        "tracker-width": 640,
+                        "tracker-height": 384,
+                        "gpu-id": 0,
+                        "ll-lib-file": tracker_lib,
+                        "enable-batch-process": 1,
+                        "display-tracking-id": 1,
+                    })
+                else:
+                    self.pipeline.add("queue", "tracker")
+            else:
+                logger.info("Decode-only pipeline — modules handle inference in Python")
+
+            # Output: nvmultistreamtiler → nvvideoconvert → capsfilter → appsink
+            # Tiler composites all streams into a single mosaic but we need per-stream.
+            # So we use fakesink + a BufferOperator probe to extract per-stream frames.
+            self.pipeline.add("queue", "queue_out", {"leaky": 2, "max-size-buffers": 2})
+            self.pipeline.add("fakesink", "fakesink", {"sync": 0, "async": 0})
+
+            # Link the pipeline
+            if use_nvinfer:
+                self.pipeline.link("mux", "pgie", "tracker", "queue_out", "fakesink")
+
+                # Attach detection probe
+                detection_handler = YOLODetectionHandler(
+                    self,
+                    conf_threshold=self.config.get('conf_threshold', 0.35),
+                    iou_threshold=self.config.get('iou_threshold', 0.45),
+                    use_tensor_meta=True,
+                )
+                self.pipeline.attach("pgie", Probe("detection_probe", detection_handler))
+            else:
+                self.pipeline.link("mux", "queue_out", "fakesink")
+
+            # Attach frame extraction probe on the queue output
+            # This probe extracts per-stream frames from batched NVMM buffers
+            frame_probe = FrameExtractionProbe(self, muxer_w, muxer_h)
+            self.pipeline.attach("queue_out", Probe("frame_probe", frame_probe))
+
+            logger.info(f"Pipeline built successfully with {num_streams} streams")
+            return True
+
+        except Exception as e:
+            logger.error(f"Pipeline build failed: {e}", exc_info=True)
+            return False
+
+    def start(self) -> bool:
+        """Start the DeepStream pipeline in a background thread."""
+        if not self.pipeline:
+            logger.error("Pipeline not built. Call build_pipeline() first.")
+            return False
+
+        self._stop_event.clear()
+
+        def _run():
+            try:
+                logger.info("Starting DeepStream pipeline...")
+                self.pipeline.start()
+                self.is_running = True
+                logger.info("DeepStream pipeline is PLAYING")
+                self.pipeline.wait()
+            except Exception as e:
+                logger.error(f"Pipeline run error: {e}", exc_info=True)
+            finally:
+                self.is_running = False
+                logger.info("DeepStream pipeline stopped")
+
+        self._pipeline_thread = threading.Thread(target=_run, daemon=True, name="ds-pipeline")
+        self._pipeline_thread.start()
+
+        # Wait for pipeline to start — nvinfer engine build may take time
+        for i in range(30):
+            time.sleep(1)
+            if not self._pipeline_thread.is_alive():
+                logger.error("Pipeline thread died during startup")
+                return False
+            if self.is_running:
+                logger.info("DeepStream pipeline thread confirmed running")
+                return True
+
+        # If we get here, thread is alive but pipeline.start() is still blocking
+        # (engine build can take a while). Assume it's starting.
+        if self._pipeline_thread.is_alive():
+            logger.info("Pipeline thread alive, assuming startup in progress...")
+            self.is_running = True
+            return True
+
+        logger.error("Pipeline thread failed after timeout")
+        return False
+
+    def stop(self):
+        """Stop the DeepStream pipeline."""
+        self.is_running = False
+        self._stop_event.set()
+
+        if self.pipeline:
+            try:
+                self.pipeline.stop()
+            except Exception as e:
+                logger.error(f"Pipeline stop error: {e}")
+
+        if self._pipeline_thread and self._pipeline_thread.is_alive():
+            self._pipeline_thread.join(timeout=10)
+
+        logger.info("DeepStream pipeline stopped")
+
+    # ─── Public API ───────────────────────────────────────────────
+
+    def register_detection_callback(self, callback: Callable):
+        """Register callback(channel_id, detections, frame_num)."""
+        self._detection_callbacks.append(callback)
+
+    def register_frame_callback(self, callback: Callable):
+        """Register callback(channel_id, frame_ndarray)."""
+        self._frame_callbacks.append(callback)
+
+    def get_latest_frame(self, channel_id: str) -> Optional[np.ndarray]:
+        """Get the latest decoded frame for a channel."""
+        with self._frame_lock:
+            return self._latest_frames.get(channel_id)
+
+    def get_latest_detections(self, channel_id: str) -> List[dict]:
+        """Get the latest detections for a channel."""
+        with self._detection_lock:
+            return self._latest_detections.get(channel_id, [])
+
+    def get_fps(self, channel_id: str) -> float:
+        """Get current FPS for a channel."""
+        return self._fps_counters.get(channel_id, {}).get('fps', 0.0)
+
+    def get_statistics(self) -> dict:
+        """Get pipeline statistics for all streams."""
+        stats = {}
+        for stream_id, channel_id in self.stream_id_to_channel.items():
+            stats[channel_id] = {
+                'stream_id': stream_id,
+                'fps': self.get_fps(channel_id),
+                'has_frame': channel_id in self._latest_frames,
+                'detection_count': len(self._latest_detections.get(channel_id, [])),
+            }
+        return stats
+
+    def get_all_channel_ids(self) -> List[str]:
+        """Get list of all channel IDs in the pipeline."""
+        return list(self.stream_id_to_channel.values())

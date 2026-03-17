@@ -1,0 +1,30 @@
+################################################################################
+# Sakshi.AI - YOLO11n Primary Detector nvinfer Configuration
+# Model: yolo11n (80 COCO classes, person detection is class 0)
+# Used as primary inference for all detection modules
+################################################################################
+
+property:
+  gpu-id: 0
+  net-scale-factor: 0.00392156862745098
+  model-engine-file: /home/ubuntu/Niyaaz_biryani/niyaaz/models/yolo11n_nvinfer.engine
+  infer-dims: 3;640;640
+  labelfile-path: /home/ubuntu/Niyaaz_biryani/niyaaz/config/labels.txt
+  batch-size: 8
+  network-mode: 1
+  num-detected-classes: 80
+  interval: 0
+  gie-unique-id: 1
+  process-mode: 1
+  network-type: 0
+  cluster-mode: 2
+  maintain-aspect-ratio: 1
+  symmetric-padding: 1
+  output-blob-names: output0
+  custom-lib-path: /home/ubuntu/Niyaaz_biryani/niyaaz/custom_parsers/libnvdsinfer_yolo_parser.so
+  parse-bbox-func-name: NvDsInferParseYoloV8
+
+class-attrs-all:
+  nms-iou-threshold: 0.45
+  pre-cluster-threshold: 0.25
+  topk: 300

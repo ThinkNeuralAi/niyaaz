@@ -32,12 +32,12 @@ class CrowdDetection:
         self.db_manager = db_manager
         self.app = app
         
-        # Initialize YOLO detector with yolo11n.pt for person detection
+        # Initialize YOLO detector with yolo11n.engine for person detection
         self.detector = YOLODetector(
-            model_path='models/yolo11n.pt',
+            model_path='models/yolo11n.engine',
             confidence_threshold=0.4,
             img_size=640,
-            person_class_id=0  # Person class in yolo11n.pt model (class 0 = person)
+            person_class_id=0  # Person class in yolo11n (class 0 = person)
         )
         
         # Initialize GIF recorder for alerts

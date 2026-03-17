@@ -1,0 +1,33 @@
+################################################################################
+# Sakshi.AI - Best Custom Detector nvinfer Configuration
+# Model: best.pt (18 custom classes for restaurant analytics)
+# Classes: Apron, Cashdraw-open, Fire, Gloves, Hairnet, No_apron, No_gloves,
+#          No_hairnet, Shoe, Smoke, Smoking, Table_clean, Table_unclean,
+#          Uniform_black, Uniform_cream, Uniform_grey, Weighing_machine,
+#          Weighing_machine_item
+################################################################################
+
+property:
+  gpu-id: 0
+  net-scale-factor: 0.00392156862745098
+  model-engine-file: /home/ubuntu/Niyaaz_biryani/niyaaz/models/best_nvinfer.engine
+  infer-dims: 3;640;640
+  labelfile-path: /home/ubuntu/Niyaaz_biryani/niyaaz/config/best_labels.txt
+  batch-size: 8
+  network-mode: 1
+  num-detected-classes: 18
+  interval: 2
+  gie-unique-id: 2
+  process-mode: 1
+  network-type: 0
+  cluster-mode: 2
+  maintain-aspect-ratio: 1
+  symmetric-padding: 1
+  output-blob-names: output0
+  custom-lib-path: /home/ubuntu/Niyaaz_biryani/niyaaz/custom_parsers/libnvdsinfer_yolo_parser.so
+  parse-bbox-func-name: NvDsInferParseYoloV8
+
+class-attrs-all:
+  nms-iou-threshold: 0.45
+  pre-cluster-threshold: 0.5
+  topk: 200

@@ -89,7 +89,7 @@ class QueueMonitor:
         #  10: 'Smoke', 11: 'Fire', 12: 'Person', 13: 'Uniform_grey', 14: 'No_hairnet',
         #  15: 'Table_clean', 16: 'Table_unclean'}
         self.detector = YOLODetector(
-            model_path="models/yolo11n.pt",
+            model_path="models/yolo11n.engine",
             # model_path="models/best.pt",
             confidence_threshold=0.5,
             img_size=640,
@@ -101,7 +101,7 @@ class QueueMonitor:
         # This helps in cases where person detection misses staff but uniform detection works
         try:
             from .model_manager import get_shared_model
-            self.uniform_detector = get_shared_model("models/best.pt", device='auto')
+            self.uniform_detector = get_shared_model("models/best.engine", device='auto')
             self.use_uniform_fallback = True
             self.uniform_classes = {"Uniform_black", "Uniform_grey", "Uniform_cream", "Uniform_blue"}
             logger.info(f"[{self.channel_id}] ✅ Uniform detector initialized for counter area fallback")
@@ -290,13 +290,13 @@ class QueueMonitor:
                 logger.info(f"    Bbox: {self.roi_cache['secondary']['bbox']}")
 
     @staticmethod
-    def _point_in_polygon_optimized(point, polygon, bbox):
+    def _point_in_polygon_optimized(point, polygon, bbox, pixel_tolerance=1):
         """Fast ROI check using bbox + cv2.pointPolygonTest."""
         x, y = point
         (min_x, min_y, max_x, max_y) = bbox
-        if x < min_x or x > max_x or y < min_y or y > max_y:
+        if x < min_x - pixel_tolerance or x > max_x + pixel_tolerance or y < min_y - pixel_tolerance or y > max_y + pixel_tolerance:
             return False
-        return cv2.pointPolygonTest(polygon, (float(x), float(y)), False) >= 0
+        return cv2.pointPolygonTest(polygon, (float(x), float(y)), False) >= -pixel_tolerance
     
     @staticmethod
     def _bbox_overlaps_roi(bbox, roi_polygon, roi_bbox, min_overlap_ratio=0.3):
@@ -354,8 +354,8 @@ class QueueMonitor:
         
         # If center point OR top-center is in ROI, consider it a match
         # This is very forgiving for staff who may be standing behind the counter
-        center_in = cv2.pointPolygonTest(roi_polygon, (float(bbox_center[0]), float(bbox_center[1])), False) >= 0
-        top_center_in = cv2.pointPolygonTest(roi_polygon, (float(bbox_top_center[0]), float(bbox_top_center[1])), False) >= 0
+        center_in = cv2.pointPolygonTest(roi_polygon, (float(bbox_center[0]), float(bbox_center[1])), False) >= -1
+        top_center_in = cv2.pointPolygonTest(roi_polygon, (float(bbox_top_center[0]), float(bbox_top_center[1])), False) >= -1
         
         if center_in or top_center_in:
             return True
@@ -1189,12 +1189,16 @@ class QueueMonitor:
             if counter_roi and counter_roi.get("polygon") is not None:
                 try:
                     # Run uniform detection (with caching for performance)
+                    infer_frame = cv2.resize(frame, (640, 640))
+                    scale_x = w / 640.0
+                    scale_y = h / 640.0
                     if (
                         self.uniform_detection_cache is None
                         or self.frame_count - self.uniform_cache_frame_count >= self.uniform_cache_interval
                     ):
                         uniform_results = self.uniform_detector(
-                            frame,
+                            infer_frame,
+                            imgsz=640,
                             conf=self.detector.confidence_threshold,
                             iou=0.45,
                             verbose=False
@@ -1211,12 +1215,24 @@ class QueueMonitor:
                         class_names = uniform_results[0].names
                         for box in boxes:
                             class_id = int(box.cls[0])
-                            class_name = class_names[class_id]
+                            class_name = class_names.get(class_id, None)
+                            if class_name is None or (isinstance(class_name, str) and class_name.startswith('class') and class_name[5:].isdigit()):
+                                labels_path = 'config/coco_labels.txt'
+                                if os.path.exists(labels_path):
+                                    labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                                    if class_id < len(labels):
+                                        class_name = labels[class_id]
+                            if class_name is None:
+                                continue
                             conf = float(box.conf[0])
                             
                             # Only consider uniform classes
                             if class_name in self.uniform_classes:
                                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                                x1 *= scale_x
+                                y1 *= scale_y
+                                x2 *= scale_x
+                                y2 *= scale_y
                                 bbox = [int(x1), int(y1), int(x2), int(y2)]
                                 center = [(x1 + x2) / 2, (y1 + y2) / 2]
                                 bottom_center = [center[0], y2]  # Bottom center point
@@ -1280,8 +1296,12 @@ class QueueMonitor:
                         self.uniform_detection_cache is None
                         or self.frame_count - self.uniform_cache_frame_count >= self.uniform_cache_interval
                     ):
+                        infer_frame = cv2.resize(frame, (640, 640))
+                        self.scale_x = w / 640.0
+                        self.scale_y = h / 640.0
                         uniform_results = self.uniform_detector(
-                            frame,
+                            infer_frame,
+                            imgsz=640,
                             conf=self.detector.confidence_threshold,
                             iou=0.45,
                             verbose=False
@@ -1298,12 +1318,24 @@ class QueueMonitor:
                         class_names = uniform_results[0].names
                         for box in boxes:
                             class_id = int(box.cls[0])
-                            class_name = class_names[class_id]
+                            class_name = class_names.get(class_id, None)
+                            if class_name is None or (isinstance(class_name, str) and class_name.startswith('class') and class_name[5:].isdigit()):
+                                labels_path = 'config/coco_labels.txt'
+                                if os.path.exists(labels_path):
+                                    labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                                    if class_id < len(labels):
+                                        class_name = labels[class_id]
+                            if class_name is None:
+                                continue
                             conf = float(box.conf[0])
                             
                             # Only consider uniform classes
                             if class_name in self.uniform_classes:
                                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                                x1 *= scale_x
+                                y1 *= scale_y
+                                x2 *= scale_x
+                                y2 *= scale_y
                                 bbox = [int(x1), int(y1), int(x2), int(y2)]
                                 center = [(x1 + x2) / 2, (y1 + y2) / 2]
                                 bottom_center = [center[0], y2]  # Bottom center point

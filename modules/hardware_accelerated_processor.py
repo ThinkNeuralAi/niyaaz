@@ -91,7 +91,7 @@ class HardwareAcceleratedProcessor:
             
             # Initialize optimized detector
             self.detector = create_optimized_detector(
-                "models/yolo11n.pt",  # Will try .trt and .onnx versions
+                "models/yolo11n.engine",  # TensorRT engine
                 use_tensorrt=True,
                 confidence_threshold=0.6
             )

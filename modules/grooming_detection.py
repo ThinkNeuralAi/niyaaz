@@ -78,8 +78,12 @@ class GroomingDetection:
         """
         self.frame_count += 1
         
-        # Run YOLO detection
-        results = self.model(frame, conf=self.confidence_threshold, verbose=False)
+        # Run YOLO detection on resized frame for engine models
+        original_h, original_w = frame.shape[:2]
+        infer_frame = cv2.resize(frame, (640, 640))
+        results = self.model(infer_frame, imgsz=640, conf=self.confidence_threshold, verbose=False)
+        scale_x = original_w / 640.0
+        scale_y = original_h / 640.0
         
         # Extract detections
         detections = []
@@ -91,7 +95,12 @@ class GroomingDetection:
                 cls_id = int(box.cls[0])
                 class_name = self.model.names[cls_id]
                 confidence = float(box.conf[0])
-                bbox = box.xyxy[0].cpu().numpy().astype(int)
+                bbox = box.xyxy[0].cpu().numpy()
+                bbox[0] *= scale_x
+                bbox[1] *= scale_y
+                bbox[2] *= scale_x
+                bbox[3] *= scale_y
+                bbox = bbox.astype(int)
                 
                 detections.append({
                     'class': class_name,

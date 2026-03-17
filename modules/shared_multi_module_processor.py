@@ -246,7 +246,7 @@ class SharedMultiModuleVideoProcessor:
                     self.deepstream_processor = DeepStreamProcessor(
                         rtsp_url=self.video_source,
                         channel_id=self.channel_id,
-                        model_path="models/yolo11n.pt",  # PyTorch model
+                        model_path="models/yolo11n.engine",  # TensorRT engine
                         config_file="config/deepstream_yolo_config.txt",
                         tracker_config="config/deepstream_tracker.txt",
                         input_width=1920,

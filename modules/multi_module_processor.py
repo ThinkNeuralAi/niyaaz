@@ -9,6 +9,29 @@ import logging
 from queue import Queue
 import numpy as np
 from typing import List, Dict, Any
+from urllib.parse import urlparse, quote
+
+
+def _encode_rtsp_url_for_cv2(url: str) -> str:
+    """Encode RTSP URL for OpenCV to handle usernames/passwords with special characters."""
+    if not isinstance(url, str) or not url.startswith("rtsp://"):
+        return url
+
+    parsed = urlparse(url)
+    if parsed.username is None or parsed.password is None:
+        return url
+
+    # Encode username and password safely.
+    encoded_user = quote(parsed.username, safe="")
+    encoded_pass = quote(parsed.password, safe="")
+
+    # Rebuild without query/fragment parts
+    netloc = f"{encoded_user}:{encoded_pass}@{parsed.hostname}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+
+    encoded_url = parsed._replace(netloc=netloc).geturl()
+    return encoded_url
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +126,13 @@ class MultiModuleVideoProcessor:
             # Determine source type
             if isinstance(self.video_source, str):
                 if self.video_source.startswith(('rtsp://', 'rtmp://', 'http://', 'https://')):
+                    if self.video_source.startswith('rtsp://'):
+                        encoded_stream = _encode_rtsp_url_for_cv2(self.video_source)
+                    else:
+                        encoded_stream = self.video_source
+
                     # RTSP/network stream - OPTIMIZED for low latency
-                    self.cap = cv2.VideoCapture(self.video_source, cv2.CAP_FFMPEG)
+                    self.cap = cv2.VideoCapture(encoded_stream, cv2.CAP_FFMPEG)
                     
                     # Aggressive optimization for real-time RTSP
                     self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffering
@@ -113,7 +141,9 @@ class MultiModuleVideoProcessor:
                     # Set transport protocol to TCP for reliability (optional)
                     self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('H','2','6','4'))
                     
-                    logger.info(f"Initializing RTSP stream with optimizations: {self.video_source}")
+                    if encoded_stream != self.video_source:
+                        logger.info(f"Encoded RTSP URL for capture: {encoded_stream}")
+                    logger.info(f"Initializing RTSP stream with optimizations: {encoded_stream}")
                     
                 elif self.video_source.isdigit():
                     # Camera index

@@ -39,7 +39,7 @@ class MoppingDetection:
         self.app = app
         
         # Detection configuration - Use PyTorch model (TensorRT engines cause segfault)
-        self.model_weight = "models/best.pt"
+        self.model_weight = "models/best.engine"
         self.conf_threshold = 0.5  # Confidence threshold for detections
         self.nms_iou = 0.45
         
@@ -113,8 +113,12 @@ class MoppingDetection:
         if torch.cuda.is_available() and self.frame_count % 100 == 0:
             torch.cuda.empty_cache()
         
-        # YOLO inference
-        results = self.yolo(frame, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
+        # YOLO inference (TensorRT models require fixed 640x640 input)
+        original_h, original_w = frame.shape[:2]
+        infer_frame = cv2.resize(frame, (640, 640))
+        results = self.yolo(infer_frame, conf=self.conf_threshold, iou=self.nms_iou, imgsz=640, verbose=False)
+        scale_x = original_w / 640.0
+        scale_y = original_h / 640.0
         
         # Process detections
         detections = []
@@ -140,6 +144,10 @@ class MoppingDetection:
                 if cls_name != self.mopping_class:
                     continue
                 
+                xyxy[0] *= scale_x
+                xyxy[1] *= scale_y
+                xyxy[2] *= scale_x
+                xyxy[3] *= scale_y
                 x1, y1, x2, y2 = map(int, xyxy.tolist())
                 
                 detections.append({

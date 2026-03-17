@@ -41,7 +41,7 @@ class PPEMonitoring:
         self.app = app
         
         # Model configuration - Use custom trained model
-        self.model_weight = "models/best.pt"
+        self.model_weight = "models/best.engine"
         self.conf_threshold = 0.5
         self.nms_iou = 0.45
         
@@ -281,6 +281,7 @@ class PPEMonitoring:
             
             results = self.model.predict(
                 frame,
+                imgsz=640,
                 conf=self.conf_threshold,
                 iou=self.nms_iou,
                 verbose=False,
@@ -303,11 +304,22 @@ class PPEMonitoring:
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
                 
-                if cls_id < len(self.model.names):
+                class_name = None
+                if hasattr(self.model, 'names') and isinstance(self.model.names, dict) and cls_id in self.model.names:
                     class_name = self.model.names[cls_id]
-                    
-                    # Process PPE-related classes and Person class (for context)
-                    if class_name in self.ppe_classes or class_name == 'Person':
+
+                # Fallback to best_labels.txt for generic class IDs (class0, class1, ...)
+                if class_name is None or (isinstance(class_name, str) and class_name.startswith('class') and class_name[5:].isdigit()):
+                    labels_path = 'config/best_labels.txt'
+                    if os.path.exists(labels_path):
+                        labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                        if cls_id < len(labels):
+                            class_name = labels[cls_id]
+                if class_name is None:
+                    class_name = f'class{cls_id}'
+
+                # Process PPE-related classes and Person class (for context)
+                if class_name in self.ppe_classes or class_name == 'Person':
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                         detections.append({
                             'bbox': [int(x1), int(y1), int(x2), int(y2)],

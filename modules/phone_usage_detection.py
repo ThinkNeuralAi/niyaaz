@@ -45,7 +45,7 @@ class PhoneUsageDetection:
         self.detection_duration = self.config.get('detection_duration', 2)  # seconds to confirm detection
         
         # Model configuration
-        self.model_path = self.config.get('model_path', 'models/best.pt')
+        self.model_path = self.config.get('model_path', 'models/best.engine')
         self.target_class = 'phone_use'  # Class name in best.pt model
         
         # Load shared YOLO model
@@ -122,8 +122,12 @@ class PhoneUsageDetection:
             self.frame_count = 0
             self.last_fps_time = current_time
         
-        # Run YOLO detection
-        results = self.model(frame, conf=self.confidence_threshold, verbose=False)
+        # Run YOLO detection on resized frame for engine models
+        original_h, original_w = frame.shape[:2]
+        infer_frame = cv2.resize(frame, (640, 640))
+        results = self.model(infer_frame, imgsz=640, conf=self.confidence_threshold, verbose=False)
+        scale_x = original_w / 640.0
+        scale_y = original_h / 640.0
         
         # Extract phone detections
         phone_detections = []
@@ -141,6 +145,10 @@ class PhoneUsageDetection:
                         conf = float(boxes.conf[i].cpu().numpy())
                         box = boxes.xyxy[i].cpu().numpy()
                         x1, y1, x2, y2 = box
+                        x1 *= scale_x
+                        y1 *= scale_y
+                        x2 *= scale_x
+                        y2 *= scale_y
                         
                         phone_detections.append({
                             'bbox': [int(x1), int(y1), int(x2), int(y2)],

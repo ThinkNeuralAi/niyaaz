@@ -50,7 +50,7 @@ class MaterialTheftMonitor:
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
 
         # YOLO model for detecting weighing_machine_item class (like Material_theft.py)
-        self.model_path = cfg.get("model_path", "models/best.pt")
+        self.model_path = cfg.get("model_path", "models/best.engine")
         self.target_class = cfg.get("target_class", "weighing_machine_item")
         self.item_model = get_shared_model(self.model_path)
         logger.info(f"[{self.channel_id}] Loaded YOLO model: {self.model_path} for class: {self.target_class}")
@@ -59,10 +59,10 @@ class MaterialTheftMonitor:
         self.person_detector = None
         if self.detect_persons:
             self.person_detector = YOLODetector(
-                model_path="models/yolo11n.pt",
+                model_path="models/yolo11n.engine",
                 confidence_threshold=0.25,
                 img_size=640,
-                person_class_id=0  # Person class in yolo11n.pt
+                person_class_id=0  # Person class in yolo11n
             )
             logger.info(f"[{self.channel_id}] Person detection enabled for MaterialTheftMonitor")
 
@@ -250,7 +250,7 @@ class MaterialTheftMonitor:
         
         try:
             # Run YOLO inference
-            results = self.item_model(frame, conf=self.confidence_threshold, verbose=False)
+            results = self.item_model(frame, imgsz=640, conf=self.confidence_threshold, verbose=False)
             
             # Get ROI points in pixels for checking if detection is within ROI
             roi_points_px = self._get_roi_points_pixels(w, h).astype(np.int32)

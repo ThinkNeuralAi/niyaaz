@@ -39,7 +39,8 @@ def main():
         if not ret:
             break
 
-        results = model(frame, verbose=False)
+        infer_frame = cv2.resize(frame, (640, 640))
+        results = model(infer_frame, imgsz=640, verbose=False)
         alert_text = ""
 
         detected_classes = []

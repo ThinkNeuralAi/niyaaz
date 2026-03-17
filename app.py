@@ -6,6 +6,27 @@ import os
 
 # Set RTSP timeout to 5 seconds to prevent blocking on unreachable cameras
 os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'timeout;5000000|rtsp_transport;tcp')
+
+# -------------------------------------------------------------------
+# CRITICAL: Pre-load TRT engines BEFORE any GStreamer/pyservicemaker import.
+# gstreamer_nvdec.py calls Gst.init() at import time; once GStreamer's TRT
+# runtime is active, Ultralytics' AutoBackend segfaults when creating new
+# TRT execution contexts. Loading engines first is safe.
+# -------------------------------------------------------------------
+_USE_DS = os.getenv('USE_DEEPSTREAM', 'true').lower() == 'true'
+if _USE_DS:
+    _base = os.path.dirname(os.path.abspath(__file__))
+    for _eng in ['models/best.engine', 'models/yolo11n.engine']:
+        _epath = os.path.join(_base, _eng)
+        if os.path.exists(_epath):
+            try:
+                from modules.model_manager import get_shared_model as _preload
+                _preload(_eng, device='auto')
+                print(f"[preload] TRT engine ready: {_eng}")
+            except Exception as _e:
+                print(f"[preload] WARNING: {_eng}: {_e}")
+    del _base, _epath, _eng
+
 import json
 import logging
 from datetime import datetime, timedelta
@@ -23,6 +44,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
 from functools import wraps
 import cv2
+import numpy as np
 import threading
 import time
 from pathlib import Path
@@ -50,9 +72,29 @@ from modules.database import DatabaseManager
 
 from modules.model_manager import get_model_stats, cleanup_models
 
+# DeepStream 8.0 integration (optional — controlled by USE_DEEPSTREAM flag)
+USE_DEEPSTREAM = os.getenv('USE_DEEPSTREAM', 'true').lower() == 'true'
+ds_pipeline_instance = None  # Global DeepStream pipeline (set during startup)
+ds_adapter_instance = None   # Global DeepStream module adapter
+
+if USE_DEEPSTREAM:
+    try:
+        from modules.ds_pipeline import DeepStreamPipeline, DEEPSTREAM_AVAILABLE
+        from modules.ds_module_adapter import DeepStreamModuleAdapter, DSDetectionResult
+        if not DEEPSTREAM_AVAILABLE:
+            USE_DEEPSTREAM = False
+    except ImportError:
+        USE_DEEPSTREAM = False
+        DEEPSTREAM_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+if USE_DEEPSTREAM:
+    logger.info("🚀 DeepStream 8.0 mode ENABLED")
+else:
+    logger.info("📷 OpenCV mode (DeepStream disabled)")
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -226,6 +268,84 @@ app_configs = {
 # Database manager
 db_manager = DatabaseManager(db)
 
+
+# ============= DeepStream Channel Wrapper ===============================
+# Wraps a single channel from the shared DS pipeline to look like a
+# MultiModuleVideoProcessor so existing code (video_feed, broadcast,
+# subscribe_stream, get_active_channels etc.) works without changes.
+# ========================================================================
+class _DSChannelWrapper:
+    """Mimics MultiModuleVideoProcessor interface backed by the global DS pipeline."""
+
+    def __init__(self, channel_id: str, ds_pipe, ds_adapt):
+        self.channel_id = channel_id
+        self._pipe = ds_pipe
+        self._adapter = ds_adapt
+        self.is_running = True
+        self.modules = {}  # module_name → module_instance
+        self.module_results = {}
+        self.processing_thread = threading.current_thread()  # dummy
+        self._start_time = time.time()
+
+    # ---------- module management (same API as MultiModuleVideoProcessor) ----
+    def add_module(self, module_name: str, module_instance):
+        self.modules[module_name] = module_instance
+
+    def remove_module(self, module_name: str):
+        self.modules.pop(module_name, None)
+
+    def get_active_modules(self):
+        return list(self.modules.keys())
+
+    # ---------- frame access -------------------------------------------------
+    def get_latest_frame(self, module_name=None):
+        """Return the latest decoded frame for this channel."""
+        frame = self._pipe.get_latest_frame(self.channel_id)
+        if frame is None:
+            return None
+
+        # If a specific module has annotation capabilities, let it annotate
+        if module_name and module_name in self.modules:
+            module = self.modules[module_name]
+            result = self.module_results.get(module_name)
+            if result is not None:
+                # Handle both dict results (with 'frame' key) and direct frame returns
+                if isinstance(result, dict) and 'frame' in result:
+                    annotated = result.get('frame')
+                    if annotated is not None:
+                        return annotated
+                elif isinstance(result, np.ndarray):
+                    # Module returned annotated frame directly (numpy array)
+                    return result
+
+        return frame
+
+    def get_module_result(self, module_name):
+        return self.module_results.get(module_name)
+
+    def get_all_module_results(self):
+        return dict(self.module_results)
+
+    def get_status(self):
+        stats = self._pipe.get_statistics()
+        ch_stats = stats.get(self.channel_id, {})
+        return {
+            'is_running': self.is_running,
+            'channel_id': self.channel_id,
+            'fps': ch_stats.get('fps', 0),
+            'detection_count': ch_stats.get('detection_count', 0),
+            'active_modules': self.get_active_modules(),
+            'backend': 'deepstream',
+        }
+
+    def start(self):
+        self.is_running = True
+        return True
+
+    def stop(self):
+        self.is_running = False
+
+
 # ============= Helper Functions for Store/Channel Mapping =============
 def get_channel_to_store_mapping():
     """
@@ -304,6 +424,202 @@ def get_channels_for_request(store_id, channel_id=None):
     return list(channel_store_map.keys())
 
 # ============= Channel Auto-Loader from Configuration =============
+
+def _load_channels_deepstream(all_channels: list):
+    """
+    Load channels via DeepStream 8.0 pipeline instead of per-channel OpenCV.
+    Creates one global DS pipeline for all RTSP cameras, then wraps each
+    channel with _DSChannelWrapper so existing code keeps working.
+    """
+    global ds_pipeline_instance, ds_adapter_instance
+
+    # Load DS config from default.json
+    ds_config = {}
+    try:
+        with open(os.path.join(BASE_DIR, 'config', 'default.json'), 'r') as f:
+            full_cfg = json.load(f)
+            ds_config = full_cfg.get('deepstream', {})
+    except Exception:
+        pass
+
+    # Build channel list for DS pipeline
+    ds_channels = []
+    for ch in all_channels:
+        if ch.get('enabled', True) and ch.get('rtsp_url'):
+            ds_channels.append({
+                'channel_id': ch['channel_id'],
+                'rtsp_url': ch['rtsp_url'],
+                'enabled': True,
+            })
+
+    if not ds_channels:
+        logger.warning("No enabled channels for DeepStream pipeline")
+        return False
+
+    # Create and build the pipeline
+    ds_pipeline_instance = DeepStreamPipeline(ds_config)
+    if not ds_pipeline_instance.build(ds_channels):
+        logger.error("DeepStream pipeline build failed — falling back to OpenCV")
+        ds_pipeline_instance = None
+        return False
+
+    # Create module adapter
+    ds_adapter_instance = DeepStreamModuleAdapter(ds_pipeline_instance)
+
+    # Register callbacks based on pipeline mode
+    decode_only = ds_config.get('decode_only', True)
+
+    if decode_only:
+        # Decode-only mode: DS provides frames, modules run their own YOLO inference.
+        # Frame callback just stores the latest frame; a background thread per channel
+        # runs module processing to avoid blocking the GStreamer pipeline thread.
+        import queue as _queue
+
+        _ds_frame_queues = {}  # channel_id → Queue(maxsize=1)
+
+        def _ds_frame_dispatcher(channel_id, frame):
+            """Store latest frame for async processing (non-blocking for pipeline)."""
+            q = _ds_frame_queues.get(channel_id)
+            if q is None:
+                return
+            # Replace old frame with new (non-blocking)
+            try:
+                q.get_nowait()
+            except _queue.Empty:
+                pass
+            try:
+                q.put_nowait(frame)
+            except _queue.Full:
+                pass
+
+        def _ds_module_worker(channel_id, q):
+            """Background worker: process frames through modules for one channel."""
+            import time as _time
+            while True:
+                try:
+                    frame = q.get(timeout=5.0)
+                except _queue.Empty:
+                    continue
+
+                wrapper = shared_video_processors.get(channel_id)
+                if wrapper is None or not isinstance(wrapper, _DSChannelWrapper):
+                    continue
+
+                shared_detections = None
+                for module_name, module in wrapper.modules.items():
+                    try:
+                        if hasattr(module, 'detector') and shared_detections is None:
+                            shared_detections = module.detector.detect_persons(frame.copy())
+
+                        if hasattr(module, 'process_frame_with_detections') and shared_detections is not None:
+                            result = module.process_frame_with_detections(frame.copy(), shared_detections)
+                        elif hasattr(module, 'process_frame'):
+                            result = module.process_frame(frame.copy())
+                        else:
+                            continue
+
+                        if result is not None:
+                            wrapper.module_results[module_name] = result
+                    except Exception as e:
+                        logger.error(f"DS module {module_name} error on {channel_id}: {e}")
+
+        # Workers will be started after wrappers are created (below)
+
+        ds_pipeline_instance.register_frame_callback(_ds_frame_dispatcher)
+    else:
+        # Full inference mode: DS nvinfer provides detections directly
+        def _ds_detection_dispatcher(channel_id, detections, frame_num):
+            """Route DS detections to the active modules on this channel."""
+            wrapper = shared_video_processors.get(channel_id)
+            if wrapper is None or not isinstance(wrapper, _DSChannelWrapper):
+                return
+
+            frame = ds_pipeline_instance.get_latest_frame(channel_id)
+            results = ds_adapter_instance.get_results(channel_id)
+
+            for module_name, module in wrapper.modules.items():
+                try:
+                    if hasattr(module, 'process_frame_with_detections') and results is not None:
+                        result = module.process_frame_with_detections(
+                            frame.copy() if frame is not None else None,
+                            results
+                        )
+                    elif hasattr(module, 'process_frame') and frame is not None:
+                        result = module.process_frame(frame.copy())
+                    else:
+                        continue
+
+                    if result is not None:
+                        wrapper.module_results[module_name] = result
+                except Exception as e:
+                    logger.error(f"DS module {module_name} error on {channel_id}: {e}")
+
+        ds_pipeline_instance.register_detection_callback(_ds_detection_dispatcher)
+
+    # Create _DSChannelWrapper per channel (so shared_video_processors is populated)
+    for ch in all_channels:
+        if not ch.get('enabled', True):
+            continue
+        channel_id = ch['channel_id']
+        wrapper = _DSChannelWrapper(channel_id, ds_pipeline_instance, ds_adapter_instance)
+        shared_video_processors[channel_id] = wrapper
+        channel_modules[channel_id] = {}
+
+        # Store in app_configs
+        if 'System' not in app_configs:
+            app_configs['System'] = {'channels': {}}
+        app_configs['System']['channels'][channel_id] = {
+            'name': ch.get('channel_name', ch.get('name', channel_id)),
+            'status': 'online',
+            'video_source': ch.get('rtsp_url', ''),
+            'source_type': 'rtsp',
+            'store_id': ch.get('store_id', 'store_1'),
+        }
+
+    # Now start modules on each channel (same instantiation as start_channel_processing)
+    channels_started = 0
+    for ch in all_channels:
+        if not ch.get('enabled', True):
+            continue
+        channel_id = ch['channel_id']
+        for mod in ch.get('modules', []):
+            if not mod.get('enabled', True):
+                continue
+            app_name = mod.get('type') or mod.get('name')
+            if not app_name:
+                continue
+            # Use existing start_channel_processing for module instantiation;
+            # it will find the _DSChannelWrapper already in shared_video_processors
+            # and add the module to it.
+            start_channel_processing(channel_id, app_name, 'rtsp',
+                                     video_source=ch.get('rtsp_url'),
+                                     config=mod.get('config', {}))
+        channels_started += 1
+
+    # Start the pipeline (non-blocking)
+    if not ds_pipeline_instance.start():
+        logger.error("DeepStream pipeline failed to start")
+        return False
+
+    # Start per-channel worker threads for async frame processing (decode-only mode)
+    if decode_only:
+        import threading as _threading
+        for ch_id in list(shared_video_processors.keys()):
+            q = _queue.Queue(maxsize=1)
+            _ds_frame_queues[ch_id] = q
+            t = _threading.Thread(
+                target=_ds_module_worker,
+                args=(ch_id, q),
+                name=f"ds-worker-{ch_id}",
+                daemon=True,
+            )
+            t.start()
+
+    logger.info(f"🚀 DeepStream pipeline running: {len(ds_channels)} streams, "
+                f"{channels_started} channels configured")
+    return True
+
+
 def load_channels_from_config(config_file='config/channels.json'):
     """Load channel configuration from database (prioritized) or config file"""
     import json
@@ -344,6 +660,27 @@ def load_channels_from_config(config_file='config/channels.json'):
                         })
                 
                 # Process the channels
+                # === DeepStream path: build a single pipeline for ALL channels
+                if USE_DEEPSTREAM:
+                    ds_channel_list = []
+                    for ch_id, ch_data in db_channels.items():
+                        ds_channel_list.append({
+                            'channel_id': ch_id,
+                            'channel_name': ch_data['name'],
+                            'rtsp_url': ch_data['rtsp_url'],
+                            'store_id': ch_data.get('store_id', 'store_1'),
+                            'enabled': True,
+                            'modules': [{'type': m['type'], 'name': m['name'],
+                                         'config': m.get('config', {}), 'enabled': True}
+                                        for m in ch_data['modules']],
+                        })
+                    if _load_channels_deepstream(ds_channel_list):
+                        logger.info("✅ Database channels loaded via DeepStream")
+                        return
+                    else:
+                        logger.warning("⚠️ DeepStream failed — falling back to OpenCV pipeline")
+
+                # === OpenCV fallback path (original code) ===
                 logger.info(f"📋 Processing {len(db_channels)} channels from database...")
                 channels_started = 0
                 channels_failed = 0
@@ -408,6 +745,15 @@ def load_channels_from_config(config_file='config/channels.json'):
             
         logger.info(f"📂 Loading {len(config.get('channels', []))} channels from channels.json")
         
+        # === DeepStream path for JSON config
+        if USE_DEEPSTREAM:
+            json_channels = [ch for ch in config.get('channels', []) if ch.get('enabled', True)]
+            if _load_channels_deepstream(json_channels):
+                logger.info("✅ JSON channels loaded via DeepStream")
+                return
+            else:
+                logger.warning("⚠️ DeepStream failed — falling back to OpenCV pipeline")
+
         for channel in config.get('channels', []):
             channel_id = channel.get('channel_id')
             if not channel.get('enabled', True):
@@ -467,17 +813,23 @@ def start_channel_processing(channel_id, app_name, source_type, video_source=Non
 
         # 2. Ensure Video Processor Exists
         if channel_id not in shared_video_processors:
-            # Create new multi-module processor
-            processor = MultiModuleVideoProcessor(video_source, channel_id)
-            shared_video_processors[channel_id] = processor
-            channel_modules[channel_id] = {}
-            
-            # Start the processor
-            if not processor.start():
-                del shared_video_processors[channel_id]
-                del channel_modules[channel_id]
-                logger.error(f"Failed to start video processor for {channel_id} ({source_type})")
-                return False
+            if USE_DEEPSTREAM and ds_pipeline_instance is not None:
+                # DeepStream mode — create a wrapper for this channel
+                wrapper = _DSChannelWrapper(channel_id, ds_pipeline_instance, ds_adapter_instance)
+                shared_video_processors[channel_id] = wrapper
+                channel_modules[channel_id] = {}
+            else:
+                # Create new multi-module processor (OpenCV path)
+                processor = MultiModuleVideoProcessor(video_source, channel_id)
+                shared_video_processors[channel_id] = processor
+                channel_modules[channel_id] = {}
+                
+                # Start the processor
+                if not processor.start():
+                    del shared_video_processors[channel_id]
+                    del channel_modules[channel_id]
+                    logger.error(f"Failed to start video processor for {channel_id} ({source_type})")
+                    return False
         
         processor = shared_video_processors[channel_id]
         
@@ -5092,9 +5444,9 @@ def set_service_discipline_table_roi():
                     normalized_points.append({'x': float(point[0]), 'y': float(point[1])})
                 else:
                     return jsonify({'success': False, 'error': f'Invalid point format: {point}'})
-            
+
             module.set_table_roi(table_id, normalized_points)
-            
+
             # Reload configuration to ensure it's persisted and loaded correctly
             if hasattr(module, 'load_configuration'):
                 try:
@@ -5102,27 +5454,41 @@ def set_service_discipline_table_roi():
                     logger.info(f"✓ Configuration reloaded after setting ROI for {table_id}")
                 except Exception as e:
                     logger.warning(f"Could not reload configuration: {e}")
-            
+
             logger.info(f"✓ Table ROI set for {table_id} on channel {channel_id} (total tables: {len(module.table_rois)})")
             return jsonify({'success': True, 'message': f'Table ROI set successfully for table {table_id}'})
-        
-        # If module not found, provide detailed error
-        available_modules = []
-        if channel_id in channel_modules:
-            available_modules = list(channel_modules[channel_id].keys())
-        elif channel_id in shared_video_processors:
-            processor = shared_video_processors[channel_id]
-            if hasattr(processor, 'modules'):
-                available_modules = list(processor.modules.keys())
-        
-        error_msg = f'ServiceDisciplineMonitor not found for channel {channel_id}'
-        if available_modules:
-            error_msg += f'. Available modules: {", ".join(available_modules)}'
-        else:
-            error_msg += f'. Channel {channel_id} not found in active channels.'
-        
-        logger.error(error_msg)
-        return jsonify({'success': False, 'error': error_msg})
+
+        # Fallback: update channels.json directly when module isn't available
+        try:
+            config_path = Path('config/channels.json')
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+
+                channel_found = False
+                for channel in cfg.get('channels', []):
+                    if channel.get('channel_id') != channel_id:
+                        continue
+                    channel_found = True
+                    for m in channel.get('modules', []):
+                        if m.get('type') == 'ServiceDisciplineMonitor':
+                            if 'config' not in m:
+                                m['config'] = {}
+                            if 'table_rois' not in m['config']:
+                                m['config']['table_rois'] = {}
+                            m['config']['table_rois'][table_id] = {
+                                'points': [{'x': float(p['x']), 'y': float(p['y'])} if isinstance(p, dict) else {'x': float(p[0]), 'y': float(p[1])} for p in roi_points]
+                            }
+                            with open(config_path, 'w', encoding='utf-8') as fw:
+                                json.dump(cfg, fw, indent=2, ensure_ascii=False)
+                            logger.info(f"✓ Table ROI persisted to channels.json for {table_id} (module missing)")
+                            return jsonify({'success': True, 'message': f'Table ROI set in config for table {table_id} (module unavailable)'})
+                if not channel_found:
+                    return jsonify({'success': False, 'error': f'Channel {channel_id} not found in channels.json'})
+        except Exception as e:
+            logger.error(f"Error persisting ROI in channels.json fallback: {e}", exc_info=True)
+
+        return jsonify({'success': False, 'error': 'ServiceDisciplineMonitor module not found for channel and fallback persisted ROI failed'})
     except Exception as e:
         logger.error(f"Error setting service discipline table ROI: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)})
@@ -5152,16 +5518,75 @@ def get_service_discipline_table_rois():
         
         if module and hasattr(module, 'table_rois'):
             table_rois = module.table_rois.copy()
-            # Convert to serializable format
+            # Convert to serializable format with proper x/y object format for frontend
             result = {}
             for table_id, roi_info in table_rois.items():
+                polygon = roi_info.get('polygon', [])
+                # Convert polygon tuples to {x, y} objects for frontend
+                polygon_objects = []
+                for p in polygon:
+                    if isinstance(p, (list, tuple)) and len(p) >= 2:
+                        polygon_objects.append({'x': float(p[0]), 'y': float(p[1])})
+                    elif isinstance(p, dict) and 'x' in p and 'y' in p:
+                        polygon_objects.append({'x': float(p['x']), 'y': float(p['y'])})
+                
+                bbox = roi_info.get('bbox', (0, 0, 0, 0))
+                bbox_dict = {'min_x': bbox[0], 'min_y': bbox[1], 'max_x': bbox[2], 'max_y': bbox[3]} if isinstance(bbox, (tuple, list)) else bbox
+                
                 result[table_id] = {
-                    'polygon': roi_info.get('polygon', []),
-                    'bbox': roi_info.get('bbox', (0, 0, 0, 0))
+                    'polygon': polygon_objects,
+                    'bbox': bbox_dict
                 }
+            logger.info(f"[{channel_id}] Retrieved {len(result)} table ROIs from module for dashboard")
             return jsonify({'success': True, 'table_rois': result})
-        
-        return jsonify({'success': True, 'table_rois': {}})
+
+        # Fallback: read from channels.json if module not loaded
+        rois = {}
+        try:
+            config_path = Path('config/channels.json')
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+                for channel in cfg.get('channels', []):
+                    if channel.get('channel_id') != channel_id:
+                        continue
+                    for m in channel.get('modules', []):
+                        if m.get('type') == 'ServiceDisciplineMonitor':
+                            for tab_id, data in (m.get('config', {}).get('table_rois', {}) or {}).items():
+                                points = []
+                                if isinstance(data, dict):
+                                    pts = data.get('points') or data.get('polygon')
+                                    if pts and isinstance(pts, list):
+                                        for p in pts:
+                                            if isinstance(p, dict) and 'x' in p and 'y' in p:
+                                                points.append({'x': float(p['x']), 'y': float(p['y'])})
+                                            elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                                                points.append({'x': float(p[0]), 'y': float(p[1])})
+                                if points:
+                                    rois[tab_id] = {'polygon': points, 'bbox': (0, 0, 0, 0)}
+        except Exception as e:
+            logger.error(f"Error reading fallback table ROIs from channels.json: {e}", exc_info=True)
+
+        # Fallback: read from DB if still empty
+        if not rois and db_manager:
+            try:
+                roi_config = db_manager.get_channel_config(channel_id, 'ServiceDisciplineMonitor', 'table_rois')
+                if isinstance(roi_config, dict):
+                    for table_id, data in roi_config.items():
+                        points = []
+                        if isinstance(data, dict):
+                            polygon = data.get('polygon') or data.get('points') or []
+                            for p in polygon:
+                                if isinstance(p, dict) and 'x' in p and 'y' in p:
+                                    points.append({'x': float(p['x']), 'y': float(p['y'])})
+                                elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                                    points.append({'x': float(p[0]), 'y': float(p[1])})
+                        if points:
+                            rois[table_id] = {'polygon': points, 'bbox': (0, 0, 0, 0)}
+            except Exception as e:
+                logger.error(f"Error reading fallback table ROIs from DB: {e}", exc_info=True)
+
+        return jsonify({'success': True, 'table_rois': rois})
     except Exception as e:
         logger.error(f"Error getting service discipline table ROIs: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)})
@@ -5639,14 +6064,31 @@ def get_system_resources():
             'memory_percent': psutil.virtual_memory().percent,
             'available_memory_gb': psutil.virtual_memory().available / (1024**3)
         }
-        return jsonify({
+        result = {
             'success': True,
             'resources': resources,
             'active_channels': len(shared_video_processors),
-            'max_channels': 50
-        })
+            'max_channels': 50,
+            'backend': 'deepstream' if (USE_DEEPSTREAM and ds_pipeline_instance) else 'opencv',
+        }
+        if USE_DEEPSTREAM and ds_pipeline_instance:
+            result['deepstream'] = ds_pipeline_instance.get_statistics()
+        return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/deepstream_status')
+@login_required
+def deepstream_status():
+    """Get DeepStream pipeline status"""
+    if not USE_DEEPSTREAM or ds_pipeline_instance is None:
+        return jsonify({'enabled': False, 'reason': 'DeepStream not active'})
+    return jsonify({
+        'enabled': True,
+        'is_running': ds_pipeline_instance.is_running,
+        'streams': ds_pipeline_instance.get_statistics(),
+        'channel_ids': ds_pipeline_instance.get_channel_ids(),
+    })
 
 if __name__ == '__main__':
     # Create database tables

@@ -41,7 +41,7 @@ class SmokingDetection:
         self.app = app
         
         # Detection configuration - use your custom best.pt model
-        self.model_weight = "models/best.pt"
+        self.model_weight = "models/best.engine"
         self.conf_threshold = 0.4  # Confidence threshold for detections
         self.nms_iou = 0.45
         
@@ -125,8 +125,12 @@ class SmokingDetection:
         if torch.cuda.is_available() and self.frame_count % 100 == 0:
             torch.cuda.empty_cache()
         
-        # YOLO inference
-        results = self.yolo(frame, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
+        # YOLO inference (TensorRT models require fixed 640x640 input)
+        original_h, original_w = frame.shape[:2]
+        infer_frame = cv2.resize(frame, (640, 640))
+        results = self.yolo(infer_frame, conf=self.conf_threshold, iou=self.nms_iou, imgsz=640, verbose=False)
+        scale_x = original_w / 640.0
+        scale_y = original_h / 640.0
         
         # Process detections
         detections = []
@@ -140,6 +144,10 @@ class SmokingDetection:
             
             for box in boxes:
                 xyxy = box.xyxy[0].cpu().numpy()
+                xyxy[0] *= scale_x
+                xyxy[1] *= scale_y
+                xyxy[2] *= scale_x
+                xyxy[3] *= scale_y
                 conf = float(box.conf[0].cpu().numpy())
                 cls_id = int(box.cls[0].cpu().numpy())
                 cls_name = self.yolo.names.get(cls_id, str(cls_id))

@@ -22,7 +22,12 @@ def process_weighing_camera(camera_id, rtsp):
         if not ret:
             break
 
-        results = model(frame, verbose=False)
+        original_h, original_w = frame.shape[:2]
+        infer_frame = cv2.resize(frame, (640, 640))
+        results = model(infer_frame, imgsz=640, verbose=False)
+
+        scale_x = original_w / 640.0
+        scale_y = original_h / 640.0
 
         detected_classes = []
         item_detected = False
@@ -37,7 +42,11 @@ def process_weighing_camera(camera_id, rtsp):
                 item_detected = True
 
                 # OPTIONAL: draw box for debugging
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                x1, y1, x2, y2 = box.xyxy[0]
+                x1 = int(x1 * scale_x)
+                y1 = int(y1 * scale_y)
+                x2 = int(x2 * scale_x)
+                y2 = int(y2 * scale_y)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
                 cv2.putText(
                     frame,

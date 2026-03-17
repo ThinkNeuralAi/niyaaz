@@ -53,7 +53,7 @@ class TableServiceMonitor:
         self.app = app
 
         # Model configuration - Use custom trained model (best.pt)
-        self.model_weight = "models/best.pt"
+        self.model_weight = "models/best.engine"
         self.conf_threshold = 0.5  # General confidence threshold for all detections
         self.unclean_conf_threshold = 0.85  # Very high threshold for unclean detections (reduces false positives from normal table settings)
         self.nms_iou = 0.45
@@ -85,12 +85,12 @@ class TableServiceMonitor:
         # Load shared YOLO model for tables
         self.model = get_shared_model(self.model_weight)
         
-        # Person detector (using yolo11n.pt like simple script)
+        # Person detector (using yolo11n.engine TensorRT)
         self.person_detector = YOLODetector(
-            model_path="models/yolo11n.pt",
+            model_path="models/yolo11n.engine",
             confidence_threshold=0.25,  # Lower threshold to detect more persons
             img_size=640,
-            person_class_id=0  # Person class in yolo11n.pt (class 0 = person)
+            person_class_id=0  # Person class in yolo11n (class 0 = person)
         )
         
         # Person proximity settings (matching simple script)
@@ -1141,8 +1141,11 @@ class TableServiceMonitor:
         if should_run_detection:
             # Run YOLO detection (expensive operation)
             try:
-                results = self.model(frame, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
+                infer_frame = cv2.resize(frame, (640, 640))
+                results = self.model(infer_frame, imgsz=640, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
                 detections = []
+                scale_x = w / 640.0
+                scale_y = h / 640.0
 
                 if len(results) > 0 and results[0].boxes is not None:
                     boxes = results[0].boxes
@@ -1150,9 +1153,21 @@ class TableServiceMonitor:
 
                     for box in boxes:
                         class_id = int(box.cls[0])
-                        class_name = class_names[class_id]
+                        class_name = class_names.get(class_id, None)
+                        if class_name is None or (isinstance(class_name, str) and class_name.startswith('class') and class_name[5:].isdigit()):
+                            labels_path = 'config/best_labels.txt'
+                            if os.path.exists(labels_path):
+                                labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                                if class_id < len(labels):
+                                    class_name = labels[class_id]
+                        if class_name is None:
+                            continue
                         conf = float(box.conf[0])
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        x1 *= scale_x
+                        y1 *= scale_y
+                        x2 *= scale_x
+                        y2 *= scale_y
 
                         detections.append({
                             "class_id": class_id,

@@ -48,7 +48,7 @@ class UnauthorizedEntryMonitor:
         self.app = app
         
         # Detection configuration - Use YOLO11n for person detection
-        self.model_weight = "models/yolo11n.pt"
+        self.model_weight = "models/yolo11n.engine"
         self.conf_threshold = 0.5  # Confidence threshold for detections
         self.nms_iou = 0.45
         self.person_class_id = 0  # Person class in YOLO11n
@@ -131,19 +131,32 @@ class UnauthorizedEntryMonitor:
         
         # YOLO inference
         try:
-            results = self.model(frame, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
+            infer_frame = cv2.resize(frame, (640, 640))
+            results = self.model(infer_frame, imgsz=640, conf=self.conf_threshold, iou=self.nms_iou, verbose=False)
             detections = []
             person_detected = False
-            
+            scale_x = frame.shape[1] / 640.0
+            scale_y = frame.shape[0] / 640.0
+
             if len(results) > 0 and results[0].boxes is not None:
                 boxes = results[0].boxes
                 class_names = results[0].names
                 
                 for box in boxes:
                     cls_id = int(box.cls[0])
-                    cls_name = class_names[cls_id]
+                    cls_name = class_names.get(cls_id, None)
+                    if cls_name is None or (isinstance(cls_name, str) and cls_name.startswith('class') and cls_name[5:].isdigit()):
+                        labels_path = 'config/best_labels.txt'
+                        if os.path.exists(labels_path):
+                            labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                            if cls_id < len(labels):
+                                cls_name = labels[cls_id]
                     conf = float(box.conf[0])
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    x1 *= scale_x
+                    y1 *= scale_y
+                    x2 *= scale_x
+                    y2 *= scale_y
                     
                     # Only process person detections (class 0)
                     if cls_id == self.person_class_id:

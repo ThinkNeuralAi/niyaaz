@@ -40,10 +40,12 @@ except ImportError as e:
     print(f"Failed to import ultralytics: {e}")
     YOLO = None
 
+from modules.model_manager import get_shared_model, release_shared_model
+
 logger = logging.getLogger(__name__)
 
 class YOLODetector:
-    def __init__(self, model_path='models/best.pt', confidence_threshold=0.5, device='auto', img_size=640, person_class_id=None):
+    def __init__(self, model_path='models/best.engine', confidence_threshold=0.5, device='auto', img_size=640, person_class_id=None):
         """
         Initialize YOLO detector
         
@@ -62,88 +64,106 @@ class YOLODetector:
         self.device = self._select_device(device)
         self.img_size = img_size  # Must match TensorRT engine build size (640)
         self.model_path = model_path
+        self._using_shared = False
         
         # Log which model is being loaded
         logger.info(f"Initializing YOLODetector with model: {model_path}")
         
-        # Check if model is TensorRT engine or PyTorch model
-        self.is_engine = model_path.endswith('.engine') or model_path.endswith('.trt')
-        
+        # Use shared model from model_manager to avoid duplicate GPU memory allocation
         try:
-            # TensorRT engines need special handling
-            if self.is_engine:
-                # Load TensorRT engine - specify task explicitly
-                self.model = YOLO(model_path, task='detect')
-                logger.info(f"TensorRT engine loaded successfully: {model_path}")
-            else:
-                # PyTorch model - use normal loading with safety patches when available.
-                # torch.serialization.safe_globals exists only on some torch versions.
-                if hasattr(torch.serialization, 'safe_globals'):
-                    with torch.serialization.safe_globals([
-                        'ultralytics.nn.tasks.DetectionModel',
-                        'ultralytics.nn.modules.conv.Conv',
-                        'ultralytics.nn.modules.block.C2f',
-                        'ultralytics.nn.modules.block.SPPF',
-                        'ultralytics.nn.modules.head.Detect'
-                    ]):
-                        self.model = YOLO(model_path)
-                else:
-                    # Older torch: fall back to direct load (we already force weights_only=False above)
-                    self.model = YOLO(model_path)
-                self.model.to(self.device)
-                
-                # Enable PyTorch optimizations for faster inference
-                if self.device == 'cuda':
-                    # Enable CUDA optimizations (without FP16 to avoid dtype errors)
-                    torch.backends.cudnn.benchmark = True
-                    logger.info(f"YOLO model loaded with CUDA optimizations on {self.device}")
-                else:
-                    logger.info(f"YOLO model loaded successfully on {self.device}")
+            self.model = get_shared_model(model_path, self.device)
+            self._using_shared = True
+            logger.info(f"YOLODetector using shared model: {model_path}")
         except Exception as e:
-            logger.error(f"Safe context loading failed: {e}")
-            try:
-                if self.is_engine:
-                    # Retry engine with explicit parameters
-                    self.model = YOLO(model_path)
-                    logger.info(f"TensorRT engine loaded (retry): {model_path}")
-                else:
-                    # Force disable weights_only for this specific load
-                    original_env = os.environ.get('PYTORCH_DISABLE_WEIGHTS_ONLY', '0')
-                    os.environ['PYTORCH_DISABLE_WEIGHTS_ONLY'] = '1'
-                    
-                    # Temporary patch for this specific model load
-                    def force_unsafe_load(*args, **kwargs):
-                        kwargs.pop('weights_only', None)  # Remove if present
-                        return original_load(*args, weights_only=False, **kwargs)
-                    
-                    torch.load = force_unsafe_load
-                    self.model = YOLO(model_path)
-                    torch.load = safe_load  # Restore our patched version
-                    
-                    self.model.to(self.device)
-                    logger.info(f"YOLO model loaded with forced unsafe loading on {self.device}")
-                    
-                    # Restore environment
-                    os.environ['PYTORCH_DISABLE_WEIGHTS_ONLY'] = original_env
-                
-            except Exception as e2:
-                logger.error(f"All YOLO loading attempts failed: {e2}")
-                raise Exception(f"Could not load YOLO model. Error: {e2}")
+            logger.warning(f"Shared model load failed ({e}), falling back to direct load")
+            self.model = YOLO(model_path, task='detect')
+            self._using_shared = False
+            logger.info(f"YOLODetector direct-loaded: {model_path}")
         
-        # Person class ID: 
-        # - 0 for COCO dataset (YOLOv11, YOLOv8, etc.)
-        # - 12 for custom best.pt model (model structure: {0: 'Apron', ..., 12: 'Person', ..., 15: 'Table_clean', 16: 'Table_unclean'})
+        self.is_engine = model_path.endswith('.engine') or model_path.endswith('.trt')
+
+        # Validate best_labels.txt against model names (if available)
+        self._validate_labels_file(model_path)
+        
         if person_class_id is not None:
             self.person_class_id = person_class_id
-        elif 'yolov11' in model_path.lower() or 'yolov8' in model_path.lower() or 'yolov5' in model_path.lower():
-            # Standard COCO models use class 0 for person
-            self.person_class_id = 0
-            logger.info(f"Auto-detected person_class_id=0 for COCO model: {model_path}")
+            logger.info(f"YOLODetector explicitly set person_class_id={self.person_class_id}")
         else:
-            # Default to 12 for custom best.pt model
-            self.person_class_id = 12
-            logger.info(f"Using default person_class_id=12 for custom model: {model_path}")
+            # Try to infer person class id from model names when available
+            self.person_class_id = None
+            model_names = None
+            try:
+                model_names = getattr(self.model, 'names', None) or getattr(self.model, 'model', None) and getattr(self.model.model, 'names', None)
+            except Exception:
+                model_names = None
+
+            if isinstance(model_names, dict):
+                normalized_names = {int(c): str(n).lower() for c, n in model_names.items()}
+                person_class_id_candidates = [c for c, n in normalized_names.items() if 'person' in n or n == 'person']
+                if person_class_id_candidates:
+                    self.person_class_id = person_class_id_candidates[0]
+                    logger.info(f"Auto-detected person_class_id={self.person_class_id} from model names")
+                else:
+                    # Fallback heuristics
+                    if 'yolov11' in model_path.lower() or 'yolov8' in model_path.lower() or 'yolov5' in model_path.lower():
+                        self.person_class_id = 0
+                        logger.info(f"Auto-detected person_class_id=0 for COCO model: {model_path}")
+                    else:
+                        self.person_class_id = 0
+                        logger.warning(f"Could not infer person class from model names; defaulting person_class_id=0 for model: {model_path}")
+            else:
+                # Unknown model names mapping; fallback
+                if 'yolov11' in model_path.lower() or 'yolov8' in model_path.lower() or 'yolov5' in model_path.lower():
+                    self.person_class_id = 0
+                    logger.info(f"Auto-detected person_class_id=0 for COCO model: {model_path}")
+                else:
+                    self.person_class_id = 0
+                    logger.warning(f"Model class names unavailable; defaulting person_class_id=0 for model: {model_path}")
     
+    def __del__(self):
+        if getattr(self, '_using_shared', False):
+            try:
+                release_shared_model(self.model_path, self.device)
+            except Exception:
+                pass
+    
+    def _resolve_label_file(self, model_path):
+        # Use model-specific labels by path.
+        if 'yolo11n' in model_path.lower() or 'coco' in model_path.lower() or 'yolov8n' in model_path.lower():
+            coco_path = os.path.join('config', 'coco_labels.txt')
+            if os.path.exists(coco_path):
+                return coco_path
+        best_path = os.path.join('config', 'best_labels.txt')
+        if os.path.exists(best_path):
+            return best_path
+        return os.path.join('config', 'labels.txt')
+
+    def _validate_labels_file(self, model_path):
+        """Validate detected labels against best/coco labels depending on model."""
+        labels_path = self._resolve_label_file(model_path)
+        if not os.path.exists(labels_path):
+            logger.warning(f"Label file not found at {labels_path}; skipping label validation")
+            return
+        try:
+            model_names = getattr(self.model, 'names', None) or getattr(self.model, 'model', None) and getattr(self.model.model, 'names', None)
+            if not isinstance(model_names, dict):
+                return
+            model_labels = [str(v) for _, v in sorted(model_names.items())]
+            file_labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+
+            generic_names = all(str(n).startswith('class') for n in model_labels)
+            if generic_names:
+                logger.warning(f"Model names are generic class0..classN; using {labels_path} fallback where available")
+            elif len(model_labels) != len(file_labels) or any(a.lower() != b.lower() for a, b in zip(model_labels, file_labels)):
+                logger.warning(f"Label mismatch detected between model classes and {labels_path}")
+                logger.warning(f" Model labels ({len(model_labels)}): {model_labels}")
+                logger.warning(f" File labels ({len(file_labels)}): {file_labels}")
+                logger.warning(f"Please update {labels_path} to match the model class labels.")
+            else:
+                logger.info(f"{labels_path} matches model class labels")
+        except Exception as e:
+            logger.warning(f"Could not validate {labels_path} vs model names: {e}")
+
     def _select_device(self, device):
         """Select the best available device"""
         if device == 'auto':
@@ -168,17 +188,16 @@ class YOLODetector:
             if frame is None or frame.size == 0:
                 logger.warning("detect_persons: Frame is None or empty")
                 return []
-            
+
+            original_h, original_w = frame.shape[:2]
+            infer_frame = cv2.resize(frame, (self.img_size, self.img_size))
+
             # **DEBUG: First try without class filtering to see all detections**
             # This helps diagnose if the model is detecting anything at all
             results_all = self.model(
-                frame, 
+                infer_frame, 
                 verbose=False,
                 imgsz=self.img_size,
-                conf=0.25,  # Lower threshold to see more detections
-                iou=0.45,
-                max_det=50,
-                device=self.device
             )
             
             # Log all detections for debugging
@@ -193,22 +212,36 @@ class YOLODetector:
                     for class_id, confidence in zip(cls, conf):
                         all_classes_found.add((int(class_id), float(confidence)))
             
+            # Auto-correct person class id if the class is found by name in names mapping
+            if self.person_class_id is not None:
+                try:
+                    model_names = getattr(self.model, 'names', None) or getattr(self.model, 'model', None) and getattr(self.model.model, 'names', None)
+                except Exception:
+                    model_names = None
+
+                if isinstance(model_names, dict):
+                    names_lower = {int(k): str(v).lower() for k, v in model_names.items()}
+                    person_candidates = [k for k, v in names_lower.items() if 'person' in v]
+                    if person_candidates and self.person_class_id not in person_candidates:
+                        old_id = self.person_class_id
+                        self.person_class_id = person_candidates[0]
+                        logger.info(f"Updated person_class_id from {old_id} to {self.person_class_id} based on model class names")
+
             # Now run with person class filtering
             # Use the confidence threshold directly (no reduction) for yolov8n.pt
             # YOLOv8 models work well with standard thresholds
             results = self.model(
-                frame, 
+                infer_frame, 
                 verbose=False,
                 imgsz=self.img_size,      # Configurable image size
-                conf=self.confidence_threshold,  # Use threshold directly
-                iou=0.45,                  # NMS IoU threshold (default 0.45)
-                classes=[self.person_class_id],   # Only detect persons
-                max_det=50,                # Reduced for performance
                 device=self.device         # Explicit device
             )
             
             detections = []
             
+            scale_x = original_w / self.img_size
+            scale_y = original_h / self.img_size
+
             for result in results:
                 boxes = result.boxes
                 if boxes is not None:
@@ -221,7 +254,10 @@ class YOLODetector:
                     for i, (box, confidence, class_id) in enumerate(zip(xyxy, conf, cls)):
                         class_id_int = int(class_id)
                         if class_id_int == self.person_class_id and confidence >= self.confidence_threshold:
-                            x1, y1, x2, y2 = map(int, box)
+                            x1 = int(box[0] * scale_x)
+                            y1 = int(box[1] * scale_y)
+                            x2 = int(box[2] * scale_x)
+                            y2 = int(box[3] * scale_y)
                             
                             # Calculate center point and bottom center (for line crossing)
                             center_x = (x1 + x2) // 2
@@ -293,8 +329,10 @@ class YOLODetector:
         
         try:
             # Run YOLO detection without class filtering
+            original_h, original_w = frame.shape[:2]
+            infer_frame = cv2.resize(frame, (self.img_size, self.img_size))
             results = self.model.predict(
-                frame,
+                infer_frame,
                 verbose=False,             # Silent mode
                 imgsz=self.img_size,      # Configurable image size
                 conf=self.confidence_threshold,  # Filter at inference time
@@ -303,6 +341,8 @@ class YOLODetector:
                 device=self.device         # Explicit device
                 # No classes filter - detect all classes
             )
+            scale_x = original_w / self.img_size
+            scale_y = original_h / self.img_size
             
             detections = []
             total_before_filter = 0
@@ -323,8 +363,21 @@ class YOLODetector:
                     for i, (box, confidence, class_id) in enumerate(zip(xyxy, conf, cls)):
                         if confidence >= self.confidence_threshold:
                             class_id_int = int(class_id)
-                            class_name = names.get(class_id_int, f'class_{class_id_int}')
-                            
+                            class_name = names.get(class_id_int, None)
+                            if class_name is None or (isinstance(class_name, str) and class_name.startswith('class') and class_name[5:].isdigit()):
+                                labels_path = self._resolve_label_file(self.model_path)
+                                if os.path.exists(labels_path):
+                                    labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                                    if class_id_int < len(labels):
+                                        class_name = labels[class_id_int]
+                            if class_name is None:
+                                class_name = f'class_{class_id_int}'
+                            # Report mapping once per detection call for debugging
+                            if not hasattr(self, '_detect_label_debug'):
+                                self._detect_label_debug = 0
+                            if self._detect_label_debug < 3:
+                                logger.info(f"Mapped class_id {class_id_int} -> '{class_name}' (from {names.get(class_id_int, 'unknown')})")
+                                self._detect_label_debug += 1
                             # Filter by target classes if specified
                             if target_classes and class_name not in target_classes:
                                 # Log what class was detected but filtered out
@@ -332,7 +385,10 @@ class YOLODetector:
                                     logger.info(f"🔍 Detected '{class_name}' (conf={confidence:.2f}) but not in target classes")
                                 continue
                             
-                            x1, y1, x2, y2 = map(int, box)
+                            x1 = int(box[0] * scale_x)
+                            y1 = int(box[1] * scale_y)
+                            x2 = int(box[2] * scale_x)
+                            y2 = int(box[3] * scale_y)
                             
                             # Calculate center point
                             center_x = (x1 + x2) // 2

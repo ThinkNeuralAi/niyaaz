@@ -12,10 +12,120 @@ from typing import Dict, Optional, Tuple
 from collections import defaultdict
 import weakref
 import os
+from pathlib import Path
 
 # Configure PyTorch environment
 os.environ['PYTORCH_WEIGHTS_ONLY'] = 'False'
 os.environ['TORCH_DISABLE_WEIGHTS_ONLY'] = '1'
+
+
+def _read_labels_file(path: Path) -> list:
+    if path.exists():
+        try:
+            labels = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+            return labels
+        except Exception:
+            return []
+    return []
+
+
+def _get_label_file_for_model(model_path: str) -> Path:
+    # For COCO-based detectors (yolo11n / coco engine), use coco labels by default.
+    if 'yolo11n' in model_path.lower() or 'coco' in model_path.lower() or 'yolov8n' in model_path.lower():
+        coco_file = Path('config/coco_labels.txt')
+        if coco_file.exists():
+            return coco_file
+    # For custom PPE/uniform models, use best labels.
+    best_file = Path('config/best_labels.txt')
+    if best_file.exists():
+        return best_file
+    # Last resort: fallback to generic labels file if present
+    alt_file = Path('config/labels.txt')
+    return alt_file
+
+
+def _is_generic_class_names(names_list):
+    if not names_list:
+        return False
+    # Check for numeric default names: class0, class1, ... or simply numeric strings
+    try:
+        for n in names_list:
+            if isinstance(n, str) and (n.startswith('class') and n[5:].isdigit()):
+                continue
+            if isinstance(n, str) and n.isdigit():
+                continue
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _patch_model_names_from_labels(model, model_path):
+    # Ensure YOLO model has valid class names. If names are generic class0/class1 or missing,
+    # patch labels from the model-specific label file.
+    names = getattr(model, 'names', None)
+    if names is None:
+        names_map = {}
+    elif isinstance(names, dict):
+        names_map = {int(k): str(v) for k, v in names.items()}
+    elif isinstance(names, (list, tuple)):
+        names_map = {i: str(v) for i, v in enumerate(names)}
+    else:
+        return model
+
+    model_label_count = len(names_map)
+    label_names = list(names_map.values())
+    labels_file = _get_label_file_for_model(model_path)
+    fallback_labels = _read_labels_file(labels_file)
+
+    if model_label_count == 0 and fallback_labels:
+        patched = {i: fallback_labels[i] if i < len(fallback_labels) else f'class{i}' for i in range(len(fallback_labels))}
+        try:
+            setattr(model, 'names', patched)
+        except Exception:
+            model.__dict__['names'] = patched
+        try:
+            if hasattr(model, 'model'):
+                model.model.names = patched
+        except Exception:
+            pass
+        logger.info(f"✅ Patched missing class names for {model_path} using {labels_file}")
+        return model
+
+    if fallback_labels and model_label_count > 0 and _is_generic_class_names(label_names):
+        patched = {i: (fallback_labels[i] if i < len(fallback_labels) else f'class{i}') for i in range(model_label_count)}
+        try:
+            setattr(model, 'names', patched)
+        except Exception:
+            try:
+                model.__dict__['names'] = patched
+            except Exception:
+                pass
+        try:
+            if hasattr(model, 'model'):
+                model.model.names = patched
+        except Exception:
+            pass
+        logger.info(f"✅ Patched generic model class names for {model_path} using {labels_file}")
+    elif fallback_labels and model_label_count > 0 and len(fallback_labels) == model_label_count and label_names != fallback_labels:
+        logger.info(f"ℹ️ Model {model_path} class names differ from {labels_file}, keeping native names.")
+    elif fallback_labels and model_label_count>0 and len(fallback_labels) != model_label_count and _is_generic_class_names(label_names):
+        logger.info(f"ℹ️ Model {model_path} has generic class names and {labels_file} has {len(fallback_labels)} labels. Patching first {len(fallback_labels)} classes.")
+        patched = {i: (fallback_labels[i] if i < len(fallback_labels) else f'class{i}') for i in range(model_label_count)}
+        try:
+            setattr(model, 'names', patched)
+        except Exception:
+            try:
+                model.__dict__['names'] = patched
+            except Exception:
+                pass
+        try:
+            if hasattr(model, 'model'):
+                model.model.names = patched
+        except Exception:
+            pass
+    return model
+
 
 try:
     from ultralytics import YOLO
@@ -219,8 +329,12 @@ class ModelManager:
         Safely load YOLO model with proper CUDA error handling
         """
         try:
-            # Clear any existing CUDA cache before loading
+            # Ensure CUDA context is initialized in the current thread.
+            # TRT requires a valid CUDA context; when loading from a background
+            # thread, the context may not have been created yet.
             if device == 'cuda' and torch.cuda.is_available():
+                torch.cuda.set_device(0)
+                torch.cuda.init()
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             
@@ -231,6 +345,12 @@ class ModelManager:
             if is_engine:
                 # TensorRT engines need explicit task specification
                 model = YOLO(model_path, task='detect')
+                # Eagerly warm up TRT engine to create execution context now,
+                # preventing lazy init crashes from concurrent TRT operations
+                # when nvinfer pipeline is already running.
+                import numpy as np
+                _dummy = np.zeros((640, 640, 3), dtype=np.uint8)
+                model(_dummy, verbose=False, imgsz=640)
                 logger.info(f"Loaded TensorRT engine: {model_path}")
             else:
                 # PyTorch model
@@ -264,6 +384,7 @@ class ModelManager:
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             
+            model = _patch_model_names_from_labels(model, model_path)
             logger.info(f"Model successfully loaded on {device}: {model_path}")
             return model
             
@@ -276,6 +397,7 @@ class ModelManager:
                 try:
                     model = YOLO(model_path)
                     model = model.cpu()
+                    model = _patch_model_names_from_labels(model, model_path)
                     logger.info(f"Emergency CPU fallback successful: {model_path}")
                     return model
                 except Exception as cpu_error:

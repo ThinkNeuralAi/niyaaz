@@ -9,6 +9,7 @@ Detects employee uniform compliance including:
 """
 
 import time
+import os
 import cv2
 import numpy as np
 import logging
@@ -42,7 +43,7 @@ class DressCodeMonitoring:
         self.app = app
         
         # Model configuration - Use custom trained model
-        self.model_weight = "models/best.pt"
+        self.model_weight = "models/best.engine"
         self.conf_threshold = 0.5
         self.nms_iou = 0.45
         
@@ -77,7 +78,7 @@ class DressCodeMonitoring:
         
         # Model for queue area - person detection using YOLOv11
         self.person_detector = YOLODetector(
-            model_path="models/yolo11n.pt",
+            model_path="models/yolo11n.engine",
             confidence_threshold=0.5,
             img_size=640,
             person_class_id=0  # Person class in YOLOv11
@@ -132,29 +133,41 @@ class DressCodeMonitoring:
         
         # Note: YOLO models are initialized above in ROI configuration section
         # Log available classes in the uniform model and verify expected classes
+        def _get_available_class_names(model):
+            names = []
+            if hasattr(model, 'names') and isinstance(model.names, dict):
+                names = list(model.names.values())
+            # If class names are generic class0..classN, fallback to file labels
+            if names and all(isinstance(n, str) and n.startswith('class') and n[5:].isdigit() for n in names):
+                labels_path = 'config/best_labels.txt'
+                if os.path.exists(labels_path):
+                    labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                    if len(labels) > 0:
+                        return labels
+            return names
+
         try:
-            if hasattr(self.uniform_detector, 'names'):
-                available_classes = list(self.uniform_detector.names.values())
-                logger.info(f"📋 Uniform model (best.pt) has {len(available_classes)} classes: {available_classes}")
-                
-                # Verify Uniform_grey is available (should be class 13 in new model)
-                if "Uniform_grey" in available_classes:
-                    if "Uniform_grey" not in self.uniform_classes:
-                        self.uniform_classes.add("Uniform_grey")
-                    logger.info(f"✅ Uniform_grey confirmed in model (class {available_classes.index('Uniform_grey') if 'Uniform_grey' in available_classes else 'N/A'})")
-                else:
-                    logger.warning(f"⚠️ Uniform_grey not found in model classes!")
-                
-                # Check which expected classes are missing
-                hairnet_expected = {
-                    self.hairnet_positive_class
-                } | ({self.hairnet_violation_class} if self.hairnet_violation_class else set())
-                all_expected = self.uniform_classes | self.compliance_classes | hairnet_expected
-                missing = all_expected - set(available_classes)
-                if missing:
-                    logger.warning(f"⚠️ Uniform model is missing expected classes: {missing}")
-                
-                logger.info(f"📋 Final uniform_classes: {self.uniform_classes}")
+            available_classes = _get_available_class_names(self.uniform_detector)
+            logger.info(f"📋 Uniform model (best.pt) has {len(available_classes)} classes: {available_classes}")
+
+            # Verify Uniform_grey is available (should be class 13 in new model)
+            if "Uniform_grey" in available_classes:
+                if "Uniform_grey" not in self.uniform_classes:
+                    self.uniform_classes.add("Uniform_grey")
+                logger.info(f"✅ Uniform_grey confirmed in model (class {available_classes.index('Uniform_grey') if 'Uniform_grey' in available_classes else 'N/A'})")
+            else:
+                logger.warning(f"⚠️ Uniform_grey not found in model classes!")
+
+            # Check which expected classes are missing
+            hairnet_expected = {
+                self.hairnet_positive_class
+            } | ({self.hairnet_violation_class} if self.hairnet_violation_class else set())
+            all_expected = self.uniform_classes | self.compliance_classes | hairnet_expected
+            missing = all_expected - set(available_classes)
+            if missing:
+                logger.warning(f"⚠️ Uniform model is missing expected classes: {missing}")
+
+            logger.info(f"📋 Final uniform_classes: {self.uniform_classes}")
         except Exception as e:
             logger.error(f"Error checking uniform model classes: {e}")
         
@@ -483,8 +496,20 @@ class DressCodeMonitoring:
                     box = boxes.xyxy[i].cpu().numpy()
                     conf = float(boxes.conf[i].cpu().numpy())
                     cls = int(boxes.cls[i].cpu().numpy())
-                    class_name = result.names[cls]
-                    
+                    class_name = None
+                    if isinstance(result.names, dict):
+                        class_name = result.names.get(cls, None)
+                    elif isinstance(result.names, (list, tuple)) and cls < len(result.names):
+                        class_name = result.names[cls]
+                    if class_name is None or (isinstance(class_name, str) and class_name.startswith('class') and class_name[5:].isdigit()):
+                        labels_path = 'config/best_labels.txt'
+                        if os.path.exists(labels_path):
+                            labels = [line.strip() for line in open(labels_path, 'r').read().splitlines() if line.strip()]
+                            if cls < len(labels):
+                                class_name = labels[cls]
+                    if class_name is None:
+                        class_name = f'class_{cls}'
+
                     x1, y1, x2, y2 = box
                     w = x2 - x1
                     h = y2 - y1
@@ -643,14 +668,31 @@ class DressCodeMonitoring:
         # If Counter ROI is configured: only detect in counter area
         # If Counter ROI is NOT configured: detect everywhere in the frame
         try:
+            # Ensure TensorRT engine gets expected 640x640 input
+            infer_frame = cv2.resize(frame, (640, 640))
             uniform_results = self.uniform_detector(
-                frame,
+                infer_frame,
                 conf=self.conf_threshold,
                 iou=self.nms_iou,
+                imgsz=640,
                 verbose=False
             )
             uniform_detections = self._extract_detections(uniform_results)
-            
+
+            # Scale detections back to original frame coordinates (if model input was resized)
+            if frame_width > 0 and frame_height > 0:
+                scale_x = frame_width / 640.0
+                scale_y = frame_height / 640.0
+                for det in uniform_detections:
+                    x, y, w, h = det['bbox']
+                    det['bbox'] = [x * scale_x, y * scale_y, w * scale_x, h * scale_y]
+
+            # Log first mapped class detection for live debug (Uniform_grey / Hairnet)
+            for det in uniform_detections:
+                if det['class_name'] in {'Uniform_grey', 'Hairnet'}:
+                    logger.info(f"[{self.channel_id}] 🔎 First mapped class detection: {det['class_name']} (confidence={det['confidence']:.2f})")
+                    break
+
             # Log raw detections for debugging
             if self.frame_count <= 5 or (self.frame_count % 100 == 0 and len(uniform_detections) > 0):
                 uniform_dets = [d for d in uniform_detections if d['class_name'] in self.uniform_classes]
@@ -686,7 +728,12 @@ class DressCodeMonitoring:
         if self.queue_roi:
             try:
                 queue_persons = self.person_detector.detect_persons(frame)
-                
+
+                # Log first queue/person detection in this frame for traceability
+                if queue_persons:
+                    first = queue_persons[0]
+                    logger.info(f"[{self.channel_id}] 🔎 Queue person detection: bbox={first.get('bbox')} confidence={first.get('confidence', 0.0):.2f} class='Person'")
+
                 # Filter detections to only those in queue ROI
                 for person in queue_persons:
                     x1, y1, x2, y2 = person['bbox']
