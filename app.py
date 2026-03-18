@@ -637,6 +637,40 @@ def _load_channels_deepstream(all_channels: list):
 
     logger.info(f"🚀 DeepStream pipeline running: {len(ds_channels)} streams, "
                 f"{channels_started} channels configured")
+
+    # Start channel health watchdog (detects zombie/stale channels)
+    def _channel_health_watchdog():
+        """Background watchdog: detect channels that stopped receiving frames."""
+        import time as _wtime
+        _wtime.sleep(90)  # Initial grace period for pipeline to stabilize
+        logger.info("🐕 Channel health watchdog started (check every 30s, stale threshold 60s)")
+        while ds_pipeline_instance and ds_pipeline_instance.is_running:
+            try:
+                stale = ds_pipeline_instance.get_stale_channels(threshold_seconds=60.0)
+                if stale:
+                    logger.warning(f"🐕 Watchdog: {len(stale)} stale channel(s): {stale}")
+                    for ch_id in stale:
+                        # Emit stream_error to subscribers of this channel
+                        for app_name_key in list(channel_modules.get(ch_id, {}).keys()):
+                            stream_key = f"{app_name_key}:{ch_id}"
+                            socketio.emit('stream_stale', {
+                                'channel_id': ch_id,
+                                'app_name': app_name_key,
+                                'message': f'No frames received for 60+ seconds. Camera may be disconnected.',
+                            }, room=f"stream:{stream_key}")
+            except Exception as e:
+                logger.error(f"Watchdog error: {e}")
+            _wtime.sleep(30)
+        logger.info("🐕 Channel health watchdog stopped")
+
+    import threading as _wd_threading
+    _wd_thread = _wd_threading.Thread(
+        target=_channel_health_watchdog,
+        name="channel-watchdog",
+        daemon=True,
+    )
+    _wd_thread.start()
+
     return True
 
 
@@ -6119,6 +6153,49 @@ def deepstream_status():
         'streams': ds_pipeline_instance.get_statistics(),
         'channel_ids': ds_pipeline_instance.get_channel_ids(),
     })
+
+@app.route('/api/channel_health')
+@login_required
+def channel_health():
+    """Get per-channel health status (FPS, frame age, stale flag)."""
+    if not USE_DEEPSTREAM or ds_pipeline_instance is None:
+        return jsonify({'success': False, 'reason': 'DeepStream not active'})
+    health = ds_pipeline_instance.get_channel_health()
+    stale = ds_pipeline_instance.get_stale_channels(threshold_seconds=60.0)
+    return jsonify({
+        'success': True,
+        'channels': health,
+        'stale_channels': stale,
+        'total': len(health),
+        'stale_count': len(stale),
+    })
+
+@app.route('/api/reload_channel/<channel_id>', methods=['POST'])
+@login_required
+def reload_channel(channel_id):
+    """Force-reload a stuck/zombie channel by restarting its modules."""
+    if channel_id not in shared_video_processors:
+        return jsonify({'success': False, 'error': f'Channel {channel_id} not found'}), 404
+
+    try:
+        wrapper = shared_video_processors[channel_id]
+        # For DS channels, clear cached frames so fresh ones are picked up
+        if isinstance(wrapper, _DSChannelWrapper) and ds_pipeline_instance:
+            # Clear stale frame from pipeline cache
+            with ds_pipeline_instance._frame_lock:
+                ds_pipeline_instance._latest_frames.pop(channel_id, None)
+            # Reset FPS counter
+            ds_pipeline_instance._fps_data.pop(channel_id, None)
+            ds_pipeline_instance._last_frame_time.pop(channel_id, None)
+            # Clear module results so they re-process
+            wrapper.module_results.clear()
+            logger.info(f"🔄 Channel {channel_id} state cleared — waiting for fresh frames from pipeline")
+            return jsonify({'success': True, 'message': f'Channel {channel_id} state reset. Fresh frames will arrive shortly if camera is connected.'})
+        else:
+            return jsonify({'success': False, 'error': 'Channel is not a DeepStream channel'})
+    except Exception as e:
+        logger.error(f"Error reloading channel {channel_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Create database tables

@@ -408,6 +408,9 @@ class DeepStreamPipeline:
             "fps": 0.0,
         })
 
+        # Per-channel frame timestamp tracking (for health/watchdog)
+        self._last_frame_time: Dict[str, float] = {}
+
         # Pipeline config
         self._muxer_width = self.config.get("muxer_width", 1280)
         self._muxer_height = self.config.get("muxer_height", 720)
@@ -442,15 +445,35 @@ class DeepStreamPipeline:
 
         # Pre-check: verify cameras are reachable (TCP connect test)
         # Unreachable cameras will block nvstreammux indefinitely
+        # Use parallel checks with retries to avoid slow sequential timeouts
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        check_timeout = self.config.get("rtsp_check_timeout", 8.0)
+        max_retries = self.config.get("rtsp_check_retries", 2)
+
+        def _check_with_retry(ch):
+            url = ch["rtsp_url"]
+            for attempt in range(max_retries):
+                if _check_rtsp_reachable(url, timeout=check_timeout):
+                    return ch, True
+                if attempt < max_retries - 1:
+                    logger.info(f"Camera {ch['channel_id']} retry {attempt + 2}/{max_retries}...")
+                    time.sleep(1)
+            return ch, False
+
         reachable = []
         unreachable = []
-        for ch in enabled:
-            url = ch["rtsp_url"]
-            if _check_rtsp_reachable(url, timeout=3.0):
-                reachable.append(ch)
-            else:
-                unreachable.append(ch)
-                logger.warning(f"Camera {ch['channel_id']} unreachable, skipping: {url[:60]}...")
+        logger.info(f"🔍 Checking {len(enabled)} cameras in parallel (timeout={check_timeout}s, retries={max_retries})...")
+
+        with ThreadPoolExecutor(max_workers=min(len(enabled), 16)) as pool:
+            futures = {pool.submit(_check_with_retry, ch): ch for ch in enabled}
+            for future in as_completed(futures):
+                ch, ok = future.result()
+                if ok:
+                    reachable.append(ch)
+                else:
+                    unreachable.append(ch)
+                    logger.warning(f"Camera {ch['channel_id']} unreachable after {max_retries} attempts, skipping: {ch['rtsp_url'][:60]}...")
 
         if unreachable:
             logger.warning(f"{len(unreachable)} camera(s) unreachable, using {len(reachable)}/{len(enabled)}")
@@ -681,17 +704,47 @@ class DeepStreamPipeline:
         """Get current FPS for a channel."""
         return self._fps_data.get(channel_id, {}).get("fps", 0.0)
 
+    def get_channel_health(self) -> dict:
+        """Get health status for all channels in the pipeline."""
+        now = time.time()
+        health = {}
+        for stream_id, channel_id in self.stream_id_to_channel.items():
+            last_frame = self._last_frame_time.get(channel_id, 0)
+            fps = self.get_fps(channel_id)
+            age = now - last_frame if last_frame > 0 else -1
+            health[channel_id] = {
+                "stream_id": stream_id,
+                "fps": round(fps, 1),
+                "last_frame_age_sec": round(age, 1),
+                "has_frame": channel_id in self._latest_frames,
+                "status": "ok" if age >= 0 and age < 30 else ("stale" if age >= 30 else "no_frames"),
+            }
+        return health
+
+    def get_stale_channels(self, threshold_seconds: float = 60.0) -> List[str]:
+        """Return list of channel_ids that haven't received a frame in threshold_seconds."""
+        now = time.time()
+        stale = []
+        for channel_id in self.channel_to_stream_id:
+            last = self._last_frame_time.get(channel_id, 0)
+            if last == 0 or (now - last) > threshold_seconds:
+                stale.append(channel_id)
+        return stale
+
     def get_statistics(self) -> dict:
         """Get pipeline statistics for all streams."""
         stats = {}
+        now = time.time()
         for stream_id, channel_id in self.stream_id_to_channel.items():
             with self._detection_lock:
                 det_count = len(self._latest_detections.get(channel_id, []))
+            last_frame = self._last_frame_time.get(channel_id, 0)
             stats[channel_id] = {
                 "stream_id": stream_id,
                 "fps": self.get_fps(channel_id),
                 "has_frame": channel_id in self._latest_frames,
                 "detection_count": det_count,
+                "last_frame_age_sec": round(now - last_frame, 1) if last_frame > 0 else -1,
             }
         return stats
 
@@ -700,7 +753,8 @@ class DeepStreamPipeline:
         return list(self.channel_to_stream_id.keys())
 
     def _update_fps(self, channel_id: str):
-        """Update FPS counter for a channel."""
+        """Update FPS counter and last-frame timestamp for a channel."""
+        self._last_frame_time[channel_id] = time.time()
         data = self._fps_data[channel_id]
         data["frame_count"] += 1
         elapsed = time.time() - data["start_time"]
