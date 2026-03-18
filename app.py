@@ -41,7 +41,7 @@ except ImportError:
 from flask import Flask, render_template, request, jsonify, Response, send_from_directory, redirect, url_for, session, make_response
 from io import BytesIO
 from flask_sqlalchemy import SQLAlchemy
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from functools import wraps
 import cv2
 import numpy as np
@@ -337,6 +337,26 @@ class _DSChannelWrapper:
             'active_modules': self.get_active_modules(),
             'backend': 'deepstream',
         }
+
+    def get_live_fps(self):
+        """Return FPS data from the DeepStream pipeline for this channel."""
+        fps = self._pipe.get_fps(self.channel_id)
+        return {'live_feed_fps': round(fps, 1), 'processing_fps': round(fps, 1)}
+
+    @property
+    def latest_raw_frame(self):
+        """Proxy to DS pipeline's latest frame so broadcast health checks work."""
+        return self._pipe.get_latest_frame(self.channel_id)
+
+    @property
+    def latest_annotated_frame(self):
+        """Return latest annotated frame from module results if available."""
+        for result in self.module_results.values():
+            if isinstance(result, dict) and 'frame' in result:
+                return result['frame']
+            elif isinstance(result, np.ndarray):
+                return result
+        return None
 
     def start(self):
         self.is_running = True
@@ -4773,6 +4793,11 @@ def handle_disconnect():
         for stream_key in list(client_subs.keys()):
             with stream_broadcast_lock:
                 stream_subscriber_counts[stream_key] = max(0, stream_subscriber_counts.get(stream_key, 0) - 1)
+            # Leave the SocketIO room for this stream
+            try:
+                leave_room(f"stream:{stream_key}")
+            except Exception:
+                pass
     except Exception:
         pass
     # Clean up subscriptions for this client
@@ -4803,6 +4828,9 @@ def handle_subscribe_stream(data):
             active_stream_subscriptions[request.sid][stream_key] = True
             with stream_broadcast_lock:
                 stream_subscriber_counts[stream_key] = stream_subscriber_counts.get(stream_key, 0) + 1
+        
+        # Join SocketIO room for this stream so frames are only sent to interested clients
+        join_room(f"stream:{stream_key}")
         
         logger.info(f"Client {request.sid} subscribed to {app_name}/{channel_id}")
         
@@ -5050,6 +5078,8 @@ def handle_unsubscribe_stream(data):
         if removed:
             with stream_broadcast_lock:
                 stream_subscriber_counts[stream_key] = max(0, stream_subscriber_counts.get(stream_key, 0) - 1)
+            # Leave the SocketIO room for this stream
+            leave_room(f"stream:{stream_key}")
         
         logger.info(f"Client {request.sid} unsubscribed from {app_name}/{channel_id}")
         # Do NOT stop the broadcast thread immediately: the UI frequently unsubscribes/re-subscribes
@@ -5238,7 +5268,7 @@ def broadcast_video_frames(app_name, channel_id, stop_flag):
             # Get FPS data
             fps_data = processor.get_live_fps() if hasattr(processor, 'get_live_fps') else {'live_feed_fps': 0, 'processing_fps': 0}
             
-            # Broadcast to all subscribed clients
+            # Broadcast to subscribed clients in this stream's room
             socketio.emit('video_frame', {
                 'app_name': app_name,
                 'channel_id': channel_id,
@@ -5246,7 +5276,7 @@ def broadcast_video_frames(app_name, channel_id, stop_flag):
                 'timestamp': current_time,
                 'fps': fps_data['live_feed_fps'],
                 'processing_fps': fps_data['processing_fps']
-            }, room=None)  # Broadcast to all connected clients
+            }, room=f"stream:{stream_key}")
             
             last_frame_time = current_time
             
