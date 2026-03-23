@@ -977,20 +977,10 @@ class DatabaseManager:
                 f"Table cleanliness violation saved: type={violation_type}, table={table_id}, channel={channel_id}"
             )
             
-            # Send Telegram notification (can be disabled via environment variable)
-            if not os.getenv("DISABLE_TABLE_SERVICE_ALERTS", "").lower() in ("true", "1", "yes"):
-                violation_msg = "Unclean table" if violation_type == 'unclean_table' else "Slow table reset"
-                store_name = self.get_store_name_for_channel(channel_id)
-                _send_telegram_alert(
-                    channel_id=channel_id,
-                    alert_type='table_cleanliness_violation',
-                    alert_message=f"Table {table_id}: {violation_msg}",
-                    snapshot_path=snapshot_path,
-                    alert_data={'table_id': table_id, 'violation_type': violation_type},
-                    store_name=store_name
-                )
-            else:
-                logger.debug(f"Table cleanliness violation alerts disabled via DISABLE_TABLE_SERVICE_ALERTS environment variable")
+            # NOTE: Telegram notification will be sent ONLY when GIF recording completes
+            # (in table_service_monitor.py after GIF is ready)
+            # Do NOT send telegram here - we want to send with GIF file only
+            logger.debug(f"Table cleanliness violation: Telegram will be sent with GIF when recording completes")
             
             return violation.id
 
@@ -1866,41 +1856,37 @@ class DatabaseManager:
             self.db.session.add(alert_gif)
             self.db.session.commit()
             
-            # Skip Telegram notification for crowd_alert
-            if alert_type == 'crowd_alert':
-                logger.debug(f"Telegram alert skipped for crowd_alert on {channel_id} (crowd detection Telegram alerts disabled)")
-            else:
-                # Send Telegram notification
-                try:
-                    from modules.telegram_notifier import get_telegram_notifier
-                    notifier = get_telegram_notifier()
-                    # Try to resolve full path for GIF
-                    full_gif_path = gif_path
-                    if gif_path and not os.path.isabs(gif_path):
-                        # Try relative to static directory
-                        static_path = os.path.join("static", gif_path)
-                        if os.path.exists(static_path):
-                            full_gif_path = static_path
-                        elif os.path.exists(gif_path):
-                            full_gif_path = gif_path
-                        else:
-                            full_gif_path = None
-                    
-                    if full_gif_path:
-                        store_name = self.get_store_name_for_channel(channel_id)
-                        notifier.send_alert(
-                            channel_id=channel_id,
-                            alert_type=alert_type,
-                            alert_message=alert_message or f"Alert from {channel_id}",
-                            image_path=full_gif_path,
-                            alert_data=alert_data,
-                            store_name=store_name
-                        )
+            # Send Telegram notification
+            try:
+                from modules.telegram_notifier import get_telegram_notifier
+                notifier = get_telegram_notifier()
+                # Try to resolve full path for GIF
+                full_gif_path = gif_path
+                if gif_path and not os.path.isabs(gif_path):
+                    # Try relative to static directory
+                    static_path = os.path.join("static", gif_path)
+                    if os.path.exists(static_path):
+                        full_gif_path = static_path
+                    elif os.path.exists(gif_path):
+                        full_gif_path = gif_path
                     else:
-                        # Skip sending Telegram alert if GIF path not found - only send with media
-                        logger.debug(f"Skipping Telegram alert for {channel_id} - no GIF/snapshot file found")
-                except Exception as tg_error:
-                    logger.warning(f"Failed to send Telegram notification: {tg_error}")
+                        full_gif_path = None
+                
+                if full_gif_path:
+                    store_name = self.get_store_name_for_channel(channel_id)
+                    notifier.send_alert(
+                        channel_id=channel_id,
+                        alert_type=alert_type,
+                        alert_message=alert_message or f"Alert from {channel_id}",
+                        image_path=full_gif_path,
+                        alert_data=alert_data,
+                        store_name=store_name
+                    )
+                else:
+                    # Skip sending Telegram alert if GIF path not found - only send with media
+                    logger.debug(f"Skipping Telegram alert for {channel_id} - no GIF/snapshot file found")
+            except Exception as tg_error:
+                logger.warning(f"Failed to send Telegram notification: {tg_error}")
             
             return alert_gif.id
             
@@ -3611,11 +3597,12 @@ class DatabaseManager:
                         logger.warning(f"⚠️ Snapshot path is None for table {table_id} - no image will be sent to Telegram")
                         resolved_snapshot_path = None
                     
-                    # Only send Telegram notification if snapshot exists and is valid
-                    # For GIFs, the path might be a placeholder initially - check if it's a placeholder
-                    is_placeholder = snapshot_path and ('placeholder' in snapshot_path.lower() or snapshot_path.endswith('.gif') and not os.path.exists(os.path.join("static", snapshot_path)))
-                    
-                    if resolved_snapshot_path and os.path.exists(resolved_snapshot_path) and not is_placeholder:
+                    # NOTE: For service discipline violations, we only send Telegram when GIF is ready
+                    # Do NOT send telegram here for service_discipline - we want to send with GIF file only
+                    violation_type = alert_data.get("violation_type") if alert_data and isinstance(alert_data, dict) else None
+                    if violation_type in ["order_wait", "service_wait"]:
+                        logger.debug(f"Service discipline violation: Telegram will be sent with GIF when recording completes")
+                    elif resolved_snapshot_path and os.path.exists(resolved_snapshot_path):
                         file_size_check = os.path.getsize(resolved_snapshot_path)
                         if file_size_check > 0:
                             store_name = self.get_store_name_for_channel(channel_id)

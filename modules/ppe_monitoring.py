@@ -42,7 +42,7 @@ class PPEMonitoring:
         
         # Model configuration - Use custom trained model
         self.model_weight = "models/best.pt"
-        self.conf_threshold = 0.5
+        self.conf_threshold = 0.4
         self.nms_iou = 0.45
         
         # PPE classes from your best.pt model
@@ -423,6 +423,21 @@ class PPEMonitoring:
                             logger.info(f"✅ PPE violation saved to database: {violation_msg}")
                         except Exception as e:
                             logger.error(f"Database logging error for PPE alert: {e}")
+                    
+                    # Send Telegram alert with full frame snapshot
+                    try:
+                        if snapshot_path:
+                            from modules.database import _send_telegram_alert
+                            _send_telegram_alert(
+                                channel_id=self.channel_id,
+                                alert_type='ppe_alert',
+                                alert_message=alert_message,
+                                snapshot_path=snapshot_path,
+                                alert_data={'violations': violations}
+                            )
+                            logger.info(f"✅ Telegram alert sent for PPE violation: {violation_msg}")
+                    except Exception as e:
+                        logger.error(f"Failed to send Telegram alert for PPE violation: {e}", exc_info=True)
                     
                     # Emit socket event
                     self.socketio.emit('ppe_alert', alert_info)

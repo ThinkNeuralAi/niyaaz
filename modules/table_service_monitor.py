@@ -724,15 +724,11 @@ class TableServiceMonitor:
         else:
             logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this violation")
         
-        # Save JPG snapshot immediately to alerts folder
-        snapshot_rel_path = self._save_unclean_snapshot(table_id, unclean_duration, current_time, frame)
-        if snapshot_rel_path:
-            snapshot_path = f"static/{snapshot_rel_path}"
-            logger.info(f"[{self.channel_id}] 📸 Unclean table snapshot saved: {snapshot_path}")
-        else:
-            # Fallback to placeholder path - will be updated when GIF completes
-            placeholder_filename = f"unclean_table_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
-            snapshot_path = f"static/table_service_violations/{placeholder_filename}"
+        # For table cleanliness: Only use GIF, don't save JPG snapshot for Telegram
+        # The GIF will be the snapshot that gets sent to Telegram and loaded in dashboard
+        placeholder_filename = f"unclean_table_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
+        snapshot_path = f"static/table_service_violations/{placeholder_filename}"
+        logger.info(f"[{self.channel_id}] 📸 Table cleanliness GIF will be used as snapshot (no JPG saved)")
 
         # Emit socket event
         if self.socketio:
@@ -913,15 +909,11 @@ class TableServiceMonitor:
         else:
             logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this violation")
         
-        # Save JPG snapshot immediately to alerts folder
-        snapshot_rel_path = self._save_slow_reset_snapshot(table_id, reset_duration, current_time, frame)
-        if snapshot_rel_path:
-            snapshot_path = f"static/{snapshot_rel_path}"
-            logger.info(f"[{self.channel_id}] 📸 Slow reset snapshot saved: {snapshot_path}")
-        else:
-            # Fallback to placeholder path - will be updated when GIF completes
-            placeholder_filename = f"slow_reset_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
-            snapshot_path = f"static/table_service_violations/{placeholder_filename}"
+        # For table cleanliness: Only use GIF, don't save JPG snapshot for Telegram
+        # The GIF will be the snapshot that gets sent to Telegram and loaded in dashboard
+        placeholder_filename = f"slow_reset_{table_id}_{self.channel_id}_{current_time.strftime('%Y%m%d_%H%M%S')}.gif"
+        snapshot_path = f"static/table_service_violations/{placeholder_filename}"
+        logger.info(f"[{self.channel_id}] 📸 Table cleanliness GIF will be used as snapshot (no JPG saved)")
 
         # Emit socket event
         if self.socketio:
