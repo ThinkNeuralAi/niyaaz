@@ -13,6 +13,7 @@ import logging
 import threading
 import time
 import numpy as np
+import cv2
 from typing import Dict, List, Optional, Callable
 from collections import defaultdict
 from urllib.parse import urlparse, quote, urlencode, parse_qs
@@ -740,7 +741,7 @@ class DeepStreamPipeline:
 
             self.stream_id_to_channel[idx] = channel_id
             self.channel_to_stream_id[channel_id] = idx
-            self._channel_rtsp_urls[channel_id] = encoded_url
+            self._channel_rtsp_urls[channel_id] = raw_url  # Raw URL for OpenCV live feed
 
             stream_uris.append(encoded_url)
             logger.info(f"Stream {idx}: {channel_id} → {raw_url[:60]}...")
@@ -947,13 +948,97 @@ class DeepStreamPipeline:
         self._frame_callbacks.append(callback)
 
     def get_latest_frame(self, channel_id: str) -> Optional[np.ndarray]:
-        """Get latest decoded frame for a channel (BGR numpy array)."""
+        """Get latest decoded frame for a channel (BGR numpy array).
+        
+        Uses OpenCV software decode for live feed to avoid GPU extraction
+        ghosting. Lazily starts a background capture thread per camera.
+        """
+        rtsp_url = self._channel_rtsp_urls.get(channel_id)
+        if not rtsp_url:
+            # No RTSP URL — fall back to DS extracted frame
+            with self._frame_lock:
+                frame = self._latest_frames.get(channel_id)
+                if frame is None:
+                    return None
+                return frame.copy()
+
+        # Lazy-init OpenCV grabber for this camera
+        if not hasattr(self, '_cv_grabbers'):
+            self._cv_grabbers: Dict[str, dict] = {}
+            self._cv_lock = threading.Lock()
+
+        with self._cv_lock:
+            grabber = self._cv_grabbers.get(channel_id)
+
+            if grabber is None or not grabber.get('alive', False):
+                # Start a new background capture thread
+                grabber = {
+                    'frame': None,
+                    'alive': True,
+                    'last_request': time.time(),
+                    'lock': threading.Lock(),
+                }
+                self._cv_grabbers[channel_id] = grabber
+
+                def _capture_loop(ch_id, url, g):
+                    """Background thread: captures frames via OpenCV."""
+                    cap = None
+                    try:
+                        # Force TCP for RTSP (same as DeepStream config)
+                        os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp'
+                        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        if not cap.isOpened():
+                            logger.warning(f"OpenCV live feed failed to open: {ch_id}")
+                            g['alive'] = False
+                            return
+
+                        logger.info(f"🎥 OpenCV live feed started for {ch_id}")
+                        while g['alive']:
+                            # Auto-stop after 30s of no requests
+                            if time.time() - g['last_request'] > 30:
+                                logger.info(f"🎥 OpenCV live feed stopped (idle): {ch_id}")
+                                break
+
+                            ret, frame = cap.read()
+                            if not ret:
+                                time.sleep(0.1)
+                                continue
+
+                            # Resize to match DS output resolution
+                            if frame.shape[1] != self._muxer_width or frame.shape[0] != self._muxer_height:
+                                frame = cv2.resize(frame, (self._muxer_width, self._muxer_height))
+
+                            with g['lock']:
+                                g['frame'] = frame
+
+                            time.sleep(0.033)  # ~30 FPS cap
+
+                    except Exception as e:
+                        logger.error(f"OpenCV live feed error for {ch_id}: {e}")
+                    finally:
+                        if cap:
+                            cap.release()
+                        g['alive'] = False
+
+                t = threading.Thread(target=_capture_loop, args=(channel_id, rtsp_url, grabber),
+                                     name=f"cv-live-{channel_id}", daemon=True)
+                t.start()
+
+            # Update last request time
+            grabber['last_request'] = time.time()
+
+        # Return OpenCV frame if available, else fall back to DS frame
+        with grabber['lock']:
+            cv_frame = grabber.get('frame')
+
+        if cv_frame is not None:
+            return cv_frame.copy()
+
+        # Fall back to DS extracted frame while OpenCV is connecting
         with self._frame_lock:
             frame = self._latest_frames.get(channel_id)
             if frame is None:
-                return None
-            # Final safety check: reject structurally invalid frames
-            if frame.ndim != 3 or frame.shape[2] not in (3, 4) or frame.shape[0] < 32 or frame.shape[1] < 32:
                 return None
             return frame.copy()
 
