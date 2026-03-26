@@ -262,6 +262,9 @@ class CombinedDetectionFrameHandler(BufferOperator):
 
                     # PRIMARY: pyds buffer mapping (properly synchronized)
                     try:
+                        import sys
+                        if '/opt/nvidia/deepstream/deepstream/lib' not in sys.path:
+                            sys.path.append('/opt/nvidia/deepstream/deepstream/lib')
                         import pyds
                         n_frame = pyds.get_nvds_buf_surface(hash(buffer), batch_id)
                         frame_np = n_frame.copy()
@@ -356,6 +359,9 @@ class FrameExtractorHandler(BufferOperator):
 
                     # PRIMARY: pyds buffer mapping (properly synchronized)
                     try:
+                        import sys
+                        if '/opt/nvidia/deepstream/deepstream/lib' not in sys.path:
+                            sys.path.append('/opt/nvidia/deepstream/deepstream/lib')
                         import pyds
                         n_frame = pyds.get_nvds_buf_surface(hash(buffer), batch_id)
                         frame_np = n_frame.copy()
@@ -514,6 +520,9 @@ class FrameRetrieverHandler(BufferRetriever):
                     # ── PRIMARY: pyds buffer mapping (properly synchronized) ──
                     if self._use_pyds:
                         try:
+                            import sys
+                            if '/opt/nvidia/deepstream/deepstream/lib' not in sys.path:
+                                sys.path.append('/opt/nvidia/deepstream/deepstream/lib')
                             import pyds
                             n_frame = pyds.get_nvds_buf_surface(hash(buffer), batch_id)
                             frame_np = n_frame.copy()
