@@ -212,25 +212,17 @@ class FrameExtractorHandler(BufferOperator):
                         continue
 
                     # Convert Tensor to numpy via DLPack
+                    # NOTE: Do NOT call torch.cuda.synchronize() here — it blocks
+                    # the entire GStreamer pipeline thread and causes RTSP buffer
+                    # underruns + H.264 I-frame drops.  .cpu() is synchronous for
+                    # the specific tensor transfer, and .copy() guarantees a fully
+                    # independent CPU array.
                     try:
                         import torch
-                        # CRITICAL: Synchronize GPU BEFORE reading the buffer.
-                        # The decoder may still be writing to it asynchronously.
-                        if torch.cuda.is_available():
-                            torch.cuda.synchronize()
-                        # Clone the tensor to isolate from the decode buffer pool.
-                        # Without this, the decoder can overwrite raw_tensor
-                        # before we finish the CPU copy, causing ghosting.
-                        cloned_tensor = raw_tensor.clone()
-                        # Sync again to ensure the clone itself is complete
-                        if torch.cuda.is_available():
-                            torch.cuda.synchronize()
-                        torch_tensor = torch.utils.dlpack.from_dlpack(cloned_tensor)
-                        frame_np = torch_tensor.cpu().numpy().copy()  # .copy() ensures full CPU independence
+                        torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
+                        frame_np = torch_tensor.cpu().numpy().copy()
                     except ImportError:
-                        # Fallback: try direct numpy conversion via clone
-                        cloned = raw_tensor.clone()
-                        frame_np = np.from_dlpack(cloned).copy()
+                        frame_np = np.from_dlpack(raw_tensor).copy()
 
                     # Ensure correct shape (H, W, C) and BGR for OpenCV
                     if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
@@ -342,21 +334,13 @@ class FrameRetrieverHandler(BufferRetriever):
                         continue
 
                     # Convert Tensor → numpy via DLPack (tensor is already RGB from capsfilter)
+                    # NOTE: Do NOT call torch.cuda.synchronize() or .clone() here.
+                    # Sync blocks the GStreamer thread → RTSP buffer underruns → I-frame drops.
+                    # .cpu() is synchronous for this tensor, .copy() ensures CPU independence.
                     try:
                         import torch
-                        # CRITICAL: Synchronize GPU BEFORE cloning.
-                        # raw_tensor points to a decode buffer that may still be
-                        # in-flight. Cloning before sync copies incomplete data,
-                        # causing ghosting/double-exposure artifacts.
-                        if torch.cuda.is_available():
-                            torch.cuda.synchronize()
-                        # Clone AFTER sync to get a complete, isolated copy
-                        tensor = raw_tensor.clone()
-                        # Sync again to ensure the clone operation itself is done
-                        if torch.cuda.is_available():
-                            torch.cuda.synchronize()
-                        torch_tensor = torch.utils.dlpack.from_dlpack(tensor)
-                        frame_np = torch_tensor.cpu().numpy().copy()  # .copy() ensures full CPU independence
+                        torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
+                        frame_np = torch_tensor.cpu().numpy().copy()
                     except ImportError:
                         frame_np = np.from_dlpack(raw_tensor).copy()
 
@@ -646,7 +630,7 @@ class DeepStreamPipeline:
         lines.append('  source-bin: "nvurisrcbin"')
         lines.append("  properties:")
         lines.append("    rtsp-reconnect-interval: 5")
-        lines.append("    latency: 200")
+        lines.append("    latency: 500")  # 500ms jitterbuffer to handle RTSP network jitter
         # Use TCP directly to avoid 5-second UDP timeout per camera
         lines.append("    select-rtp-protocol: 4")  # 4 = TCP
 
