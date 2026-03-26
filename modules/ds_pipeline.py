@@ -443,6 +443,9 @@ class FrameRetrieverHandler(BufferRetriever):
         """Called by the appsink for each buffer. Returns consumed bytes (>0 = ok, <0 = error)."""
         try:
             self._frame_count += 1
+            # DEBUG: print bypasses all logging/filter config
+            if self._frame_count <= 2:
+                print(f"[PYDS-DEBUG] FrameRetrieverHandler.consume #{self._frame_count}, pyds={self._use_pyds}", flush=True)
 
             if self._frame_count <= 3:
                 logger.info(f"FrameRetriever.consume called #{self._frame_count}, batch_size={buffer.batch_size}")
