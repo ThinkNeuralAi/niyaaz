@@ -535,7 +535,7 @@ class FrameRetrieverHandler(BufferRetriever):
                             self._use_pyds = False
                             frame_np = None
 
-                    # ── FALLBACK: DLPack extraction (may ghost) ──
+                    # ── FALLBACK: DLPack extraction ──
                     if frame_np is None:
                         raw_tensor = buffer.extract(batch_id)
                         if raw_tensor is None:
@@ -544,6 +544,18 @@ class FrameRetrieverHandler(BufferRetriever):
                             import torch
                             torch.cuda.synchronize()
                             torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
+
+                            # DEBUG: Check if stride mismatch causes ghosting
+                            if not self._pyds_logged:
+                                self._pyds_logged = True
+                                print(f"[PYDS-DEBUG] DLPack tensor: shape={torch_tensor.shape}, "
+                                      f"stride={torch_tensor.stride()}, "
+                                      f"contiguous={torch_tensor.is_contiguous()}, "
+                                      f"dtype={torch_tensor.dtype}, device={torch_tensor.device}", flush=True)
+
+                            # CRITICAL: make contiguous BEFORE .cpu() to fix stride/pitch mismatch
+                            if not torch_tensor.is_contiguous():
+                                torch_tensor = torch_tensor.contiguous()
                             frame_np = torch_tensor.cpu().numpy().copy()
                             del torch_tensor
                             del raw_tensor
