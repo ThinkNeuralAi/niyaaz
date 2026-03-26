@@ -214,15 +214,23 @@ class FrameExtractorHandler(BufferOperator):
                     # Convert Tensor to numpy via DLPack
                     try:
                         import torch
-                        # Synchronize GPU to ensure buffer is fully written
+                        # CRITICAL: Synchronize GPU BEFORE reading the buffer.
+                        # The decoder may still be writing to it asynchronously.
                         if torch.cuda.is_available():
                             torch.cuda.synchronize()
-                        torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
-                        frame_np = torch_tensor.cpu().numpy()
+                        # Clone the tensor to isolate from the decode buffer pool.
+                        # Without this, the decoder can overwrite raw_tensor
+                        # before we finish the CPU copy, causing ghosting.
+                        cloned_tensor = raw_tensor.clone()
+                        # Sync again to ensure the clone itself is complete
+                        if torch.cuda.is_available():
+                            torch.cuda.synchronize()
+                        torch_tensor = torch.utils.dlpack.from_dlpack(cloned_tensor)
+                        frame_np = torch_tensor.cpu().numpy().copy()  # .copy() ensures full CPU independence
                     except ImportError:
                         # Fallback: try direct numpy conversion via clone
                         cloned = raw_tensor.clone()
-                        frame_np = np.from_dlpack(cloned)
+                        frame_np = np.from_dlpack(cloned).copy()
 
                     # Ensure correct shape (H, W, C) and BGR for OpenCV
                     if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
@@ -234,9 +242,9 @@ class FrameExtractorHandler(BufferOperator):
                         logger.debug(f"Skipping frame with invalid shape {frame_np.shape} for {channel_id}")
                         continue
 
-                    # Reject zero-frames (GPU decode failures) and tiny frames
-                    if frame_np.shape[0] < 32 or frame_np.shape[1] < 32 or not np.any(frame_np):
-                        logger.debug(f"Skipping corrupt/zero frame for {channel_id}")
+                    # Reject tiny frames (GPU decode failures)
+                    if frame_np.shape[0] < 32 or frame_np.shape[1] < 32:
+                        logger.debug(f"Skipping tiny frame for {channel_id}")
                         continue
 
                     if frame_np.shape[2] == 4:
@@ -332,18 +340,25 @@ class FrameRetrieverHandler(BufferRetriever):
                     raw_tensor = buffer.extract(batch_id)
                     if raw_tensor is None:
                         continue
-                    tensor = raw_tensor.clone()
 
                     # Convert Tensor → numpy via DLPack (tensor is already RGB from capsfilter)
                     try:
                         import torch
-                        # Synchronize GPU to ensure buffer is fully written
+                        # CRITICAL: Synchronize GPU BEFORE cloning.
+                        # raw_tensor points to a decode buffer that may still be
+                        # in-flight. Cloning before sync copies incomplete data,
+                        # causing ghosting/double-exposure artifacts.
+                        if torch.cuda.is_available():
+                            torch.cuda.synchronize()
+                        # Clone AFTER sync to get a complete, isolated copy
+                        tensor = raw_tensor.clone()
+                        # Sync again to ensure the clone operation itself is done
                         if torch.cuda.is_available():
                             torch.cuda.synchronize()
                         torch_tensor = torch.utils.dlpack.from_dlpack(tensor)
-                        frame_np = torch_tensor.cpu().numpy()
+                        frame_np = torch_tensor.cpu().numpy().copy()  # .copy() ensures full CPU independence
                     except ImportError:
-                        frame_np = np.from_dlpack(tensor)
+                        frame_np = np.from_dlpack(raw_tensor).copy()
 
                     # Ensure (H, W, C) layout
                     if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
@@ -354,9 +369,9 @@ class FrameRetrieverHandler(BufferRetriever):
                         logger.debug(f"Skipping frame with invalid shape {frame_np.shape} for {channel_id}")
                         continue
 
-                    # Reject zero-frames (GPU decode failures) and tiny frames
-                    if frame_np.shape[0] < 32 or frame_np.shape[1] < 32 or not np.any(frame_np):
-                        logger.debug(f"Skipping corrupt/zero frame for {channel_id}")
+                    # Reject tiny frames (GPU decode failures)
+                    if frame_np.shape[0] < 32 or frame_np.shape[1] < 32:
+                        logger.debug(f"Skipping tiny frame for {channel_id}")
                         continue
 
                     # RGB → BGR for OpenCV compatibility
