@@ -299,7 +299,12 @@ class _DSChannelWrapper:
 
     # ---------- frame access -------------------------------------------------
     def get_latest_frame(self, module_name=None):
-        """Return the latest decoded frame for this channel."""
+        """Return the latest decoded frame for this channel.
+        
+        Uses clean OpenCV-decoded frame from the pipeline.
+        Module-annotated frames (rendered on DLPack-extracted GPU frames)
+        are skipped to avoid ghosting artifacts.
+        """
         frame = self._pipe.get_latest_frame(self.channel_id)
         if frame is None:
             return None
@@ -308,20 +313,9 @@ class _DSChannelWrapper:
         if frame.ndim != 3 or frame.shape[2] not in (3, 4) or frame.shape[0] < 32 or frame.shape[1] < 32:
             return None
 
-        # If a specific module has annotation capabilities, let it annotate
-        if module_name and module_name in self.modules:
-            module = self.modules[module_name]
-            result = self.module_results.get(module_name)
-            if result is not None:
-                # Handle both dict results (with 'frame' key) and direct frame returns
-                if isinstance(result, dict) and 'frame' in result:
-                    annotated = result.get('frame')
-                    if annotated is not None and hasattr(annotated, 'ndim') and annotated.ndim == 3:
-                        return annotated
-                elif isinstance(result, np.ndarray) and result.ndim == 3:
-                    # Module returned annotated frame directly (numpy array)
-                    return result
-
+        # Always return the clean base frame — module-annotated frames
+        # are built from DLPack-extracted GPU data which has ghosting.
+        # Module results are still available via get_module_result() API.
         return frame
 
     def get_module_result(self, module_name):
