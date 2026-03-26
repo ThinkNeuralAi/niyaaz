@@ -731,7 +731,7 @@ class DeepStreamPipeline:
             # Final safety check: reject structurally invalid frames
             if frame.ndim != 3 or frame.shape[2] not in (3, 4) or frame.shape[0] < 32 or frame.shape[1] < 32:
                 return None
-            return frame
+            return frame.copy()
 
     def get_latest_detections(self, channel_id: str) -> list:
         """Get latest detection results for a channel."""
