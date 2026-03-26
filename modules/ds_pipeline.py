@@ -495,6 +495,12 @@ class FrameRetrieverHandler(BufferRetriever):
 
             batch_meta = buffer.batch_meta
 
+            # DEBUG: always print batch info until pyds result is known
+            if not self._pyds_logged and self._frame_count <= 500:
+                items = list(batch_meta.frame_items)
+                if items:
+                    print(f"[PYDS-DEBUG] Frame#{self._frame_count} has {len(items)} frame_items, attempting pyds...", flush=True)
+
             for frame_meta in batch_meta.frame_items:
                 source_id = frame_meta.source_id
                 channel_id = self.pipeline_mgr.stream_id_to_channel.get(source_id)
