@@ -465,7 +465,8 @@ class FrameRetrieverHandler(BufferRetriever):
         self.pipeline_mgr = pipeline_mgr
         self._frame_count = 0
         self._use_pyds = True       # Try pyds first
-        self._pyds_logged = False    # Log buffer info once
+        self._pyds_logged = False    # Log pyds result once
+        self._buffer_logged = False  # Log buffer info once
 
     def consume(self, buffer) -> int:
         """Called by the appsink for each buffer. Returns consumed bytes (>0 = ok, <0 = error)."""
@@ -479,8 +480,8 @@ class FrameRetrieverHandler(BufferRetriever):
                 logger.info(f"FrameRetriever.consume called #{self._frame_count}, batch_size={buffer.batch_size}")
 
             # One-time: log buffer attributes to understand pyservicemaker's API
-            if not self._pyds_logged:
-                self._pyds_logged = True
+            if not self._buffer_logged:
+                self._buffer_logged = True
                 try:
                     attrs = [a for a in dir(buffer) if not a.startswith('__')]
                     logger.info(f"📋 Buffer object type: {type(buffer).__name__}, attrs: {attrs}")
@@ -508,18 +509,14 @@ class FrameRetrieverHandler(BufferRetriever):
                     if self._use_pyds:
                         try:
                             import pyds
-                            # pyds.get_nvds_buf_surface maps the NvBufSurface to a
-                            # numpy array using GStreamer's native synchronization.
-                            # No DLPack, no PyTorch, no CUDA sync needed.
                             n_frame = pyds.get_nvds_buf_surface(hash(buffer), batch_id)
-                            frame_np = n_frame.copy()  # Deep copy before buffer is released
+                            frame_np = n_frame.copy()
 
-                            if self._frame_count <= 3:
-                                logger.info(f"✅ pyds frame extraction OK: shape={frame_np.shape}, dtype={frame_np.dtype}")
+                            if not self._pyds_logged:
+                                self._pyds_logged = True
+                                print(f"[PYDS-DEBUG] ✅ pyds extract OK: shape={frame_np.shape}, dtype={frame_np.dtype}", flush=True)
                         except Exception as e:
-                            if self._frame_count <= 5:
-                                logger.warning(f"⚠️ pyds extraction failed (batch_id={batch_id}): {e}")
-                                logger.info("Falling back to DLPack extraction")
+                            print(f"[PYDS-DEBUG] ⚠️ pyds failed (frame#{self._frame_count}, batch_id={batch_id}): {e}", flush=True)
                             self._use_pyds = False
                             frame_np = None
 
