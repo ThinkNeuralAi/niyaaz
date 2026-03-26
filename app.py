@@ -1125,6 +1125,13 @@ def video_feed(app_name, channel_id):
                 # Get frame - either combined or module-specific
                 frame = processor.get_latest_frame(module_name=app_name if app_name in processor.get_active_modules() else None)
                 if frame is not None:
+                    # Validate frame structure before encoding - skip corrupt/broken frames
+                    # Note: we allow all-zero (black) frames here since get_latest_frame()
+                    # returns a black placeholder during startup. The stricter zero-frame
+                    # check is applied at the source (validate_frame in processing loop).
+                    if frame.ndim != 3 or frame.shape[2] not in (3, 4):
+                        time.sleep(0.066)
+                        continue
                     # Encode with optimized JPEG quality for faster transmission
                     ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])  # 75% quality (vs 95% default)
                     if ret:

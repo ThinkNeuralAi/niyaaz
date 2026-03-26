@@ -11,7 +11,7 @@ from queue import Queue
 import numpy as np
 from typing import List, Dict, Any, Optional
 
-from .rtsp_connection_pool import rtsp_pool
+from .rtsp_connection_pool import rtsp_pool, validate_frame
 
 # Try to import DeepStream processor
 # DISABLED - Pipeline causes segmentation faults when transitioning to PLAYING state
@@ -438,7 +438,7 @@ class SharedMultiModuleVideoProcessor:
                             continue
                         consecutive_failures = 0  # Reset on successful loop
                 
-                if not safe_array_check(frame, "valid"):
+                if not safe_array_check(frame, "valid") or not validate_frame(frame):
                     continue
                 
                 # Increment frame counter for ALL frames (for display)
@@ -449,9 +449,9 @@ class SharedMultiModuleVideoProcessor:
                     # Still update display with raw frame for smooth video
                     with self.frame_lock:
                         self.latest_raw_frame = frame
-                        # Reuse last annotated frame if available
-                        if self.latest_annotated_frame is None:
-                            self.latest_annotated_frame = frame
+                        # Do NOT set raw frame as annotated — it lacks the header overlay
+                        # and causes dimension mismatch. Let get_latest_frame() fall through
+                        # to latest_raw_frame naturally.
                     continue
                 
                 # Reset failure counter

@@ -360,6 +360,58 @@ def safe_array_check(obj, check_type="non_empty"):
         logger.error(f"Error in safe_array_check: {e}")
         return False
 
+
+def validate_frame(frame, expected_channels=3, min_dimension=10):
+    """
+    Robust frame validation that detects corrupt, incomplete, or invalid frames.
+    Use this instead of safe_array_check() for video frame validation.
+    
+    Args:
+        frame: numpy array to validate
+        expected_channels: expected number of color channels (3 for BGR, 4 for BGRA)
+        min_dimension: minimum acceptable width/height in pixels
+    
+    Returns:
+        bool: True if frame is valid for processing/display
+    """
+    try:
+        if frame is None:
+            return False
+        
+        if not hasattr(frame, 'shape') or not hasattr(frame, 'size'):
+            return False
+        
+        if frame.size == 0:
+            return False
+        
+        # Must be 3D: (height, width, channels)
+        if frame.ndim != 3:
+            return False
+        
+        h, w, c = frame.shape
+        
+        # Check channels
+        if c not in (3, 4):
+            return False
+        
+        # Check minimum dimensions
+        if h < min_dimension or w < min_dimension:
+            return False
+        
+        # Check for all-zero frame (black frame from failed decode)
+        if not np.any(frame):
+            return False
+        
+        # Check for NaN values (can happen with DLPack conversion errors)
+        if frame.dtype in (np.float32, np.float64) and np.isnan(frame).any():
+            return False
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error in validate_frame: {e}")
+        return False
+
 class RTSPConnectionPool:
     """
     Manages shared RTSP connections to avoid duplicate streams
@@ -512,8 +564,8 @@ class RTSPConnectionPool:
             rtsp_url: RTSP stream URL
             frame: Video frame to broadcast
         """
-        # Validate frame before broadcasting using safe check
-        if not safe_array_check(frame, "valid"):
+        # Validate frame before broadcasting using robust check
+        if not validate_frame(frame):
             return
             
         if rtsp_url in self._subscribers:
@@ -840,6 +892,10 @@ class RTSPConnection:
                         reconnect_attempts += 1
                         logger.info(f"Attempting to reconnect to {self.rtsp_url} (attempt {reconnect_attempts}/{max_reconnect_attempts})")
                         
+                        # Clear stale frame so consumers see None instead of old data
+                        with self.frame_lock:
+                            self.latest_frame = None
+                        
                         # Release current connection
                         try:
                             if isinstance(self.cap, cv2.VideoCapture):
@@ -873,20 +929,28 @@ class RTSPConnection:
                                         early_warning_sent = False  # Reset early warning flag on successful reconnection
                                         logger.info(f"Successfully reconnected to {self.rtsp_url}")
                                         
-                                        # Force immediate frame read and broadcast to notify subscribers
+                                        # Skip first 2 frames after reconnection (partial I-frames)
+                                        frames_to_skip = 2
+                                        for _ in range(frames_to_skip):
+                                            try:
+                                                self.cap.read()
+                                            except:
+                                                pass
+                                        
+                                        # Read a fresh frame after skipping
                                         try:
-                                            test_ret, test_frame = self.cap.read()
-                                            if test_ret and safe_array_check(test_frame, "valid"):
-                                                # Update latest frame immediately
+                                            fresh_ret, fresh_frame = self.cap.read()
+                                            if fresh_ret and validate_frame(fresh_frame):
+                                                # Update latest frame
                                                 with self.frame_lock:
-                                                    self.latest_frame = test_frame.copy()
+                                                    self.latest_frame = fresh_frame.copy()
                                                 
-                                                # Broadcast immediately to notify all subscribers
+                                                # Broadcast validated frame to subscribers
                                                 if self.pool:
-                                                    self.pool.broadcast_frame(self.rtsp_url, test_frame)
-                                                logger.info(f"Immediate frame broadcast after reconnection: {self.rtsp_url}")
+                                                    self.pool.broadcast_frame(self.rtsp_url, fresh_frame)
+                                                logger.info(f"Post-reconnect frame broadcast (skipped {frames_to_skip} initial frames): {self.rtsp_url}")
                                         except Exception as e:
-                                            logger.debug(f"Could not immediately broadcast frame after reconnection: {e}")
+                                            logger.debug(f"Could not broadcast frame after reconnection: {e}")
                                         
                                         # Send Telegram alert for successful reconnection
                                         if self.pool:

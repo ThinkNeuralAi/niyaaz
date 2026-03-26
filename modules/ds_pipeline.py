@@ -207,24 +207,32 @@ class FrameExtractorHandler(BufferOperator):
 
                 batch_id = frame_meta.batch_id
                 try:
-                    tensor = buffer.extract(batch_id)
-                    if not tensor:
+                    raw_tensor = buffer.extract(batch_id)
+                    if raw_tensor is None:
                         continue
 
                     # Convert Tensor to numpy via DLPack
                     try:
                         import torch
-                        torch_tensor = torch.utils.dlpack.from_dlpack(tensor)
+                        # Synchronize GPU to ensure buffer is fully written
+                        if torch.cuda.is_available():
+                            torch.cuda.synchronize()
+                        torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
                         frame_np = torch_tensor.cpu().numpy()
                     except ImportError:
                         # Fallback: try direct numpy conversion via clone
-                        cloned = tensor.clone()
+                        cloned = raw_tensor.clone()
                         frame_np = np.from_dlpack(cloned)
 
                     # Ensure correct shape (H, W, C) and BGR for OpenCV
                     if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
                         # CHW → HWC
                         frame_np = np.transpose(frame_np, (1, 2, 0))
+
+                    # Validate frame has correct dimensions
+                    if frame_np.ndim != 3 or frame_np.shape[2] not in (3, 4):
+                        logger.debug(f"Skipping frame with invalid shape {frame_np.shape} for {channel_id}")
+                        continue
 
                     if frame_np.shape[2] == 4:
                         # RGBA → BGR
@@ -316,13 +324,17 @@ class FrameRetrieverHandler(BufferRetriever):
 
                 batch_id = frame_meta.batch_id
                 try:
-                    tensor = buffer.extract(batch_id).clone()
-                    if not tensor:
+                    raw_tensor = buffer.extract(batch_id)
+                    if raw_tensor is None:
                         continue
+                    tensor = raw_tensor.clone()
 
                     # Convert Tensor → numpy via DLPack (tensor is already RGB from capsfilter)
                     try:
                         import torch
+                        # Synchronize GPU to ensure buffer is fully written
+                        if torch.cuda.is_available():
+                            torch.cuda.synchronize()
                         torch_tensor = torch.utils.dlpack.from_dlpack(tensor)
                         frame_np = torch_tensor.cpu().numpy()
                     except ImportError:
@@ -331,6 +343,11 @@ class FrameRetrieverHandler(BufferRetriever):
                     # Ensure (H, W, C) layout
                     if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
                         frame_np = np.transpose(frame_np, (1, 2, 0))
+
+                    # Validate frame has correct dimensions
+                    if frame_np.ndim != 3 or frame_np.shape[2] not in (3, 4):
+                        logger.debug(f"Skipping frame with invalid shape {frame_np.shape} for {channel_id}")
+                        continue
 
                     # RGB → BGR for OpenCV compatibility
                     if frame_np.ndim == 3 and frame_np.shape[2] == 3:

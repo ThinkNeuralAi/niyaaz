@@ -60,6 +60,11 @@ class AlertGifRecorder:
         if frame is None or frame.size == 0:
             return
         
+        # Validate frame integrity before storing
+        # Reject corrupt/incomplete frames (wrong channels, all-zero, etc.)
+        if frame.ndim != 3 or frame.shape[2] not in (3, 4) or not np.any(frame):
+            return
+        
         # Resize frame for efficient storage
         resized_frame = cv2.resize(frame, (self.gif_width, self.gif_height))
         
