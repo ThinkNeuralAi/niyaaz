@@ -212,15 +212,15 @@ class FrameExtractorHandler(BufferOperator):
                         continue
 
                     # Convert Tensor to numpy via DLPack
-                    # NOTE: Do NOT call torch.cuda.synchronize() here — it blocks
-                    # the entire GStreamer pipeline thread and causes RTSP buffer
-                    # underruns + H.264 I-frame drops.  .cpu() is synchronous for
-                    # the specific tensor transfer, and .copy() guarantees a fully
-                    # independent CPU array.
+                    # .clone() creates a fast GPU-to-GPU copy (~microseconds) that isolates
+                    # our frame from the NVDEC decode buffer pool. Without it, the decode
+                    # surface can be recycled while .cpu() is still transferring.
+                    # Do NOT add torch.cuda.synchronize() — it blocks the pipeline thread.
                     try:
                         import torch
                         torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
-                        frame_np = torch_tensor.cpu().numpy().copy()
+                        safe_copy = torch_tensor.clone()  # Fast GPU copy, isolates from buffer pool
+                        frame_np = safe_copy.cpu().numpy().copy()  # .cpu() waits for clone
                     except ImportError:
                         frame_np = np.from_dlpack(raw_tensor).copy()
 
@@ -333,14 +333,15 @@ class FrameRetrieverHandler(BufferRetriever):
                     if raw_tensor is None:
                         continue
 
-                    # Convert Tensor → numpy via DLPack (tensor is already RGB from capsfilter)
-                    # NOTE: Do NOT call torch.cuda.synchronize() or .clone() here.
-                    # Sync blocks the GStreamer thread → RTSP buffer underruns → I-frame drops.
-                    # .cpu() is synchronous for this tensor, .copy() ensures CPU independence.
+                    # .clone() after from_dlpack isolates from the NVDEC buffer pool.
+                    # Without it, the decode surface can be recycled while .cpu() transfers.
+                    # .clone() is fast (~microseconds GPU copy), .cpu() waits for clone.
+                    # Do NOT add torch.cuda.synchronize() — it blocks the pipeline thread.
                     try:
                         import torch
                         torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
-                        frame_np = torch_tensor.cpu().numpy().copy()
+                        safe_copy = torch_tensor.clone()
+                        frame_np = safe_copy.cpu().numpy().copy()
                     except ImportError:
                         frame_np = np.from_dlpack(raw_tensor).copy()
 

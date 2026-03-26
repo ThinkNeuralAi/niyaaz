@@ -563,32 +563,70 @@ def _load_channels_deepstream(all_channels: list):
 
         ds_pipeline_instance.register_frame_callback(_ds_frame_dispatcher)
     else:
-        # Full inference mode: DS nvinfer provides detections directly
-        def _ds_detection_dispatcher(channel_id, detections, frame_num):
-            """Route DS detections to the active modules on this channel."""
-            wrapper = shared_video_processors.get(channel_id)
-            if wrapper is None or not isinstance(wrapper, _DSChannelWrapper):
-                return
+        # Full inference mode: DS nvinfer provides detections directly.
+        # CRITICAL: Module processing (PPE YOLO etc.) MUST NOT run on the
+        # GStreamer pipeline thread — it blocks NVDEC decoding for all 28+
+        # cameras, causing buffer pool exhaustion and frame ghosting.
+        # Instead, we store the latest frame+results in a queue and process
+        # in a background worker thread.
+        import queue as _queue
 
+        _ds_infer_queues = {}   # channel_id → Queue(maxsize=1)
+
+        def _ds_detection_dispatcher(channel_id, detections, frame_num):
+            """Queue frame+results for async module processing (non-blocking)."""
             frame = ds_pipeline_instance.get_latest_frame(channel_id)
+            if frame is None:
+                return
             results = ds_adapter_instance.get_results(channel_id)
 
-            for module_name, module in wrapper.modules.items():
-                try:
-                    if hasattr(module, 'process_frame_with_detections') and results is not None:
-                        result = module.process_frame_with_detections(
-                            frame.copy() if frame is not None else None,
-                            results
-                        )
-                    elif hasattr(module, 'process_frame') and frame is not None:
-                        result = module.process_frame(frame.copy())
-                    else:
-                        continue
+            q = _ds_infer_queues.get(channel_id)
+            if q is None:
+                return
+            # Drop old frame if worker hasn't consumed it yet
+            try:
+                q.get_nowait()
+            except _queue.Empty:
+                pass
+            try:
+                q.put_nowait((frame.copy(), results))
+            except _queue.Full:
+                pass
 
-                    if result is not None:
-                        wrapper.module_results[module_name] = result
-                except Exception as e:
-                    logger.error(f"DS module {module_name} error on {channel_id}: {e}")
+        def _ds_infer_worker(channel_id, q):
+            """Background worker: process frames through modules for one channel."""
+            import time as _time
+            while True:
+                try:
+                    frame, results = q.get(timeout=5.0)
+                except _queue.Empty:
+                    continue
+
+                wrapper = shared_video_processors.get(channel_id)
+                if wrapper is None or not isinstance(wrapper, _DSChannelWrapper):
+                    continue
+
+                # Validate frame
+                if frame is None or frame.ndim != 3 or frame.shape[2] not in (3, 4):
+                    continue
+                if frame.shape[0] < 32 or frame.shape[1] < 32:
+                    continue
+
+                for module_name, module in wrapper.modules.items():
+                    try:
+                        if hasattr(module, 'process_frame_with_detections') and results is not None:
+                            result = module.process_frame_with_detections(
+                                frame.copy(), results
+                            )
+                        elif hasattr(module, 'process_frame'):
+                            result = module.process_frame(frame.copy())
+                        else:
+                            continue
+
+                        if result is not None:
+                            wrapper.module_results[module_name] = result
+                    except Exception as e:
+                        logger.error(f"DS module {module_name} error on {channel_id}: {e}")
 
         ds_pipeline_instance.register_detection_callback(_ds_detection_dispatcher)
 
@@ -637,7 +675,7 @@ def _load_channels_deepstream(all_channels: list):
         logger.error("DeepStream pipeline failed to start")
         return False
 
-    # Start per-channel worker threads for async frame processing (decode-only mode)
+    # Start per-channel worker threads for async frame processing
     if decode_only:
         import threading as _threading
         for ch_id in list(shared_video_processors.keys()):
@@ -647,6 +685,19 @@ def _load_channels_deepstream(all_channels: list):
                 target=_ds_module_worker,
                 args=(ch_id, q),
                 name=f"ds-worker-{ch_id}",
+                daemon=True,
+            )
+            t.start()
+    else:
+        # Full-inference mode: start workers for _ds_infer_queues
+        import threading as _threading
+        for ch_id in list(shared_video_processors.keys()):
+            q = _queue.Queue(maxsize=1)
+            _ds_infer_queues[ch_id] = q
+            t = _threading.Thread(
+                target=_ds_infer_worker,
+                args=(ch_id, q),
+                name=f"ds-infer-{ch_id}",
                 daemon=True,
             )
             t.start()
