@@ -427,12 +427,17 @@ class FrameRetrieverHandler(BufferRetriever):
     Retrieves frame buffers via Flow.retrieve() path.
     Flow.retrieve() automatically adds nvvideoconvert + capsfilter(RGB) + appsink,
     so we get proper RGB numpy frames.
+
+    Frame extraction uses pyds.get_nvds_buf_surface() which provides properly
+    synchronized buffer mapping. Falls back to DLPack if pyds is unavailable.
     """
 
     def __init__(self, pipeline_mgr: "DeepStreamPipeline"):
         super().__init__()
         self.pipeline_mgr = pipeline_mgr
         self._frame_count = 0
+        self._use_pyds = True       # Try pyds first
+        self._pyds_logged = False    # Log buffer info once
 
     def consume(self, buffer) -> int:
         """Called by the appsink for each buffer. Returns consumed bytes (>0 = ok, <0 = error)."""
@@ -441,6 +446,16 @@ class FrameRetrieverHandler(BufferRetriever):
 
             if self._frame_count <= 3:
                 logger.info(f"FrameRetriever.consume called #{self._frame_count}, batch_size={buffer.batch_size}")
+
+            # One-time: log buffer attributes to understand pyservicemaker's API
+            if not self._pyds_logged:
+                self._pyds_logged = True
+                try:
+                    attrs = [a for a in dir(buffer) if not a.startswith('__')]
+                    logger.info(f"📋 Buffer object type: {type(buffer).__name__}, attrs: {attrs}")
+                    logger.info(f"📋 Buffer hash: {hash(buffer)}, id: {id(buffer)}")
+                except Exception as e:
+                    logger.warning(f"Buffer introspection failed: {e}")
 
             # Rate limit frame extraction
             if self._frame_count % max(1, self.pipeline_mgr._frame_extract_interval) != 0:
@@ -456,40 +471,63 @@ class FrameRetrieverHandler(BufferRetriever):
 
                 batch_id = frame_meta.batch_id
                 try:
-                    raw_tensor = buffer.extract(batch_id)
-                    if raw_tensor is None:
-                        continue
+                    frame_np = None
 
-                    # Extract frame via DLPack → CPU copy.
-                    # No torch.cuda.synchronize() needed here — the retrieve() path
-                    # goes through nvvideoconvert (video processing unit, not CUDA).
-                    # Instead we rely on enlarged num-extra-surfaces pool + frame dropping.
-                    try:
-                        import torch
-                        torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
-                        frame_np = torch_tensor.cpu().numpy().copy()
-                    except ImportError:
-                        frame_np = np.from_dlpack(raw_tensor).copy()
+                    # ── PRIMARY: pyds buffer mapping (properly synchronized) ──
+                    if self._use_pyds:
+                        try:
+                            import pyds
+                            # pyds.get_nvds_buf_surface maps the NvBufSurface to a
+                            # numpy array using GStreamer's native synchronization.
+                            # No DLPack, no PyTorch, no CUDA sync needed.
+                            n_frame = pyds.get_nvds_buf_surface(hash(buffer), batch_id)
+                            frame_np = n_frame.copy()  # Deep copy before buffer is released
+
+                            if self._frame_count <= 3:
+                                logger.info(f"✅ pyds frame extraction OK: shape={frame_np.shape}, dtype={frame_np.dtype}")
+                        except Exception as e:
+                            if self._frame_count <= 5:
+                                logger.warning(f"⚠️ pyds extraction failed (batch_id={batch_id}): {e}")
+                                logger.info("Falling back to DLPack extraction")
+                            self._use_pyds = False
+                            frame_np = None
+
+                    # ── FALLBACK: DLPack extraction (may ghost) ──
+                    if frame_np is None:
+                        raw_tensor = buffer.extract(batch_id)
+                        if raw_tensor is None:
+                            continue
+                        try:
+                            import torch
+                            torch.cuda.synchronize()
+                            torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
+                            frame_np = torch_tensor.cpu().numpy().copy()
+                            del torch_tensor
+                            del raw_tensor
+                            torch.cuda.synchronize()
+                        except ImportError:
+                            frame_np = np.from_dlpack(raw_tensor).copy()
+
+                    # ── Post-processing (same for both paths) ──
 
                     # Ensure (H, W, C) layout
                     if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
                         frame_np = np.transpose(frame_np, (1, 2, 0))
 
-                    # Validate frame has correct dimensions
+                    # Validate frame dimensions
                     if frame_np.ndim != 3 or frame_np.shape[2] not in (3, 4):
-                        logger.debug(f"Skipping frame with invalid shape {frame_np.shape} for {channel_id}")
+                        logger.debug(f"Skipping invalid shape {frame_np.shape} for {channel_id}")
                         continue
 
-                    # Reject tiny frames (GPU decode failures)
+                    # Reject tiny frames
                     if frame_np.shape[0] < 32 or frame_np.shape[1] < 32:
-                        logger.debug(f"Skipping tiny frame for {channel_id}")
                         continue
 
-                    # RGB → BGR for OpenCV compatibility
-                    if frame_np.ndim == 3 and frame_np.shape[2] == 3:
-                        frame_np = frame_np[:, :, ::-1].copy()
-                    elif frame_np.ndim == 3 and frame_np.shape[2] == 4:
+                    # Color conversion to BGR for OpenCV
+                    if frame_np.shape[2] == 4:
                         frame_np = frame_np[:, :, :3][:, :, ::-1].copy()
+                    elif frame_np.shape[2] == 3:
+                        frame_np = frame_np[:, :, ::-1].copy()
 
                     with self.pipeline_mgr._frame_lock:
                         self.pipeline_mgr._latest_frames[channel_id] = frame_np
