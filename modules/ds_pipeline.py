@@ -198,6 +198,8 @@ class CombinedDetectionFrameHandler(BufferOperator):
         """Called for every buffer. Extracts metadata + frames. Must return True."""
         try:
             self._frame_count += 1
+            if self._frame_count <= 2:
+                print(f"[PYDS-DEBUG] CombinedDetectionFrameHandler.handle_buffer #{self._frame_count}", flush=True)
             batch_meta = buffer.batch_meta
 
             for frame_meta in batch_meta.frame_items:
@@ -256,19 +258,32 @@ class CombinedDetectionFrameHandler(BufferOperator):
 
                 batch_id = frame_meta.batch_id
                 try:
-                    raw_tensor = buffer.extract(batch_id)
-                    if raw_tensor is None:
-                        continue
+                    frame_np = None
 
-                    # Sync GPU — ensures muxer's RGBA surface is fully written.
-                    # Safe now that module processing is on background threads.
+                    # PRIMARY: pyds buffer mapping (properly synchronized)
                     try:
-                        import torch
-                        torch.cuda.synchronize()
-                        torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
-                        frame_np = torch_tensor.cpu().numpy().copy()
-                    except ImportError:
-                        frame_np = np.from_dlpack(raw_tensor).copy()
+                        import pyds
+                        n_frame = pyds.get_nvds_buf_surface(hash(buffer), batch_id)
+                        frame_np = n_frame.copy()
+                        if self._frame_count <= 3:
+                            print(f"[PYDS-DEBUG] ✅ pyds extract OK: shape={frame_np.shape}", flush=True)
+                    except Exception as e:
+                        if self._frame_count <= 5:
+                            print(f"[PYDS-DEBUG] ⚠️ pyds failed: {e}, falling back to DLPack", flush=True)
+
+                    # FALLBACK: DLPack (may ghost)
+                    if frame_np is None:
+                        raw_tensor = buffer.extract(batch_id)
+                        if raw_tensor is None:
+                            continue
+                        try:
+                            import torch
+                            torch.cuda.synchronize()
+                            torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
+                            frame_np = torch_tensor.cpu().numpy().copy()
+                            del torch_tensor, raw_tensor
+                        except ImportError:
+                            frame_np = np.from_dlpack(raw_tensor).copy()
 
                     # Ensure (H, W, C) layout
                     if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
@@ -319,6 +334,8 @@ class FrameExtractorHandler(BufferOperator):
         """Called for every buffer. Must return True to keep buffer flowing."""
         try:
             self._frame_count += 1
+            if self._frame_count <= 2:
+                print(f"[PYDS-DEBUG] FrameExtractorHandler.handle_buffer #{self._frame_count}", flush=True)
 
             # Only extract frames every N buffers to reduce CPU load
             if self._frame_count % self.pipeline_mgr._frame_extract_interval != 0:
@@ -335,21 +352,32 @@ class FrameExtractorHandler(BufferOperator):
 
                 batch_id = frame_meta.batch_id
                 try:
-                    raw_tensor = buffer.extract(batch_id)
-                    if raw_tensor is None:
-                        continue
+                    frame_np = None
 
-                    # Sync GPU to ensure NVDEC has finished decoding this surface.
-                    # This is safe now that module processing (PPE YOLO etc.) is on
-                    # background worker threads — sync only waits for decode, not inference.
-                    # Do NOT use .clone() — it races with NVDEC's hardware engine.
+                    # PRIMARY: pyds buffer mapping (properly synchronized)
                     try:
-                        import torch
-                        torch.cuda.synchronize()  # Wait for NVDEC decode completion
-                        torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
-                        frame_np = torch_tensor.cpu().numpy().copy()
-                    except ImportError:
-                        frame_np = np.from_dlpack(raw_tensor).copy()
+                        import pyds
+                        n_frame = pyds.get_nvds_buf_surface(hash(buffer), batch_id)
+                        frame_np = n_frame.copy()
+                        if self._frame_count <= 3:
+                            print(f"[PYDS-DEBUG] ✅ pyds extract OK: shape={frame_np.shape}", flush=True)
+                    except Exception as e:
+                        if self._frame_count <= 5:
+                            print(f"[PYDS-DEBUG] ⚠️ pyds failed: {e}, falling back to DLPack", flush=True)
+
+                    # FALLBACK: DLPack (may ghost)
+                    if frame_np is None:
+                        raw_tensor = buffer.extract(batch_id)
+                        if raw_tensor is None:
+                            continue
+                        try:
+                            import torch
+                            torch.cuda.synchronize()
+                            torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
+                            frame_np = torch_tensor.cpu().numpy().copy()
+                            del torch_tensor, raw_tensor
+                        except ImportError:
+                            frame_np = np.from_dlpack(raw_tensor).copy()
 
                     # Ensure correct shape (H, W, C) and BGR for OpenCV
                     if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
