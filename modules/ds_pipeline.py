@@ -460,11 +460,12 @@ class FrameRetrieverHandler(BufferRetriever):
                     if raw_tensor is None:
                         continue
 
-                    # Sync GPU before reading the decode surface.
-                    # Safe now that PPE etc. are on background threads.
+                    # Extract frame via DLPack → CPU copy.
+                    # No torch.cuda.synchronize() needed here — the retrieve() path
+                    # goes through nvvideoconvert (video processing unit, not CUDA).
+                    # Instead we rely on enlarged num-extra-surfaces pool + frame dropping.
                     try:
                         import torch
-                        torch.cuda.synchronize()
                         torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
                         frame_np = torch_tensor.cpu().numpy().copy()
                     except ImportError:
@@ -718,15 +719,16 @@ class DeepStreamPipeline:
                 if self._enable_sgie:
                     flow = flow.infer(self._sgie_config, **{"batch-size": min(batch_size, 8)})
 
-                # Combined probe: extracts BOTH detections AND frames from the
-                # same buffer. This BYPASSES retrieve() → nvvideoconvert which
-                # uses the GPU's video processing unit (unsynchronizable from CUDA).
-                combined_handler = CombinedDetectionFrameHandler(self)
-                combined_probe = Probe("combined-probe", combined_handler)
-                flow = flow.attach(what=combined_probe)
+                # Metadata probe for nvinfer detections + frame numbers
+                metadata_handler = DetectionMetadataHandler(self)
+                metadata_probe = Probe("detection-probe", metadata_handler)
+                flow = flow.attach(what=metadata_probe)
 
-                # Terminate pipeline — no appsink needed since probe does everything
-                flow = flow.render(RenderMode.DISCARD)
+                # Frame retriever — consumes RGB buffers via appsink
+                # retrieve() adds nvvideoconvert (NV12→RGBA) internally,
+                # which is required since buffer.extract() only supports RGB format.
+                frame_retriever = FrameRetrieverHandler(self)
+                flow = flow.retrieve(frame_retriever)
 
                 self._flow = flow
 
@@ -759,11 +761,11 @@ class DeepStreamPipeline:
         lines.append("    rtsp-reconnect-interval: 5")
         lines.append("    latency: 500")  # 500ms jitterbuffer for RTSP network jitter
         # Enlarge NVDEC decode surface pool — prevents buffer reuse while reading.
-        # Default is 1 which is too few with 28+ cameras; decoded surface gets
-        # recycled before .cpu().numpy().copy() finishes → ghosting/tearing.
-        lines.append("    num-extra-surfaces: 4")
-        # Drop frames under load rather than accumulating stale buffers
-        lines.append("    drop-frame-interval: 0")
+        # With 32 cameras and pipeline depth ~3 stages, need enough surfaces so
+        # a decoded frame isn't recycled while still being read by downstream.
+        lines.append("    num-extra-surfaces: 8")
+        # Drop every other frame under load rather than accumulating stale buffers
+        lines.append("    drop-frame-interval: 2")
         # Use device memory for decode surfaces (faster, avoids host staging)
         lines.append("    cudadec-memtype: 0")
         # Use TCP directly to avoid 5-second UDP timeout per camera
