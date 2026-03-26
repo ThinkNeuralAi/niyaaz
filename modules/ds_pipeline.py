@@ -176,6 +176,134 @@ class DetectionMetadataHandler(BatchMetadataOperator):
                     logger.error(f"Detection callback error on {channel_id}: {e}")
 
 
+class CombinedDetectionFrameHandler(BufferOperator):
+    """
+    Combined handler: extracts BOTH detection metadata AND frame pixels from
+    the same buffer in a single probe callback.
+
+    This bypasses retrieve() → nvvideoconvert entirely. nvvideoconvert uses
+    the GPU's video processing unit (NOT CUDA compute), so
+    torch.cuda.synchronize() cannot sync with it — causing ghosting.
+
+    By extracting frames directly from the probe, we read the muxer's
+    RGBA batch buffer which IS managed by CUDA-synchronizable surfaces.
+    """
+
+    def __init__(self, pipeline_mgr: "DeepStreamPipeline"):
+        super().__init__()
+        self.pipeline_mgr = pipeline_mgr
+        self._frame_count = 0
+
+    def handle_buffer(self, buffer):
+        """Called for every buffer. Extracts metadata + frames. Must return True."""
+        try:
+            self._frame_count += 1
+            batch_meta = buffer.batch_meta
+
+            for frame_meta in batch_meta.frame_items:
+                source_id = frame_meta.source_id
+                channel_id = self.pipeline_mgr.stream_id_to_channel.get(source_id)
+                if channel_id is None:
+                    continue
+
+                frame_number = frame_meta.frame_number
+
+                # ── Extract detection metadata ──
+                detections = []
+                for obj_meta in frame_meta.object_items:
+                    rect = obj_meta.rect_params
+                    detection = {
+                        "class_id": obj_meta.class_id,
+                        "class_name": obj_meta.label.decode("utf-8", errors="replace") if isinstance(obj_meta.label, bytes) else str(obj_meta.label),
+                        "confidence": obj_meta.confidence,
+                        "tracker_id": obj_meta.object_id if obj_meta.object_id != 0xFFFFFFFFFFFFFFFF else -1,
+                        "tracker_confidence": obj_meta.tracker_confidence,
+                        "bbox": {
+                            "x": rect.left,
+                            "y": rect.top,
+                            "w": rect.width,
+                            "h": rect.height,
+                        },
+                        "frame_number": frame_number,
+                        "stream_id": source_id,
+                        "channel_id": channel_id,
+                        "unique_component_id": obj_meta.unique_component_id,
+                    }
+                    for classifier in obj_meta.classifier_items:
+                        detection["classifier"] = {
+                            "class_id": classifier.class_id,
+                            "label": classifier.label.decode("utf-8", errors="replace") if isinstance(classifier.label, bytes) else str(classifier.label),
+                        }
+                    detections.append(detection)
+
+                # Update FPS counter
+                self.pipeline_mgr._update_fps(channel_id)
+
+                # Store latest detections
+                with self.pipeline_mgr._detection_lock:
+                    self.pipeline_mgr._latest_detections[channel_id] = detections
+
+                # Fire detection callbacks
+                for cb in self.pipeline_mgr._detection_callbacks:
+                    try:
+                        cb(channel_id, detections, frame_number)
+                    except Exception as e:
+                        logger.error(f"Detection callback error on {channel_id}: {e}")
+
+                # ── Extract frame (rate-limited) ──
+                if self._frame_count % max(1, self.pipeline_mgr._frame_extract_interval) != 0:
+                    continue
+
+                batch_id = frame_meta.batch_id
+                try:
+                    raw_tensor = buffer.extract(batch_id)
+                    if raw_tensor is None:
+                        continue
+
+                    # Sync GPU — ensures muxer's RGBA surface is fully written.
+                    # Safe now that module processing is on background threads.
+                    try:
+                        import torch
+                        torch.cuda.synchronize()
+                        torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
+                        frame_np = torch_tensor.cpu().numpy().copy()
+                    except ImportError:
+                        frame_np = np.from_dlpack(raw_tensor).copy()
+
+                    # Ensure (H, W, C) layout
+                    if frame_np.ndim == 3 and frame_np.shape[0] in (3, 4):
+                        frame_np = np.transpose(frame_np, (1, 2, 0))
+
+                    if frame_np.ndim != 3 or frame_np.shape[2] not in (3, 4):
+                        continue
+
+                    if frame_np.shape[0] < 32 or frame_np.shape[1] < 32:
+                        continue
+
+                    # Color conversion to BGR for OpenCV
+                    if frame_np.shape[2] == 4:
+                        frame_np = frame_np[:, :, :3][:, :, ::-1].copy()
+                    elif frame_np.shape[2] == 3:
+                        frame_np = frame_np[:, :, ::-1].copy()
+
+                    with self.pipeline_mgr._frame_lock:
+                        self.pipeline_mgr._latest_frames[channel_id] = frame_np
+
+                    for cb in self.pipeline_mgr._frame_callbacks:
+                        try:
+                            cb(channel_id, frame_np)
+                        except Exception as e:
+                            logger.error(f"Frame callback error on {channel_id}: {e}")
+
+                except Exception as e:
+                    logger.debug(f"Frame extract error for {channel_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"CombinedDetectionFrameHandler error: {e}")
+
+        return True
+
+
 class FrameExtractorHandler(BufferOperator):
     """
     Extracts raw frame data from GPU buffers for MJPEG streaming and GIF recording.
@@ -590,14 +718,15 @@ class DeepStreamPipeline:
                 if self._enable_sgie:
                     flow = flow.infer(self._sgie_config, **{"batch-size": min(batch_size, 8)})
 
-                # Metadata probe for nvinfer detections + frame numbers
-                metadata_handler = DetectionMetadataHandler(self)
-                metadata_probe = Probe("detection-probe", metadata_handler)
-                flow = flow.attach(what=metadata_probe)
+                # Combined probe: extracts BOTH detections AND frames from the
+                # same buffer. This BYPASSES retrieve() → nvvideoconvert which
+                # uses the GPU's video processing unit (unsynchronizable from CUDA).
+                combined_handler = CombinedDetectionFrameHandler(self)
+                combined_probe = Probe("combined-probe", combined_handler)
+                flow = flow.attach(what=combined_probe)
 
-                # Frame retriever — consumes RGB buffers via appsink
-                frame_retriever = FrameRetrieverHandler(self)
-                flow = flow.retrieve(frame_retriever)
+                # Terminate pipeline — no appsink needed since probe does everything
+                flow = flow.render(RenderMode.DISCARD)
 
                 self._flow = flow
 
