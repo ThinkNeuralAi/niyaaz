@@ -211,16 +211,15 @@ class FrameExtractorHandler(BufferOperator):
                     if raw_tensor is None:
                         continue
 
-                    # Convert Tensor to numpy via DLPack
-                    # .clone() creates a fast GPU-to-GPU copy (~microseconds) that isolates
-                    # our frame from the NVDEC decode buffer pool. Without it, the decode
-                    # surface can be recycled while .cpu() is still transferring.
-                    # Do NOT add torch.cuda.synchronize() — it blocks the pipeline thread.
+                    # Sync GPU to ensure NVDEC has finished decoding this surface.
+                    # This is safe now that module processing (PPE YOLO etc.) is on
+                    # background worker threads — sync only waits for decode, not inference.
+                    # Do NOT use .clone() — it races with NVDEC's hardware engine.
                     try:
                         import torch
+                        torch.cuda.synchronize()  # Wait for NVDEC decode completion
                         torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
-                        safe_copy = torch_tensor.clone()  # Fast GPU copy, isolates from buffer pool
-                        frame_np = safe_copy.cpu().numpy().copy()  # .cpu() waits for clone
+                        frame_np = torch_tensor.cpu().numpy().copy()
                     except ImportError:
                         frame_np = np.from_dlpack(raw_tensor).copy()
 
@@ -333,15 +332,13 @@ class FrameRetrieverHandler(BufferRetriever):
                     if raw_tensor is None:
                         continue
 
-                    # .clone() after from_dlpack isolates from the NVDEC buffer pool.
-                    # Without it, the decode surface can be recycled while .cpu() transfers.
-                    # .clone() is fast (~microseconds GPU copy), .cpu() waits for clone.
-                    # Do NOT add torch.cuda.synchronize() — it blocks the pipeline thread.
+                    # Sync GPU before reading the decode surface.
+                    # Safe now that PPE etc. are on background threads.
                     try:
                         import torch
+                        torch.cuda.synchronize()
                         torch_tensor = torch.utils.dlpack.from_dlpack(raw_tensor)
-                        safe_copy = torch_tensor.clone()
-                        frame_np = safe_copy.cpu().numpy().copy()
+                        frame_np = torch_tensor.cpu().numpy().copy()
                     except ImportError:
                         frame_np = np.from_dlpack(raw_tensor).copy()
 
