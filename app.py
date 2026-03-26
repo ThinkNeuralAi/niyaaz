@@ -304,6 +304,10 @@ class _DSChannelWrapper:
         if frame is None:
             return None
 
+        # Validate frame integrity before serving to live feed
+        if frame.ndim != 3 or frame.shape[2] not in (3, 4) or frame.shape[0] < 32 or frame.shape[1] < 32:
+            return None
+
         # If a specific module has annotation capabilities, let it annotate
         if module_name and module_name in self.modules:
             module = self.modules[module_name]
@@ -312,9 +316,9 @@ class _DSChannelWrapper:
                 # Handle both dict results (with 'frame' key) and direct frame returns
                 if isinstance(result, dict) and 'frame' in result:
                     annotated = result.get('frame')
-                    if annotated is not None:
+                    if annotated is not None and hasattr(annotated, 'ndim') and annotated.ndim == 3:
                         return annotated
-                elif isinstance(result, np.ndarray):
+                elif isinstance(result, np.ndarray) and result.ndim == 3:
                     # Module returned annotated frame directly (numpy array)
                     return result
 
@@ -499,6 +503,12 @@ def _load_channels_deepstream(all_channels: list):
 
         def _ds_frame_dispatcher(channel_id, frame):
             """Store latest frame for async processing (non-blocking for pipeline)."""
+            # Validate frame before queuing — reject corrupt GPU decode output
+            if frame is None or frame.ndim != 3 or frame.shape[2] not in (3, 4):
+                return
+            if frame.shape[0] < 32 or frame.shape[1] < 32 or not np.any(frame):
+                return
+
             q = _ds_frame_queues.get(channel_id)
             if q is None:
                 return
@@ -523,6 +533,12 @@ def _load_channels_deepstream(all_channels: list):
 
                 wrapper = shared_video_processors.get(channel_id)
                 if wrapper is None or not isinstance(wrapper, _DSChannelWrapper):
+                    continue
+
+                # Validate frame before module processing — prevents corrupt alert snapshots
+                if frame is None or frame.ndim != 3 or frame.shape[2] not in (3, 4):
+                    continue
+                if frame.shape[0] < 32 or frame.shape[1] < 32 or not np.any(frame):
                     continue
 
                 shared_detections = None

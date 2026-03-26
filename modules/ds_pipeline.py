@@ -234,6 +234,11 @@ class FrameExtractorHandler(BufferOperator):
                         logger.debug(f"Skipping frame with invalid shape {frame_np.shape} for {channel_id}")
                         continue
 
+                    # Reject zero-frames (GPU decode failures) and tiny frames
+                    if frame_np.shape[0] < 32 or frame_np.shape[1] < 32 or not np.any(frame_np):
+                        logger.debug(f"Skipping corrupt/zero frame for {channel_id}")
+                        continue
+
                     if frame_np.shape[2] == 4:
                         # RGBA → BGR
                         frame_np = frame_np[:, :, :3][:, :, ::-1].copy()
@@ -347,6 +352,11 @@ class FrameRetrieverHandler(BufferRetriever):
                     # Validate frame has correct dimensions
                     if frame_np.ndim != 3 or frame_np.shape[2] not in (3, 4):
                         logger.debug(f"Skipping frame with invalid shape {frame_np.shape} for {channel_id}")
+                        continue
+
+                    # Reject zero-frames (GPU decode failures) and tiny frames
+                    if frame_np.shape[0] < 32 or frame_np.shape[1] < 32 or not np.any(frame_np):
+                        logger.debug(f"Skipping corrupt/zero frame for {channel_id}")
                         continue
 
                     # RGB → BGR for OpenCV compatibility
@@ -710,7 +720,13 @@ class DeepStreamPipeline:
     def get_latest_frame(self, channel_id: str) -> Optional[np.ndarray]:
         """Get latest decoded frame for a channel (BGR numpy array)."""
         with self._frame_lock:
-            return self._latest_frames.get(channel_id)
+            frame = self._latest_frames.get(channel_id)
+            if frame is None:
+                return None
+            # Final safety check: reject structurally invalid frames
+            if frame.ndim != 3 or frame.shape[2] not in (3, 4) or frame.shape[0] < 32 or frame.shape[1] < 32:
+                return None
+            return frame
 
     def get_latest_detections(self, channel_id: str) -> list:
         """Get latest detection results for a channel."""
