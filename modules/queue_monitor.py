@@ -142,6 +142,7 @@ class QueueMonitor:
         # Counts
         self.queue_count = 0
         self.counter_count = 0
+        self.uniform_counter_count = 0  # Uniform-based counter count (supplements person detection)
 
         # Alert state
         self.last_alert_time = None
@@ -1068,22 +1069,25 @@ class QueueMonitor:
             # 1. Check if we have any detections classified as "counter" (even if not counted yet)
             counter_detections = len([t for t in self.person_tracking if t.get("area_type") == "counter" and t.get("in_roi")])
             # 2. Check if we have any detections in counter ROI from current frame
-            # (This catches cases where detection happens but tracking hasn't updated yet)
             current_counter_dets = getattr(self, '_last_counter_dets', [])
             current_counter_count = len(current_counter_dets)
+            # 3. Check uniform-based counter count (staff wearing uniforms detected at counter)
+            uniform_count = getattr(self, 'uniform_counter_count', 0)
             
-            # If we have counter detections but count is 0, it's likely a tracking/dwell time issue
-            if counter_detections > 0 or current_counter_count > 0:
-                # People detected but not counted - likely tracking/dwell time issue, not absence
-                logger.info(f"[{self.channel_id}] V3 check: {counter_detections} tracked + {current_counter_count} current detections in counter but count=0 (likely tracking issue, skipping alert)")
+            # If we have counter detections, uniform detections, or person tracking in counter,
+            # staff IS present - skip the alert (it's a detection/tracking inconsistency)
+            if counter_detections > 0 or current_counter_count > 0 or uniform_count > 0:
+                logger.info(
+                    f"[{self.channel_id}] V3 check suppressed: counter_detections={counter_detections}, "
+                    f"current_dets={current_counter_count}, uniform_count={uniform_count} "
+                    f"(staff present, skipping false alert)"
+                )
             else:
-                # No detections at all in counter area - this is a real absence
-                # Don't include counts in the message - they may be stale when displayed
-                # The current counts are shown separately in the display
+                # No detections at all in counter area (no persons, no uniforms) - real absence
                 violations.append(
                     "No staff at counter"
                 )
-                logger.info(f"[{self.channel_id}] V3 violation detected: queue={self.queue_count} > 0, counter={self.counter_count} < required={counter_required}, no counter detections found")
+                logger.info(f"[{self.channel_id}] V3 violation detected: queue={self.queue_count} > 0, counter={self.counter_count} < required={counter_required}, no counter/uniform detections found")
 
         # V4: Counter capacity exceeded
         if counter_capacity_max is not None and self.counter_count > counter_capacity_max:
@@ -1282,23 +1286,22 @@ class QueueMonitor:
         self.queue_count = self._update_person_tracking(queue_dets, "queue")
         self.counter_count = self._update_person_tracking(counter_dets, "counter")
         
-        # Second-level fallback: If counter count is still 0 after tracking, try uniform detection again
-        # This catches cases where person detection found people but they weren't counted (tracking/dwell time issue)
-        # This is especially useful for camera_2 where person detection sometimes fails
-        if (self.use_uniform_fallback 
-            and self.uniform_detector 
-            and self.counter_count == 0):
+        # Uniform-based counter detection: Always run when counter ROI is configured
+        # This supplements person detection - if uniforms are detected at counter, staff is present
+        # Fixes false "No staff at counter" alerts when person detection misses staff but uniform is visible
+        self.uniform_counter_count = 0
+        if self.use_uniform_fallback and self.uniform_detector:
             counter_roi = self.roi_cache.get("secondary")
             if counter_roi and counter_roi.get("polygon") is not None:
                 try:
+                    scale_x = w / 640.0
+                    scale_y = h / 640.0
                     # Run uniform detection (with caching for performance)
                     if (
                         self.uniform_detection_cache is None
                         or self.frame_count - self.uniform_cache_frame_count >= self.uniform_cache_interval
                     ):
                         infer_frame = cv2.resize(frame, (640, 640))
-                        self.scale_x = w / 640.0
-                        self.scale_y = h / 640.0
                         uniform_results = self.uniform_detector(
                             infer_frame,
                             imgsz=640,
@@ -1338,7 +1341,7 @@ class QueueMonitor:
                                 y2 *= scale_y
                                 bbox = [int(x1), int(y1), int(x2), int(y2)]
                                 center = [(x1 + x2) / 2, (y1 + y2) / 2]
-                                bottom_center = [center[0], y2]  # Bottom center point
+                                bottom_center = [center[0], y2]
                                 
                                 # Check if uniform is in counter ROI
                                 if self._point_in_polygon_optimized(
@@ -1354,17 +1357,17 @@ class QueueMonitor:
                                         "from_uniform": True
                                     })
                     
-                    # If we found uniforms in counter area, directly set counter count
-                    if uniform_dets_in_counter:
-                        logger.warning(
-                            f"[{self.channel_id}] 🔄 Second-level fallback: Found {len(uniform_dets_in_counter)} uniform(s) in counter area "
-                            f"after tracking returned 0. Setting counter_count directly."
+                    self.uniform_counter_count = len(uniform_dets_in_counter)
+                    
+                    # Use the higher of person-based count and uniform-based count
+                    if self.uniform_counter_count > self.counter_count:
+                        logger.info(
+                            f"[{self.channel_id}] 👔 Uniform detection found {self.uniform_counter_count} staff at counter "
+                            f"(person detection: {self.counter_count}). Using uniform count."
                         )
-                        # Directly set counter count based on uniform detections
-                        # This bypasses tracking/dwell time issues
-                        self.counter_count = len(uniform_dets_in_counter)
+                        self.counter_count = self.uniform_counter_count
                 except Exception as e:
-                    logger.warning(f"[{self.channel_id}] ⚠️ Second-level uniform fallback failed: {e}")
+                    logger.warning(f"[{self.channel_id}] ⚠️ Uniform counter detection failed: {e}")
         
         # Store current detections for alert checking
         self._last_counter_dets = counter_dets

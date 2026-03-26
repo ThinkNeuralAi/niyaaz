@@ -65,7 +65,7 @@ class GStreamerNVDECDecoder:
             # DeepStream 6.4 compatible pipeline
             # Using nvv4l2decoder instead of deprecated nvdec
             pipeline_str = (
-                f"rtspsrc location={self.rtsp_url} latency=0 ! "
+                f"rtspsrc location={self.rtsp_url} latency=2000 protocols=tcp ! "
                 "rtph264depay ! h264parse ! "
                 "nvv4l2decoder ! "  # NVDEC hardware decoder
                 f"nvvideoconvert ! "  # NVIDIA video converter (DeepStream 6.x)

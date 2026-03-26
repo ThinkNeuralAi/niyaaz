@@ -977,20 +977,8 @@ class DatabaseManager:
                 f"Table cleanliness violation saved: type={violation_type}, table={table_id}, channel={channel_id}"
             )
             
-            # Send Telegram notification (can be disabled via environment variable)
-            if not os.getenv("DISABLE_TABLE_SERVICE_ALERTS", "").lower() in ("true", "1", "yes"):
-                violation_msg = "Unclean table" if violation_type == 'unclean_table' else "Slow table reset"
-                store_name = self.get_store_name_for_channel(channel_id)
-                _send_telegram_alert(
-                    channel_id=channel_id,
-                    alert_type='table_cleanliness_violation',
-                    alert_message=f"Table {table_id}: {violation_msg}",
-                    snapshot_path=snapshot_path,
-                    alert_data={'table_id': table_id, 'violation_type': violation_type},
-                    store_name=store_name
-                )
-            else:
-                logger.debug(f"Table cleanliness violation alerts disabled via DISABLE_TABLE_SERVICE_ALERTS environment variable")
+            # Skip snapshot Telegram for table cleanliness - GIF will be sent by monitor when recording completes
+            logger.info(f"Table cleanliness violation saved for table {table_id} - Telegram alert will be sent with GIF when recording completes")
             
             return violation.id
 
@@ -1866,9 +1854,9 @@ class DatabaseManager:
             self.db.session.add(alert_gif)
             self.db.session.commit()
             
-            # Skip Telegram notification for crowd_alert
-            if alert_type == 'crowd_alert':
-                logger.debug(f"Telegram alert skipped for crowd_alert on {channel_id} (crowd detection Telegram alerts disabled)")
+            # Skip Telegram notification for certain alert types
+            if alert_type in ('table_cleanliness_alert', 'service_discipline_alert', 'cash_alert'):
+                logger.debug(f"Telegram alert skipped for {alert_type} on {channel_id} (handled by monitor module)")
             else:
                 # Send Telegram notification
                 try:
@@ -2396,16 +2384,8 @@ class DatabaseManager:
             
             logger.info(f"Cash snapshot saved to database: ID {snapshot.id}")
             
-            # Send Telegram notification
-            store_name = self.get_store_name_for_channel(channel_id)
-            _send_telegram_alert(
-                channel_id=channel_id,
-                alert_type='cash_alert',
-                alert_message=alert_message or f"Cash detected: {detection_count} instance(s)",
-                snapshot_path=snapshot_path,
-                alert_data=alert_data,
-                store_name=store_name
-            )
+            # Skip Telegram notification for cash draw monitoring
+            logger.debug(f"Telegram alert skipped for cash_alert on {channel_id}")
             
             return snapshot.id
             
@@ -3550,91 +3530,8 @@ class DatabaseManager:
             snapshot_info = f"snapshot_path={snapshot_path}" if snapshot_path else "snapshot_path=None (NO SNAPSHOT)"
             logger.info(f"✅ Table service violation saved: ID={violation_id}, Table {table_id} in channel {channel_id}, waiting time: {waiting_time_str}, order wait: {order_wait_str}, service wait: {service_wait_str}, {snapshot_info}")
             
-            # Send Telegram notification (can be disabled via environment variable)
-            # IMPORTANT: Only send Telegram alert if snapshot_path exists and file is valid
-            if not os.getenv("DISABLE_TABLE_SERVICE_ALERTS", "").lower() in ("true", "1", "yes"):
-                    # Extract violation_type from alert_data to create specific message
-                    violation_type = None
-                    if alert_data and isinstance(alert_data, dict):
-                        violation_type = alert_data.get("violation_type")
-                    
-                    # Create specific message based on violation type
-                    if violation_type == "order_wait":
-                        wait_min = (order_wait_time / 60) if order_wait_time else (waiting_time / 60 if waiting_time else 0)
-                        alert_message = f"Table {table_id}: Order wait time exceeded - {wait_min:.1f} min (customer waiting for order)"
-                    elif violation_type == "service_wait":
-                        wait_min = (service_wait_time / 60) if service_wait_time else (waiting_time / 60 if waiting_time else 0)
-                        alert_message = f"Table {table_id}: Service wait time exceeded - {wait_min:.1f} min (food not served after order)"
-                    else:
-                        # Fallback to generic message
-                        wait_min = waiting_time / 60 if waiting_time else 0
-                        alert_message = f"Table {table_id}: Service delay - {wait_min:.1f} min wait time"
-                    
-                    # Ensure alert_data includes violation_type for proper filtering in dashboard
-                    alert_data_for_telegram = {
-                        'table_id': table_id,
-                        'waiting_time': waiting_time,
-                        'order_wait_time': order_wait_time,
-                        'service_wait_time': service_wait_time
-                    }
-                    if violation_type:
-                        alert_data_for_telegram['violation_type'] = violation_type
-                    
-                    # Resolve snapshot path to absolute path for Telegram
-                    resolved_snapshot_path = None
-                    if snapshot_path:
-                        # Normalize path separators (handle Windows backslashes)
-                        normalized_path = snapshot_path.replace('\\', '/')
-                        
-                        # Try to resolve the path
-                        if os.path.isabs(normalized_path):
-                            resolved_snapshot_path = normalized_path
-                        else:
-                            # Try relative to static/ (most common case)
-                            static_path = os.path.join("static", normalized_path)
-                            if os.path.exists(static_path):
-                                resolved_snapshot_path = os.path.abspath(static_path)
-                                logger.info(f"✅ Resolved snapshot path: {snapshot_path} -> {resolved_snapshot_path}")
-                            elif os.path.exists(normalized_path):
-                                resolved_snapshot_path = os.path.abspath(normalized_path)
-                                logger.info(f"✅ Resolved snapshot path (direct): {snapshot_path} -> {resolved_snapshot_path}")
-                            else:
-                                # Try with service_discipline directory
-                                service_discipline_path = os.path.join("static", "service_discipline", os.path.basename(normalized_path))
-                                if os.path.exists(service_discipline_path):
-                                    resolved_snapshot_path = os.path.abspath(service_discipline_path)
-                                    logger.info(f"✅ Resolved snapshot path (by filename): {snapshot_path} -> {resolved_snapshot_path}")
-                                else:
-                                    logger.warning(f"❌ Snapshot path not found: {snapshot_path} (tried: {static_path}, {normalized_path}, {service_discipline_path})")
-                                    resolved_snapshot_path = None
-                    else:
-                        logger.warning(f"⚠️ Snapshot path is None for table {table_id} - no image will be sent to Telegram")
-                        resolved_snapshot_path = None
-                    
-                    # Only send Telegram notification if snapshot exists and is valid
-                    # For GIFs, the path might be a placeholder initially - check if it's a placeholder
-                    is_placeholder = snapshot_path and ('placeholder' in snapshot_path.lower() or snapshot_path.endswith('.gif') and not os.path.exists(os.path.join("static", snapshot_path)))
-                    
-                    if resolved_snapshot_path and os.path.exists(resolved_snapshot_path) and not is_placeholder:
-                        file_size_check = os.path.getsize(resolved_snapshot_path)
-                        if file_size_check > 0:
-                            store_name = self.get_store_name_for_channel(channel_id)
-                            _send_telegram_alert(
-                                channel_id=channel_id,
-                                alert_type='table_service_violation',
-                                alert_message=alert_message,
-                                snapshot_path=resolved_snapshot_path,
-                                alert_data=alert_data_for_telegram,
-                                store_name=store_name
-                            )
-                        else:
-                            logger.warning(f"⚠️ Snapshot file is empty (0 bytes) for table {table_id} - skipping Telegram notification")
-                    elif is_placeholder:
-                        logger.info(f"ℹ️ Snapshot path is a placeholder for table {table_id} - Telegram will be sent when GIF completes")
-                    else:
-                        logger.warning(f"⚠️ No valid snapshot available for table {table_id} - skipping Telegram notification (path: {snapshot_path})")
-            else:
-                logger.debug(f"Table service violation alerts disabled via DISABLE_TABLE_SERVICE_ALERTS environment variable")
+            # Skip snapshot Telegram for service discipline - GIF will be sent by monitor when recording completes
+            logger.info(f"Service discipline violation saved for table {table_id} - Telegram alert will be sent with GIF when recording completes")
             
             return violation.id
             

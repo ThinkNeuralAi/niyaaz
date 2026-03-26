@@ -604,9 +604,11 @@ class DeepStreamPipeline:
         lines.append('  source-bin: "nvurisrcbin"')
         lines.append("  properties:")
         lines.append("    rtsp-reconnect-interval: 5")
-        lines.append("    latency: 200")
+        lines.append("    latency: 2000")
         # Use TCP directly to avoid 5-second UDP timeout per camera
         lines.append("    select-rtp-protocol: 4")  # 4 = TCP
+        lines.append("    drop-on-latency: false")
+        lines.append("    udp-buffer-size: 2097152")  # 2MB buffer
 
         with open(path, "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -691,9 +693,11 @@ class DeepStreamPipeline:
         self._frame_callbacks.append(callback)
 
     def get_latest_frame(self, channel_id: str) -> Optional[np.ndarray]:
-        """Get latest decoded frame for a channel (BGR numpy array)."""
+        """Get latest decoded frame for a channel (BGR numpy array).
+        Returns a copy to prevent race conditions with pipeline thread."""
         with self._frame_lock:
-            return self._latest_frames.get(channel_id)
+            frame = self._latest_frames.get(channel_id)
+            return frame.copy() if frame is not None else None
 
     def get_latest_detections(self, channel_id: str) -> list:
         """Get latest detection results for a channel."""

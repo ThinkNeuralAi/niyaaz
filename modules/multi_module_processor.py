@@ -134,12 +134,9 @@ class MultiModuleVideoProcessor:
                     # RTSP/network stream - OPTIMIZED for low latency
                     self.cap = cv2.VideoCapture(encoded_stream, cv2.CAP_FFMPEG)
                     
-                    # Aggressive optimization for real-time RTSP
-                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffering
+                    # Buffer for reliable RTSP decode (prevents keyframe loss artifacts)
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
                     self.cap.set(cv2.CAP_PROP_FPS, 15)  # Limit to 15 FPS for RTSP (reduces load)
-                    
-                    # Set transport protocol to TCP for reliability (optional)
-                    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('H','2','6','4'))
                     
                     if encoded_stream != self.video_source:
                         logger.info(f"Encoded RTSP URL for capture: {encoded_stream}")
@@ -164,11 +161,8 @@ class MultiModuleVideoProcessor:
             
             # Additional RTSP optimization settings
             if isinstance(self.video_source, str) and self.video_source.startswith(('rtsp://', 'rtmp://')):
-                # RTSP-specific optimizations
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-                # Try to set a reasonable timeout
-                self.cap.set(cv2.CAP_PROP_POS_MSEC, 1000)
+                # RTSP-specific optimizations — keep buffer consistent
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
             
             # Get video properties
             self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))

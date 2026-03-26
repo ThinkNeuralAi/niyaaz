@@ -5,7 +5,7 @@ Main Flask Application
 import os
 
 # Set RTSP timeout to 5 seconds to prevent blocking on unreachable cameras
-os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'timeout;5000000|rtsp_transport;tcp')
+os.environ.setdefault('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'timeout;5000000|rtsp_transport;tcp|buffer_size;2097152|max_delay;500000|stimeout;5000000')
 
 # -------------------------------------------------------------------
 # CRITICAL: Pre-load TRT engines BEFORE any GStreamer/pyservicemaker import.
@@ -346,7 +346,8 @@ class _DSChannelWrapper:
     @property
     def latest_raw_frame(self):
         """Proxy to DS pipeline's latest frame so broadcast health checks work."""
-        return self._pipe.get_latest_frame(self.channel_id)
+        frame = self._pipe.get_latest_frame(self.channel_id)
+        return frame
 
     @property
     def latest_annotated_frame(self):
@@ -502,13 +503,16 @@ def _load_channels_deepstream(all_channels: list):
             q = _ds_frame_queues.get(channel_id)
             if q is None:
                 return
+            # Copy frame so module workers get a stable snapshot
+            # (the pipeline thread may overwrite the original on next buffer)
+            frame_copy = frame.copy() if frame is not None else None
             # Replace old frame with new (non-blocking)
             try:
                 q.get_nowait()
             except _queue.Empty:
                 pass
             try:
-                q.put_nowait(frame)
+                q.put_nowait(frame_copy)
             except _queue.Full:
                 pass
 

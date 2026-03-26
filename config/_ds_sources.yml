@@ -1,82 +1,105 @@
 source-list:
-- uri: "rtsp://admin:admin@132.154.208.136:555/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:571/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_0
   sensor-name: camera_0
-- uri: "rtsp://admin:admin@132.154.208.136:571/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:573/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_1
   sensor-name: camera_1
-- uri: "rtsp://admin:admin@132.154.208.136:557/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:555/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_2
   sensor-name: camera_2
-- uri: "rtsp://admin:admin@132.154.208.136:558/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:557/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_3
   sensor-name: camera_3
-- uri: "rtsp://admin:admin@132.154.208.136:559/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:558/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_4
   sensor-name: camera_4
-- uri: "rtsp://admin:admin@132.154.208.136:561/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:559/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_5
   sensor-name: camera_5
-- uri: "rtsp://admin:admin@132.154.208.136:562/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:561/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_6
   sensor-name: camera_6
-- uri: "rtsp://admin:admin@132.154.208.136:563/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:562/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_7
   sensor-name: camera_7
-- uri: "rtsp://admin:admin@132.154.208.136:564/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:563/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_8
   sensor-name: camera_8
-- uri: "rtsp://admin:admin@132.154.208.136:565/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:564/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_9
   sensor-name: camera_9
-- uri: "rtsp://admin:admin@132.154.208.136:567/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://admin:admin@132.154.208.136:565/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_10
   sensor-name: camera_10
 - uri: "rtsp://admin:admin@132.154.208.136:569/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_11
   sensor-name: camera_11
-- uri: "rtsp://admin:admin@132.154.208.136:572/cam/realmonitor?channel=1&subtype=1"
+- uri: "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=2&stream=1.sdp?"
   sensor-id: stream_12
   sensor-name: camera_12
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=2&subtype=0"
+- uri: "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=6&stream=1.sdp?"
   sensor-id: stream_13
   sensor-name: camera_13
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=3&subtype=0"
+- uri: "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=7&stream=1.sdp?"
   sensor-id: stream_14
   sensor-name: camera_14
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=6&subtype=0"
+- uri: "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=11&stream=1.sdp?"
   sensor-id: stream_15
   sensor-name: camera_15
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=8&subtype=0"
+- uri: "rtsp://admin:admin@132.154.208.136:572/cam/realmonitor?channel=1&subtype=1"
   sensor-id: stream_16
   sensor-name: camera_16
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=9&subtype=0"
+- uri: "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=12&stream=1.sdp?"
   sensor-id: stream_17
   sensor-name: camera_17
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=13&subtype=0"
+- uri: "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=5&stream=1.sdp?"
   sensor-id: stream_18
   sensor-name: camera_18
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=15&subtype=0"
+- uri: "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=10&stream=1.sdp?"
   sensor-id: stream_19
   sensor-name: camera_19
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=16&subtype=0"
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=6&subtype=1"
   sensor-id: stream_20
   sensor-name: camera_20
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:82/cam/realmonitor?channel=1&subtype=0"
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=2&subtype=1"
   sensor-id: stream_21
   sensor-name: camera_21
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:82/cam/realmonitor?channel=4&subtype=0"
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=13&subtype=1"
   sensor-id: stream_22
   sensor-name: camera_22
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:82/cam/realmonitor?channel=5&subtype=0"
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=9&subtype=1"
   sensor-id: stream_23
   sensor-name: camera_23
-- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:82/cam/realmonitor?channel=6&subtype=0"
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=3&subtype=1"
   sensor-id: stream_24
   sensor-name: camera_24
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=16&subtype=1"
+  sensor-id: stream_25
+  sensor-name: camera_25
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:82/cam/realmonitor?channel=1&subtype=1"
+  sensor-id: stream_26
+  sensor-name: camera_26
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=8&subtype=1"
+  sensor-id: stream_27
+  sensor-name: camera_27
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:81/cam/realmonitor?channel=15&subtype=1"
+  sensor-id: stream_28
+  sensor-name: camera_28
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:82/cam/realmonitor?channel=4&subtype=1"
+  sensor-id: stream_29
+  sensor-name: camera_29
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:82/cam/realmonitor?channel=5&subtype=1"
+  sensor-id: stream_30
+  sensor-name: camera_30
+- uri: "rtsp://admin:NIVPL%2A%405566@115.247.155.102:82/cam/realmonitor?channel=6&subtype=1"
+  sensor-id: stream_31
+  sensor-name: camera_31
 source-config:
   source-bin: "nvurisrcbin"
   properties:
     rtsp-reconnect-interval: 5
-    latency: 200
+    latency: 2000
     select-rtp-protocol: 4
+    drop-on-latency: false
+    udp-buffer-size: 2097152

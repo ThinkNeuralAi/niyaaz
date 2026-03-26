@@ -248,7 +248,15 @@ class ServiceDisciplineMonitor:
                 if settings:
                     self.settings.update(settings)
             
-            logger.info(f"[{self.channel_id}] Service discipline config loaded: {len(self.table_rois)} tables configured")
+            # Ensure order_wait_threshold is synced with wait_time_threshold (legacy compat)
+            if 'wait_time_threshold' in self.settings and self.settings.get('order_wait_threshold', 300.0) == 300.0:
+                self.settings['order_wait_threshold'] = self.settings['wait_time_threshold']
+            
+            logger.info(
+                f"[{self.channel_id}] Service discipline config loaded: {len(self.table_rois)} tables, "
+                f"order_wait_threshold={self.settings.get('order_wait_threshold')}s, "
+                f"service_wait_threshold={self.settings.get('service_wait_threshold')}s"
+            )
         except Exception as e:
             logger.error(f"Failed to load service discipline configuration: {e}", exc_info=True)
     
@@ -364,7 +372,10 @@ class ServiceDisciplineMonitor:
                     
                     if settings_config:
                         self.settings.update(settings_config)
-                        logger.info(f"[{self.channel_id}] Loaded settings from channels.json")
+                        # Map legacy wait_time_threshold to order_wait_threshold
+                        if 'wait_time_threshold' in settings_config and 'order_wait_threshold' not in settings_config:
+                            self.settings['order_wait_threshold'] = settings_config['wait_time_threshold']
+                        logger.info(f"[{self.channel_id}] Loaded settings from channels.json: order_wait_threshold={self.settings.get('order_wait_threshold')}s, service_wait_threshold={self.settings.get('service_wait_threshold')}s")
                         return
         except Exception as e:
             logger.error(f"Failed to load settings from channels.json: {e}")
@@ -725,11 +736,12 @@ class ServiceDisciplineMonitor:
         if len(tracking["server_tracks"]) < before_server_count:
             logger.debug(f"[{self.channel_id}] Table {table_id}: Removed {before_server_count - len(tracking['server_tracks'])} stale server tracks")
 
-        self._check_violations(table_id, tracking, current_time, frame)
+        self._check_violations_legacy(table_id, tracking, current_time, frame)
 
-    def _check_violations(self, table_id, tracking, current_time, frame=None):
+    def _check_violations_legacy(self, table_id, tracking, current_time, frame=None):
+        """Legacy violation check for old tracking path (kept for backward compatibility)"""
         now_ts = current_time.timestamp()
-        wait_threshold = self.settings["wait_time_threshold"]
+        wait_threshold = self.settings.get("order_wait_threshold", self.settings.get("wait_time_threshold", 300.0))
         cooldown = self.settings["alert_cooldown"]
 
         for cust in tracking["customer_tracks"]:
@@ -975,7 +987,12 @@ class ServiceDisciplineMonitor:
                 tracks = []
             
             # Process tracked persons and classify them
-            self._process_tracked_persons(tracks, person_detections_list, uniform_detections_list, current_time, frame)
+            if tracks:
+                # DeepSORT tracking available - use event-based tracking
+                self._process_tracked_persons(tracks, person_detections_list, uniform_detections_list, current_time, frame)
+            else:
+                # Fallback: simple center-based tracking when DeepSORT is unavailable
+                self._process_simple_tracking(person_detections_list, uniform_detections_list, current_time, frame)
             
             # Detect interactions and update events
             self._detect_interactions(current_time)
@@ -1235,6 +1252,108 @@ class ServiceDisciplineMonitor:
                     self.person_tracks[track_id]["T_seated"] = now_ts
                     logger.info(f"[{self.channel_id}] 🪑 T_seated: Customer track {track_id} at table {table_id}")
     
+    def _process_simple_tracking(self, person_detections, uniform_detections, current_time, frame):
+        """Simple center-based tracking fallback when DeepSORT is unavailable.
+        Matches detections to existing tracks by proximity, creates new tracks for unmatched detections."""
+        h, w = frame.shape[:2]
+        now_ts = current_time.timestamp()
+        match_distance = 100  # pixels for matching
+        
+        if not hasattr(self, '_simple_track_counter'):
+            self._simple_track_counter = 0
+        
+        # Build uniform centers set for quick lookup
+        uniform_centers = []
+        for uni_det in uniform_detections:
+            uniform_centers.append(uni_det["center"])
+        
+        # Mark all existing tracks as unmatched
+        for track_id in self.person_tracks:
+            self.person_tracks[track_id]["_matched"] = False
+        
+        # Process each person detection
+        for det in person_detections:
+            bbox = det.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+            x1, y1, x2, y2 = bbox
+            center = [(x1 + x2) / 2, (y1 + y2) / 2]
+            
+            # Check if this person has a uniform nearby (waiter)
+            is_waiter = False
+            for uni_center in uniform_centers:
+                distance = math.hypot(center[0] - uni_center[0], center[1] - uni_center[1])
+                if distance < self.waiter_uniform_distance_threshold:
+                    is_waiter = True
+                    break
+            
+            # Determine which table this person is in
+            table_id = None
+            point_norm = (center[0] / w, center[1] / h)
+            for tid, roi_info in self.table_rois.items():
+                polygon = roi_info.get("polygon")
+                bbox_norm = roi_info.get("bbox")
+                if polygon and bbox_norm and self._point_in_polygon(point_norm, polygon, bbox_norm):
+                    table_id = tid
+                    break
+            
+            if table_id is None:
+                continue  # Person not in any table ROI
+            
+            self._ensure_table_tracking(table_id)
+            person_type = "waiter" if is_waiter else "customer"
+            
+            # Try to match with existing track
+            best_match_id = None
+            best_distance = float('inf')
+            track_list_key = "waiter_track_ids" if is_waiter else "customer_track_ids"
+            
+            for track_id in self.table_tracking[table_id].get(track_list_key, []):
+                if track_id not in self.person_tracks:
+                    continue
+                track = self.person_tracks[track_id]
+                if track.get("_matched"):
+                    continue
+                dist = math.hypot(center[0] - track["center"][0], center[1] - track["center"][1])
+                if dist < match_distance and dist < best_distance:
+                    best_match_id = track_id
+                    best_distance = dist
+            
+            if best_match_id is not None:
+                # Update existing track
+                self.person_tracks[best_match_id]["center"] = center
+                self.person_tracks[best_match_id]["bbox"] = [int(x1), int(y1), int(x2), int(y2)]
+                self.person_tracks[best_match_id]["last_seen"] = now_ts
+                self.person_tracks[best_match_id]["_matched"] = True
+            else:
+                # Create new track
+                self._simple_track_counter += 1
+                track_id = self._simple_track_counter
+                self.person_tracks[track_id] = {
+                    "type": person_type,
+                    "table_id": table_id,
+                    "center": center,
+                    "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                    "T_seated": now_ts if person_type == "customer" else None,
+                    "T_order_start": None,
+                    "T_order_end": None,
+                    "T_food_served": None,
+                    "last_seen": now_ts,
+                    "order_wait_time": None,
+                    "service_wait_time": None,
+                    "interaction_history": [],
+                    "last_snapshot_time": None,
+                    "waiter_at_table": False,
+                    "_matched": True
+                }
+                
+                if person_type == "customer":
+                    self.table_tracking[table_id]["customer_track_ids"].append(track_id)
+                    logger.info(f"[{self.channel_id}] 🪑 T_seated: Customer track {track_id} at table {table_id} (simple tracking)")
+                else:
+                    self.table_tracking[table_id]["waiter_track_ids"].append(track_id)
+                    logger.info(f"[{self.channel_id}] 👔 Waiter track {track_id} at table {table_id} (simple tracking)")
+
     def _detect_interactions(self, current_time):
         """Detect T_order_start, T_order_end, and T_food_served events based on waiter-customer proximity"""
         now_ts = current_time.timestamp()
@@ -1411,16 +1530,19 @@ class ServiceDisciplineMonitor:
                                     order_wait = (now_ts - t_seated) if t_order is None else (t_order - t_seated)
                                     logger.info(
                                         f"[{self.channel_id}]   Customer {customer_id}: T_seated={t_seated:.1f}, "
-                                        f"T_order_start={t_order:.1f if t_order else 'None'}, "
-                                        f"T_food_served={t_food:.1f if t_food else 'None'}, "
+                                        f"T_order_start={f'{t_order:.1f}' if t_order else 'None'}, "
+                                        f"T_food_served={f'{t_food:.1f}' if t_food else 'None'}, "
                                         f"order_wait={order_wait:.1f}s"
                                     )
         
         for table_id, table_info in self.table_tracking.items():
             customer_ids = table_info.get("customer_track_ids", [])
             last_alert_time = table_info.get("last_alert_time")
+            table_alerted_this_cycle = False  # Prevent duplicate alerts for same table in same frame
             
             for customer_id in customer_ids:
+                if table_alerted_this_cycle:
+                    break  # Only one alert per table per frame
                 if customer_id not in self.person_tracks:
                     continue
                 customer = self.person_tracks[customer_id]
@@ -1469,6 +1591,7 @@ class ServiceDisciplineMonitor:
                                 table_id, customer_id, "order_wait", order_wait, current_time, frame
                             )
                             table_info["last_alert_time"] = now_ts
+                            table_alerted_this_cycle = True
                             # Update last snapshot time to prevent duplicate
                             customer["last_snapshot_time"] = now_ts
                         else:
@@ -1519,6 +1642,7 @@ class ServiceDisciplineMonitor:
                                 table_id, customer_id, "service_wait", service_wait, current_time, frame
                             )
                             table_info["last_alert_time"] = now_ts
+                            table_alerted_this_cycle = True
                             # Update last snapshot time to prevent duplicate
                             customer["last_snapshot_time"] = now_ts
                         else:
@@ -1696,11 +1820,11 @@ class ServiceDisciplineMonitor:
                 # Also log to general alerts table for consistency with other modules
                 # Determine the correct threshold based on violation type
                 if violation_type == "order_wait":
-                    threshold = self.settings.get("order_wait_threshold", 120.0)
+                    threshold = self.settings.get("order_wait_threshold", 300.0)
                 elif violation_type == "service_wait":
                     threshold = self.settings.get("service_wait_threshold", 300.0)
                 else:
-                    threshold = self.settings.get("wait_time_threshold", 120.0)
+                    threshold = self.settings.get("wait_time_threshold", 300.0)
                 
                 alert_message = f"Service discipline violation: Table {table_id} {violation_type} = {wait_time:.1f}s (threshold: {threshold}s)"
                 
@@ -2372,5 +2496,4 @@ class ServiceDisciplineMonitor:
             "total_alerts": self.total_alerts,
             "tables_configured": len(self.table_rois)
         }
-
 
