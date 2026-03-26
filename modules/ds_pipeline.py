@@ -630,7 +630,15 @@ class DeepStreamPipeline:
         lines.append('  source-bin: "nvurisrcbin"')
         lines.append("  properties:")
         lines.append("    rtsp-reconnect-interval: 5")
-        lines.append("    latency: 500")  # 500ms jitterbuffer to handle RTSP network jitter
+        lines.append("    latency: 500")  # 500ms jitterbuffer for RTSP network jitter
+        # Enlarge NVDEC decode surface pool — prevents buffer reuse while reading.
+        # Default is 1 which is too few with 28+ cameras; decoded surface gets
+        # recycled before .cpu().numpy().copy() finishes → ghosting/tearing.
+        lines.append("    num-extra-surfaces: 4")
+        # Drop frames under load rather than accumulating stale buffers
+        lines.append("    drop-frame-interval: 0")
+        # Use device memory for decode surfaces (faster, avoids host staging)
+        lines.append("    cudadec-memtype: 0")
         # Use TCP directly to avoid 5-second UDP timeout per camera
         lines.append("    select-rtp-protocol: 4")  # 4 = TCP
 
