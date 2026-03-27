@@ -302,8 +302,7 @@ class _DSChannelWrapper:
         """Return the latest decoded frame for this channel.
         
         Uses clean OpenCV-decoded frame from the pipeline.
-        Module-annotated frames (rendered on DLPack-extracted GPU frames)
-        are skipped to avoid ghosting artifacts.
+        Module annotations are drawn on clean frames (not DLPack frames).
         """
         frame = self._pipe.get_latest_frame(self.channel_id)
         if frame is None:
@@ -313,9 +312,18 @@ class _DSChannelWrapper:
         if frame.ndim != 3 or frame.shape[2] not in (3, 4) or frame.shape[0] < 32 or frame.shape[1] < 32:
             return None
 
-        # Always return the clean base frame — module-annotated frames
-        # are built from DLPack-extracted GPU data which has ghosting.
-        # Module results are still available via get_module_result() API.
+        # If a specific module has an annotated frame, return it
+        # (annotations are now drawn on clean OpenCV frames in the worker)
+        if module_name and module_name in self.modules:
+            result = self.module_results.get(module_name)
+            if result is not None:
+                if isinstance(result, dict) and 'frame' in result:
+                    annotated = result.get('frame')
+                    if annotated is not None and hasattr(annotated, 'ndim') and annotated.ndim == 3:
+                        return annotated
+                elif isinstance(result, np.ndarray) and result.ndim == 3:
+                    return result
+
         return frame
 
     def get_module_result(self, module_name):
@@ -521,7 +529,7 @@ def _load_channels_deepstream(all_channels: list):
             import time as _time
             while True:
                 try:
-                    frame = q.get(timeout=5.0)
+                    _ = q.get(timeout=5.0)  # DLPack frame (used as trigger only)
                 except _queue.Empty:
                     continue
 
@@ -529,7 +537,10 @@ def _load_channels_deepstream(all_channels: list):
                 if wrapper is None or not isinstance(wrapper, _DSChannelWrapper):
                     continue
 
-                # Validate frame before module processing — prevents corrupt alert snapshots
+                # Use clean OpenCV frame instead of ghosted DLPack frame
+                frame = ds_pipeline_instance.get_latest_frame(channel_id)
+
+                # Validate frame before module processing
                 if frame is None or frame.ndim != 3 or frame.shape[2] not in (3, 4):
                     continue
                 if frame.shape[0] < 32 or frame.shape[1] < 32:
