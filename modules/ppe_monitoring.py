@@ -424,20 +424,8 @@ class PPEMonitoring:
                         except Exception as e:
                             logger.error(f"Database logging error for PPE alert: {e}")
                     
-                    # Send Telegram alert with full frame snapshot
-                    try:
-                        if snapshot_path:
-                            from modules.database import _send_telegram_alert
-                            _send_telegram_alert(
-                                channel_id=self.channel_id,
-                                alert_type='ppe_alert',
-                                alert_message=alert_message,
-                                snapshot_path=snapshot_path,
-                                alert_data={'violations': violations}
-                            )
-                            logger.info(f"✅ Telegram alert sent for PPE violation: {violation_msg}")
-                    except Exception as e:
-                        logger.error(f"Failed to send Telegram alert for PPE violation: {e}", exc_info=True)
+                    # Telegram alert is already sent by add_ppe_alert() method in database
+                    # No need to send it here to avoid duplicate messages
                     
                     # Emit socket event
                     self.socketio.emit('ppe_alert', alert_info)

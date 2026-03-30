@@ -91,20 +91,33 @@ class QueueMonitor:
         self.detector = YOLODetector(
             model_path="models/yolo11n.pt",
             # model_path="models/best.pt",
-            confidence_threshold=0.5,
+            confidence_threshold=0.2,
             img_size=640,
             person_class_id=0,
         )
         
         # --- Uniform detector (fallback for counter area) ---
-        # Use best.pt to detect uniforms when person detection fails
-        # This helps in cases where person detection misses staff but uniform detection works
+        # Use best.pt to detect uniforms, counter_person, and other counter staff indicators
+        # This helps in cases where person detection fails but uniform/counter_person detection works
         try:
             from .model_manager import get_shared_model
             self.uniform_detector = get_shared_model("models/best.pt", device='auto')
             self.use_uniform_fallback = True
-            self.uniform_classes = {"Uniform_black", "Uniform_grey", "Uniform_cream", "Uniform_blue"}
+            # Classes from best.pt that indicate counter staff:
+            # - Uniform classes: Uniform_black (13), Uniform_cream (14), Uniform_grey (15), Uniform_blue (19), Uniform_white (20), Uniform_brown (21)
+            # - Counter_person (18): Specific counter staff class
+            self.uniform_classes = {
+                "Uniform_black", "Uniform_grey", "Uniform_cream", "Uniform_blue", 
+                "Uniform_white", "Uniform_brown", "Counter_person"
+            }
+            # Map class names to their IDs from best.pt for reference
+            self.best_pt_class_ids = {
+                "Uniform_black": 13, "Uniform_cream": 14, "Uniform_grey": 15, 
+                "Uniform_blue": 19, "Uniform_white": 20, "Uniform_brown": 21, 
+                "Counter_person": 18
+            }
             logger.info(f"[{self.channel_id}] ✅ Uniform detector initialized for counter area fallback")
+            logger.info(f"[{self.channel_id}]    Detecting: {', '.join(sorted(self.uniform_classes))}")
         except Exception as e:
             logger.warning(f"[{self.channel_id}] ⚠️ Failed to initialize uniform detector fallback: {e}")
             self.uniform_detector = None
@@ -1206,6 +1219,9 @@ class QueueMonitor:
                     
                     # Extract uniform detections
                     uniform_dets = []
+                    counter_person_count = 0
+                    uniform_breakdown = {}
+                    
                     if uniform_results and len(uniform_results) > 0:
                         boxes = uniform_results[0].boxes
                         class_names = uniform_results[0].names
@@ -1214,7 +1230,7 @@ class QueueMonitor:
                             class_name = class_names[class_id]
                             conf = float(box.conf[0])
                             
-                            # Only consider uniform classes
+                            # Only consider uniform classes (including Counter_person from best.pt)
                             if class_name in self.uniform_classes:
                                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                                 bbox = [int(x1), int(y1), int(x2), int(y2)]
@@ -1234,10 +1250,23 @@ class QueueMonitor:
                                         "class_name": class_name,
                                         "from_uniform": True  # Mark as uniform detection
                                     })
+                                    
+                                    # Track Counter_person specifically
+                                    if class_name == "Counter_person":
+                                        counter_person_count += 1
+                                    
+                                    # Track class breakdown
+                                    if class_name not in uniform_breakdown:
+                                        uniform_breakdown[class_name] = 0
+                                    uniform_breakdown[class_name] += 1
                     
                     # If we found uniforms in counter area, add them as counter detections
                     if uniform_dets:
-                        logger.info(f"[{self.channel_id}] 🔄 Fallback: Found {len(uniform_dets)} uniform(s) in counter area (person detection missed them)")
+                        breakdown_str = ", ".join([f"{k}={v}" for k, v in sorted(uniform_breakdown.items())])
+                        logger.info(f"[{self.channel_id}] 🔄 Fallback: Found {len(uniform_dets)} staff members in counter area")
+                        logger.info(f"[{self.channel_id}]    Breakdown: {breakdown_str}")
+                        if counter_person_count > 0:
+                            logger.info(f"[{self.channel_id}]    📍 Counter_person class detected: {counter_person_count} instance(s) from best.pt")
                         counter_dets.extend(uniform_dets)
                 except Exception as e:
                     logger.warning(f"[{self.channel_id}] ⚠️ Uniform fallback detection failed: {e}")
@@ -1293,6 +1322,9 @@ class QueueMonitor:
                     
                     # Extract uniform detections in counter ROI
                     uniform_dets_in_counter = []
+                    counter_person_count_fallback = 0
+                    uniform_breakdown_fallback = {}
+                    
                     if uniform_results and len(uniform_results) > 0:
                         boxes = uniform_results[0].boxes
                         class_names = uniform_results[0].names
@@ -1301,7 +1333,7 @@ class QueueMonitor:
                             class_name = class_names[class_id]
                             conf = float(box.conf[0])
                             
-                            # Only consider uniform classes
+                            # Only consider uniform classes (including Counter_person from best.pt)
                             if class_name in self.uniform_classes:
                                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                                 bbox = [int(x1), int(y1), int(x2), int(y2)]
@@ -1321,13 +1353,26 @@ class QueueMonitor:
                                         "class_name": class_name,
                                         "from_uniform": True
                                     })
+                                    
+                                    # Track Counter_person specifically
+                                    if class_name == "Counter_person":
+                                        counter_person_count_fallback += 1
+                                    
+                                    # Track class breakdown
+                                    if class_name not in uniform_breakdown_fallback:
+                                        uniform_breakdown_fallback[class_name] = 0
+                                    uniform_breakdown_fallback[class_name] += 1
                     
                     # If we found uniforms in counter area, directly set counter count
                     if uniform_dets_in_counter:
+                        breakdown_str = ", ".join([f"{k}={v}" for k, v in sorted(uniform_breakdown_fallback.items())])
                         logger.warning(
-                            f"[{self.channel_id}] 🔄 Second-level fallback: Found {len(uniform_dets_in_counter)} uniform(s) in counter area "
+                            f"[{self.channel_id}] 🔄 Second-level fallback: Found {len(uniform_dets_in_counter)} staff members in counter area "
                             f"after tracking returned 0. Setting counter_count directly."
                         )
+                        logger.warning(f"[{self.channel_id}]    Breakdown: {breakdown_str}")
+                        if counter_person_count_fallback > 0:
+                            logger.warning(f"[{self.channel_id}]    📍 Counter_person class: {counter_person_count_fallback} instance(s) from best.pt")
                         # Directly set counter count based on uniform detections
                         # This bypasses tracking/dwell time issues
                         self.counter_count = len(uniform_dets_in_counter)

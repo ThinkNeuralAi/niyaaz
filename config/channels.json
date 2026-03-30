@@ -934,7 +934,7 @@
             "settings": {
               "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
-              "conf_threshold": 0.5
+              "conf_threshold": 0.4
             }
           }
         },
@@ -997,7 +997,7 @@
             "settings": {
               "alert_cooldown": 180.0,
               "violation_duration_threshold": 2.0,
-              "conf_threshold": 0.5
+              "conf_threshold": 0.4
             }
           }
         },
@@ -1121,7 +1121,7 @@
       "channel_id": "camera_13",
       "channel_name": "Store Area",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:568/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@132.154.208.136:573/cam/realmonitor?channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -1819,7 +1819,7 @@
             "settings": {
               "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
-              "conf_threshold": 0.5
+              "conf_threshold": 0.4
             }
           }
         },
@@ -2117,7 +2117,7 @@
             "settings": {
               "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
-              "conf_threshold": 0.5
+              "conf_threshold": 0.4
             }
           }
         },
@@ -2179,7 +2179,7 @@
             "settings": {
               "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
-              "conf_threshold": 0.5
+              "conf_threshold": 0.4
             }
           }
         },
@@ -2241,7 +2241,7 @@
             "settings": {
               "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
-              "conf_threshold": 0.5
+              "conf_threshold": 0.4
             }
           }
         },
