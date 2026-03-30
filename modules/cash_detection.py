@@ -495,6 +495,22 @@ class CashDetection:
         logger.info(f"[{self.channel_id}] ✅ GIF recording started, _pending_alert_info set: message='{alert_message}', timestamp='{dt.isoformat()}'")
         logger.info(f"[{self.channel_id}] 📊 GIF recorder state: is_recording_alert={self.gif_recorder.is_recording_alert}")
         
+        # Check if store is in operation hours before saving to database
+        store_in_operation = True
+        store_id = None
+        if self.db_manager:
+            try:
+                # Get store_id from channel_id via RTSPLink
+                rtsp_link = self.db_manager.get_rtsp_link(self.channel_id)
+                if rtsp_link:
+                    store_id = rtsp_link.get('store_id')
+                    store_in_operation = self.db_manager.is_store_in_operation(store_id)
+                    if not store_in_operation:
+                        logger.info(f"[{self.channel_id}] Store {store_id} is not in operation hours - suppressing cash detection alert")
+                        return
+            except Exception as e:
+                logger.debug(f"[{self.channel_id}] Could not check operation hours: {e}")
+        
         # Save to database immediately (with placeholder snapshot_path - will be updated when GIF completes)
         if self.db_manager and self.app:
             try:

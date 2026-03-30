@@ -789,6 +789,21 @@ class ServiceDisciplineMonitor:
                     )
 
     def _trigger_violation_alert(self, table_id, customer_track, waiting_time, current_time, frame=None):
+        # Check if store is in operation hours before saving to database
+        store_in_operation = True
+        store_id = None
+        if self.db_manager:
+            try:
+                # Extract store_id from channel metadata
+                if hasattr(self, 'store_id') and self.store_id:
+                    store_id = self.store_id
+                store_in_operation = self.db_manager.is_store_in_operation(store_id) if store_id else True
+                if not store_in_operation:
+                    logger.info(f"[{self.channel_id}] Store {store_id} not in operation - suppressing service discipline alert")
+                    return
+            except Exception as e:
+                logger.debug(f"Could not check operation hours: {e}")
+        
         logger.warning(
             f"[{self.channel_id}] Service discipline violation: Table {table_id} "
             f"waiting {waiting_time:.1f}s (threshold {self.settings['wait_time_threshold']}s)"

@@ -569,6 +569,22 @@ class DressCodeMonitoring:
             
             logger.info(f"[{self.channel_id}] Snapshot file written: {filepath} (exists: {filepath.exists()})")
             
+            # Check if store is in operation hours before saving to database
+            store_in_operation = True
+            store_id = None
+            if self.db_manager:
+                try:
+                    # Get store_id from channel_id via RTSPLink
+                    rtsp_link = self.db_manager.get_rtsp_link(self.channel_id)
+                    if rtsp_link:
+                        store_id = rtsp_link.get('store_id')
+                        store_in_operation = self.db_manager.is_store_in_operation(store_id)
+                        if not store_in_operation:
+                            logger.info(f"[{self.channel_id}] Store {store_id} is not in operation hours - suppressing dress code alert")
+                            return None
+                except Exception as e:
+                    logger.debug(f"[{self.channel_id}] Could not check operation hours: {e}")
+            
             # Store in database - always use app context
             if self.db_manager and self.app:
                 try:

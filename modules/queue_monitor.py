@@ -103,7 +103,7 @@ class QueueMonitor:
             from .model_manager import get_shared_model
             self.uniform_detector = get_shared_model("models/best.engine", device='auto')
             self.use_uniform_fallback = True
-            self.uniform_classes = {"Uniform_black", "Uniform_grey", "Uniform_cream", "Uniform_blue"}
+            self.uniform_classes = {"Uniform_black","Uniform_brown", "Uniform_grey", "Uniform_cream", "Uniform_blue"}
             logger.info(f"[{self.channel_id}] ✅ Uniform detector initialized for counter area fallback")
         except Exception as e:
             logger.warning(f"[{self.channel_id}] ⚠️ Failed to initialize uniform detector fallback: {e}")

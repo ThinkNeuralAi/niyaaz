@@ -291,6 +291,21 @@ class PersonSmokingDetection:
             detections: List of detection dictionaries
             timestamp: Current timestamp
         """
+        # Check if store is in operation hours before saving to database
+        store_in_operation = True
+        store_id = None
+        if self.db_manager:
+            try:
+                # Extract store_id from channel metadata
+                if hasattr(self, 'store_id') and self.store_id:
+                    store_id = self.store_id
+                store_in_operation = self.db_manager.is_store_in_operation(store_id) if store_id else True
+                if not store_in_operation:
+                    logger.info(f"[{self.channel_id}] Store {store_id} not in operation - suppressing person smoking alert")
+                    return
+            except Exception as e:
+                logger.debug(f"Could not check operation hours: {e}")
+        
         try:
             self.total_alerts += 1
             

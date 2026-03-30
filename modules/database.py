@@ -375,6 +375,8 @@ class DatabaseManager:
             is_active = self.db.Column(self.db.Boolean, default=True)
             is_default = self.db.Column(self.db.Boolean, default=False)
             excluded_modules = self.db.Column(self.db.Text)  # JSON array of module names to exclude
+            operation_start_time = self.db.Column(self.db.String(5))  # Store opening time in HH:MM format (e.g., "09:00")
+            operation_end_time = self.db.Column(self.db.String(5))  # Store closing time in HH:MM format (e.g., "21:00")
             created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
             updated_at = self.db.Column(self.db.DateTime, default=get_ist_now, onupdate=get_ist_now)
         
@@ -450,7 +452,7 @@ class DatabaseManager:
 
     # ==================== Store Management Methods ====================
     
-    def add_store(self, store_id, name, location, description=None, is_active=True, is_default=False, excluded_modules=None):
+    def add_store(self, store_id, name, location, description=None, is_active=True, is_default=False, excluded_modules=None, operation_start_time=None, operation_end_time=None):
         """Add a new store to the database"""
         import json
         try:
@@ -473,7 +475,9 @@ class DatabaseManager:
                 description=description,
                 is_active=is_active,
                 is_default=is_default,
-                excluded_modules=excluded_modules_str
+                excluded_modules=excluded_modules_str,
+                operation_start_time=operation_start_time,
+                operation_end_time=operation_end_time
             )
             self.db.session.add(store)
             self.db.session.commit()
@@ -508,6 +512,8 @@ class DatabaseManager:
                 'is_active': store.is_active,
                 'is_default': store.is_default,
                 'excluded_modules': excluded_modules,
+                'operation_start_time': store.operation_start_time,
+                'operation_end_time': store.operation_end_time,
                 'created_at': store.created_at.isoformat() if store.created_at else None,
                 'updated_at': store.updated_at.isoformat() if store.updated_at else None,
             }
@@ -541,6 +547,8 @@ class DatabaseManager:
                     'is_default': store.is_default,
                     'default': store.is_default, # Aliased for frontend compatibility
                     'excluded_modules': excluded_modules,
+                    'operation_start_time': store.operation_start_time,
+                    'operation_end_time': store.operation_end_time,
                     'created_at': store.created_at.isoformat() if store.created_at else None,
                     'updated_at': store.updated_at.isoformat() if store.updated_at else None,
                 })
@@ -564,7 +572,7 @@ class DatabaseManager:
                         setattr(store, key, json.dumps(value))
                     else:
                         setattr(store, key, value)
-                elif key in ['name', 'location', 'description', 'is_active', 'is_default']:
+                elif key in ['name', 'location', 'description', 'is_active', 'is_default', 'operation_start_time', 'operation_end_time']:
                     setattr(store, key, value)
             
             store.updated_at = get_ist_now()
@@ -592,6 +600,70 @@ class DatabaseManager:
             logger.error(f"Error deleting store: {e}")
             self.db.session.rollback()
             return False
+    
+    def is_store_in_operation(self, store_id):
+        """
+        Check if a store is currently in operation hours.
+        Returns True if store is within operation hours, False otherwise.
+        If operation times are not set, returns True (always in operation).
+        """
+        try:
+            from datetime import datetime
+            
+            store = self.Store.query.filter_by(store_id=store_id).first()
+            if not store:
+                logger.warning(f"Store {store_id} not found")
+                return True  # Default to True if store not found
+            
+            # If operation times are not set, store is always in operation
+            if not store.operation_start_time or not store.operation_end_time:
+                logger.debug(f"Store {store_id} has no operation times set, allowing violations")
+                return True
+            
+            # Get current time in IST
+            current_time = get_ist_now()
+            current_hour = current_time.hour
+            current_minute = current_time.minute
+            current_time_str = f"{current_hour:02d}:{current_minute:02d}"
+            
+            # Parse operation times (format: "HH:MM")
+            try:
+                start_parts = store.operation_start_time.split(':')
+                end_parts = store.operation_end_time.split(':')
+                
+                start_hour = int(start_parts[0])
+                start_minute = int(start_parts[1]) if len(start_parts) > 1 else 0
+                
+                end_hour = int(end_parts[0])
+                end_minute = int(end_parts[1]) if len(end_parts) > 1 else 0
+                
+                # Convert to minutes for easier comparison
+                current_mins = current_hour * 60 + current_minute
+                start_mins = start_hour * 60 + start_minute
+                end_mins = end_hour * 60 + end_minute
+                
+                # Check if current time is within operation hours
+                # Handle case where operation hours span midnight (e.g., 22:00 to 06:00)
+                if start_mins <= end_mins:
+                    # Normal case: operation hours don't span midnight
+                    is_in_operation = start_mins <= current_mins < end_mins
+                else:
+                    # Operation hours span midnight
+                    is_in_operation = current_mins >= start_mins or current_mins < end_mins
+                
+                logger.debug(f"Store {store_id}: Current time {current_time_str}, "
+                           f"operation hours {store.operation_start_time}-{store.operation_end_time}, "
+                           f"in_operation={is_in_operation}")
+                
+                return is_in_operation
+                
+            except (ValueError, IndexError) as e:
+                logger.error(f"Error parsing operation times for store {store_id}: {e}")
+                return True  # Default to True if parsing fails
+                
+        except Exception as e:
+            logger.error(f"Error checking store operation status: {e}")
+            return True  # Default to True on error
     
     # ==================== RTSP Link Management Methods ====================
     
