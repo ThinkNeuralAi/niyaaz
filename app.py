@@ -972,6 +972,64 @@ def get_stores():
         logger.error(f"Error getting stores: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/get_store_operation_hours/<store_id>')
+@login_required
+def get_store_operation_hours(store_id):
+    """Get operation hours for a specific store"""
+    try:
+        store = db_manager.get_store(store_id)
+        if not store:
+            return jsonify({'success': False, 'error': f'Store {store_id} not found'})
+        
+        return jsonify({
+            'success': True,
+            'store_id': store_id,
+            'operation_start_time': store.get('operation_start_time'),
+            'operation_end_time': store.get('operation_end_time')
+        })
+    except Exception as e:
+        logger.error(f"Error getting operation hours for store {store_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/set_store_operation_hours', methods=['POST'])
+@login_required
+def set_store_operation_hours():
+    """Set operation hours for a store. Alerts/violations will only trigger within these hours."""
+    try:
+        data = request.json
+        store_id = data.get('store_id')
+        start_time = data.get('operation_start_time')  # HH:MM format
+        end_time = data.get('operation_end_time')        # HH:MM format
+        
+        if not store_id:
+            return jsonify({'success': False, 'error': 'store_id is required'})
+        
+        # Validate time format if provided
+        import re
+        time_pattern = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
+        if start_time and not time_pattern.match(start_time):
+            return jsonify({'success': False, 'error': 'Invalid start time format. Use HH:MM (24-hour)'})
+        if end_time and not time_pattern.match(end_time):
+            return jsonify({'success': False, 'error': 'Invalid end time format. Use HH:MM (24-hour)'})
+        
+        success = db_manager.update_store(
+            store_id,
+            operation_start_time=start_time,
+            operation_end_time=end_time
+        )
+        
+        if success:
+            logger.info(f"Operation hours updated for store {store_id}: {start_time} - {end_time}")
+            return jsonify({
+                'success': True,
+                'message': f'Operation hours set for store {store_id}: {start_time or "not set"} - {end_time or "not set"}'
+            })
+        else:
+            return jsonify({'success': False, 'error': f'Store {store_id} not found'})
+    except Exception as e:
+        logger.error(f"Error setting operation hours: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/get_channels_by_store/<store_id>')
 def get_channels_by_store(store_id):
     """Get channels configured for a specific store"""

@@ -501,6 +501,15 @@ class DressCodeMonitoring:
     def _save_violation_snapshot(self, frame, violations, uniform_color, position_key):
         """Save snapshot of dress code violation"""
         try:
+            # Check if within store operation hours
+            if self.db_manager and self.app:
+                try:
+                    with self.app.app_context():
+                        if not self.db_manager.is_within_operation_hours(self.channel_id):
+                            return None
+                except Exception:
+                    pass
+
             timestamp = datetime.now()
             
             # Generate unique filename

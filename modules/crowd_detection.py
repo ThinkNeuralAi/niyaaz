@@ -450,6 +450,15 @@ class CrowdDetection:
     
     def check_alert_conditions(self):
         """Check if crowd threshold is exceeded"""
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        return None
+            except Exception:
+                pass
+
         current_time = datetime.now()
         
         # Use raw count or long-stay count based on settings

@@ -459,6 +459,15 @@ class FallDetection:
     
     def _trigger_fall_alert(self, frame, track_id, bbox, timestamp):
         """Trigger fall detection alert with snapshot"""
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        return
+            except Exception:
+                pass
+
         self.total_alerts += 1
         
         # Generate filename

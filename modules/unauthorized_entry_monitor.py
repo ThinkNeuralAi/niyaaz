@@ -254,6 +254,15 @@ class UnauthorizedEntryMonitor:
             frame: Current frame
         """
         try:
+            # Check if within store operation hours
+            if self.db_manager and self.app:
+                try:
+                    with self.app.app_context():
+                        if not self.db_manager.is_within_operation_hours(self.channel_id):
+                            return
+                except Exception:
+                    pass
+
             person_count = len(detections)
             alert_message = f"⚠️ UNAUTHORIZED ENTRY: {person_count} person(s) detected"
             

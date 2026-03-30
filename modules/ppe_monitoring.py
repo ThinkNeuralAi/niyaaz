@@ -538,6 +538,15 @@ class PPEMonitoring:
     
     def _save_violation_snapshot(self, frame, violations, employee_id):
         """Save snapshot of PPE violation (similar to dress code monitoring)"""
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        return None
+            except Exception:
+                pass
+
         timestamp = datetime.now()
         
         # Generate unique filename (without employee_id)

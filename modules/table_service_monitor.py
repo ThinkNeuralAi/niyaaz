@@ -675,6 +675,15 @@ class TableServiceMonitor:
             current_time: Current timestamp
             frame: Optional frame for snapshot saving
         """
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        return
+            except Exception:
+                pass
+
         # Safety check: Verify no person is present before alerting
         # This is a final safeguard in case person detection wasn't passed correctly
         table_center = tracking.get("center")

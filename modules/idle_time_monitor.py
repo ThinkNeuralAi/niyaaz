@@ -568,6 +568,15 @@ class IdleTimeMonitor:
 
     def _trigger_alert(self, track_id, idle_time, current_time, frame=None):
         """Trigger an idle time alert — start GIF recording, save to DB, emit socketio event."""
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        return
+            except Exception:
+                pass
+
         track = self.person_tracks.get(track_id)
         if not track:
             return

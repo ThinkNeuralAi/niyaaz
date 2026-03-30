@@ -375,6 +375,8 @@ class DatabaseManager:
             is_active = self.db.Column(self.db.Boolean, default=True)
             is_default = self.db.Column(self.db.Boolean, default=False)
             excluded_modules = self.db.Column(self.db.Text)  # JSON array of module names to exclude
+            operation_start_time = self.db.Column(self.db.String(5))  # HH:MM format, e.g. "09:00"
+            operation_end_time = self.db.Column(self.db.String(5))    # HH:MM format, e.g. "22:00"
             created_at = self.db.Column(self.db.DateTime, default=get_ist_now)
             updated_at = self.db.Column(self.db.DateTime, default=get_ist_now, onupdate=get_ist_now)
         
@@ -450,7 +452,7 @@ class DatabaseManager:
 
     # ==================== Store Management Methods ====================
     
-    def add_store(self, store_id, name, location, description=None, is_active=True, is_default=False, excluded_modules=None):
+    def add_store(self, store_id, name, location, description=None, is_active=True, is_default=False, excluded_modules=None, operation_start_time=None, operation_end_time=None):
         """Add a new store to the database"""
         import json
         try:
@@ -473,7 +475,9 @@ class DatabaseManager:
                 description=description,
                 is_active=is_active,
                 is_default=is_default,
-                excluded_modules=excluded_modules_str
+                excluded_modules=excluded_modules_str,
+                operation_start_time=operation_start_time,
+                operation_end_time=operation_end_time
             )
             self.db.session.add(store)
             self.db.session.commit()
@@ -508,6 +512,8 @@ class DatabaseManager:
                 'is_active': store.is_active,
                 'is_default': store.is_default,
                 'excluded_modules': excluded_modules,
+                'operation_start_time': store.operation_start_time,
+                'operation_end_time': store.operation_end_time,
                 'created_at': store.created_at.isoformat() if store.created_at else None,
                 'updated_at': store.updated_at.isoformat() if store.updated_at else None,
             }
@@ -541,6 +547,8 @@ class DatabaseManager:
                     'is_default': store.is_default,
                     'default': store.is_default, # Aliased for frontend compatibility
                     'excluded_modules': excluded_modules,
+                    'operation_start_time': store.operation_start_time,
+                    'operation_end_time': store.operation_end_time,
                     'created_at': store.created_at.isoformat() if store.created_at else None,
                     'updated_at': store.updated_at.isoformat() if store.updated_at else None,
                 })
@@ -564,7 +572,7 @@ class DatabaseManager:
                         setattr(store, key, json.dumps(value))
                     else:
                         setattr(store, key, value)
-                elif key in ['name', 'location', 'description', 'is_active', 'is_default']:
+                elif key in ['name', 'location', 'description', 'is_active', 'is_default', 'operation_start_time', 'operation_end_time']:
                     setattr(store, key, value)
             
             store.updated_at = get_ist_now()
@@ -593,6 +601,47 @@ class DatabaseManager:
             self.db.session.rollback()
             return False
     
+    def is_within_operation_hours(self, channel_id):
+        """
+        Check if the current time (IST) is within the store's operation hours for a given channel.
+        Returns True if within hours or if no operation hours are configured (always active).
+        """
+        try:
+            # Resolve channel_id → store_id → operation hours
+            link = self.RTSPLink.query.filter_by(channel_id=channel_id).first()
+            if not link or not link.store_id:
+                return True  # No store mapping, allow by default
+            
+            store = self.Store.query.filter_by(store_id=link.store_id).first()
+            if not store:
+                return True  # No store found, allow by default
+            
+            start_time_str = store.operation_start_time
+            end_time_str = store.operation_end_time
+            
+            # If either is not set, store is always active
+            if not start_time_str or not end_time_str:
+                return True
+            
+            now = get_ist_now()
+            current_minutes = now.hour * 60 + now.minute
+            
+            # Parse HH:MM to minutes since midnight
+            start_parts = start_time_str.split(':')
+            end_parts = end_time_str.split(':')
+            start_minutes = int(start_parts[0]) * 60 + int(start_parts[1])
+            end_minutes = int(end_parts[0]) * 60 + int(end_parts[1])
+            
+            # Handle overnight ranges (e.g., 22:00 - 06:00)
+            if start_minutes <= end_minutes:
+                return start_minutes <= current_minutes <= end_minutes
+            else:
+                # Overnight: active if current >= start OR current <= end
+                return current_minutes >= start_minutes or current_minutes <= end_minutes
+        except Exception as e:
+            logger.error(f"Error checking operation hours for channel {channel_id}: {e}")
+            return True  # On error, allow by default
+
     # ==================== RTSP Link Management Methods ====================
     
     def add_rtsp_link(self, channel_id, store_id, channel_name, rtsp_url, description=None, 

@@ -707,6 +707,15 @@ class ServiceDisciplineMonitor:
                     )
 
     def _trigger_violation_alert(self, table_id, customer_track, waiting_time, current_time, frame=None):
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        return
+            except Exception:
+                pass
+
         logger.warning(
             f"[{self.channel_id}] Service discipline violation: Table {table_id} "
             f"waiting {waiting_time:.1f}s (threshold {self.settings['wait_time_threshold']}s)"
