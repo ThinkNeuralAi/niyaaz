@@ -1905,37 +1905,40 @@ class DatabaseManager:
             self.db.session.add(alert_gif)
             self.db.session.commit()
             
-            # Send Telegram notification
-            try:
-                from modules.telegram_notifier import get_telegram_notifier
-                notifier = get_telegram_notifier()
-                # Try to resolve full path for GIF
-                full_gif_path = gif_path
-                if gif_path and not os.path.isabs(gif_path):
-                    # Try relative to static directory
-                    static_path = os.path.join("static", gif_path)
-                    if os.path.exists(static_path):
-                        full_gif_path = static_path
-                    elif os.path.exists(gif_path):
-                        full_gif_path = gif_path
+            # Send Telegram notification - DISABLED FOR CASH DETECTION ALERTS
+            if alert_type != 'cash_detection_alert':
+                try:
+                    from modules.telegram_notifier import get_telegram_notifier
+                    notifier = get_telegram_notifier()
+                    # Try to resolve full path for GIF
+                    full_gif_path = gif_path
+                    if gif_path and not os.path.isabs(gif_path):
+                        # Try relative to static directory
+                        static_path = os.path.join("static", gif_path)
+                        if os.path.exists(static_path):
+                            full_gif_path = static_path
+                        elif os.path.exists(gif_path):
+                            full_gif_path = gif_path
+                        else:
+                            full_gif_path = None
+                    
+                    if full_gif_path:
+                        store_name = self.get_store_name_for_channel(channel_id)
+                        notifier.send_alert(
+                            channel_id=channel_id,
+                            alert_type=alert_type,
+                            alert_message=alert_message or f"Alert from {channel_id}",
+                            image_path=full_gif_path,
+                            alert_data=alert_data,
+                            store_name=store_name
+                        )
                     else:
-                        full_gif_path = None
-                
-                if full_gif_path:
-                    store_name = self.get_store_name_for_channel(channel_id)
-                    notifier.send_alert(
-                        channel_id=channel_id,
-                        alert_type=alert_type,
-                        alert_message=alert_message or f"Alert from {channel_id}",
-                        image_path=full_gif_path,
-                        alert_data=alert_data,
-                        store_name=store_name
-                    )
-                else:
-                    # Skip sending Telegram alert if GIF path not found - only send with media
-                    logger.debug(f"Skipping Telegram alert for {channel_id} - no GIF/snapshot file found")
-            except Exception as tg_error:
-                logger.warning(f"Failed to send Telegram notification: {tg_error}")
+                        # Skip sending Telegram alert if GIF path not found - only send with media
+                        logger.debug(f"Skipping Telegram alert for {channel_id} - no GIF/snapshot file found")
+                except Exception as tg_error:
+                    logger.warning(f"Failed to send Telegram notification: {tg_error}")
+            else:
+                logger.info(f"Telegram notification skipped for cash_detection_alert (disabled)")
             
             return alert_gif.id
             
@@ -2431,16 +2434,16 @@ class DatabaseManager:
             
             logger.info(f"Cash snapshot saved to database: ID {snapshot.id}")
             
-            # Send Telegram notification
-            store_name = self.get_store_name_for_channel(channel_id)
-            _send_telegram_alert(
-                channel_id=channel_id,
-                alert_type='cash_alert',
-                alert_message=alert_message or f"Cash detected: {detection_count} instance(s)",
-                snapshot_path=snapshot_path,
-                alert_data=alert_data,
-                store_name=store_name
-            )
+            # Send Telegram notification - DISABLED FOR CASH DETECTION
+            # store_name = self.get_store_name_for_channel(channel_id)
+            # _send_telegram_alert(
+            #     channel_id=channel_id,
+            #     alert_type='cash_alert',
+            #     alert_message=alert_message or f"Cash detected: {detection_count} instance(s)",
+            #     snapshot_path=snapshot_path,
+            #     alert_data=alert_data,
+            #     store_name=store_name
+            # )
             
             return snapshot.id
             
@@ -4845,108 +4848,4 @@ class DatabaseManager:
                 'period_days': days
             }
     # Dress Code Monitoring Methods
-    def add_dresscode_alert(self, channel_id, violations, uniform_color=None, snapshot_path=None, employee_id=None):
-        """Add a dress code violation"""
-        try:
-            alert = self.DressCodeViolation(
-                channel_id=channel_id,
-                violations=violations,
-                uniform_color=uniform_color,
-                snapshot_path=snapshot_path,
-                employee_id=employee_id
-            )
-            if snapshot_path:
-                alert.snapshot_filename = os.path.basename(snapshot_path)
-            
-            self.db.session.add(alert)
-            self.db.session.commit()
-            logger.info(f"Dress code alert saved for channel {channel_id}")
-            
-            # Send Telegram notification
-            try:
-                violations_str = violations if isinstance(violations, str) else ', '.join(violations) if isinstance(violations, list) else str(violations)
-                store_name = self.get_store_name_for_channel(channel_id)
-                _send_telegram_alert(
-                    channel_id=channel_id,
-                    alert_type='dresscode_alert',
-                    alert_message=f"Dress code violation: {violations_str}",
-                    snapshot_path=snapshot_path,
-                    alert_data={'violations': violations_str, 'uniform_color': uniform_color},
-                    store_name=store_name
-                )
-            except Exception as tg_error:
-                logger.warning(f"Failed to send Telegram notification for dress code alert: {tg_error}")
-            
-            return alert
-        except Exception as e:
-            self.db.session.rollback()
-            logger.error(f"Error adding dress code alert: {e}")
-            return None
 
-    def get_dresscode_alerts(self, limit=100, offset=0, channel_id=None, store_id=None, days=None):
-        """Get dress code alerts with pagination and filtering"""
-        try:
-            from datetime import datetime, timedelta
-            query = self.DressCodeViolation.query
-            
-            if days is not None and isinstance(days, (int, float)) and days > 0:
-                date_threshold = datetime.now() - timedelta(days=days)
-                query = query.filter(self.DressCodeViolation.created_at >= date_threshold)
-            
-            if store_id:
-                # Join with RTSPLink to filter by store_id
-                query = query.join(
-                    self.RTSPLink, 
-                    self.RTSPLink.channel_id == self.DressCodeViolation.channel_id
-                ).filter(self.RTSPLink.store_id == store_id)
-            
-            if channel_id:
-                if isinstance(channel_id, list):
-                    query = query.filter(self.DressCodeViolation.channel_id.in_(channel_id))
-                else:
-                    query = query.filter(self.DressCodeViolation.channel_id == channel_id)
-            
-            return query.order_by(self.DressCodeViolation.created_at.desc()).offset(offset).limit(limit).all()
-        except Exception as e:
-            logger.error(f"Error getting dress code alerts: {e}")
-            return []
-
-    def delete_dresscode_alert(self, alert_id):
-        """Delete a dress code alert"""
-        try:
-            alert = self.DressCodeViolation.query.get(alert_id)
-            if alert:
-                if alert.snapshot_path and os.path.exists(alert.snapshot_path):
-                     try:
-                         os.remove(alert.snapshot_path)
-                     except OSError:
-                         pass
-                self.db.session.delete(alert)
-                self.db.session.commit()
-                return True
-            return False
-        except Exception as e:
-            self.db.session.rollback()
-            logger.error(f"Error deleting dress code alert: {e}")
-            return False
-
-    def clear_old_dresscode_alerts(self, days=30):
-        """Clear dress code alerts older than specified days"""
-        try:
-            cutoff_date = get_ist_now() - timedelta(days=days)
-            old_alerts = self.DressCodeViolation.query.filter(self.DressCodeViolation.created_at < cutoff_date).all()
-            count = 0
-            for alert in old_alerts:
-                if alert.snapshot_path and os.path.exists(alert.snapshot_path):
-                    try:
-                        os.remove(alert.snapshot_path)
-                    except OSError:
-                        pass
-                self.db.session.delete(alert)
-                count += 1
-            self.db.session.commit()
-            return count
-        except Exception as e:
-            self.db.session.rollback()
-            logger.error(f"Error clearing old dress code alerts: {e}")
-            return 0

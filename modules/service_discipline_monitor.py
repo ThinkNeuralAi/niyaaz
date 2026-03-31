@@ -976,19 +976,8 @@ class ServiceDisciplineMonitor:
                                     alert_data=alert_info
                                 )
                                 
-                                # Now send Telegram alert with the actual GIF path
-                                if snapshot_path and os.path.exists(gif_path if gif_path else os.path.join("static", snapshot_path)):
-                                    from modules.database import _send_telegram_alert
-                                    _send_telegram_alert(
-                                        channel_id=self.channel_id,
-                                        alert_type='table_service_violation',
-                                        alert_message=alert_message,
-                                        snapshot_path=snapshot_path,
-                                        alert_data=alert_info
-                                    )
-                                    logger.info(f"[{self.channel_id}] ✅ Telegram alert sent with GIF: {gif_filename}")
-                                else:
-                                    logger.warning(f"[{self.channel_id}] ⚠️ GIF path not found, skipping Telegram alert: {snapshot_path}")
+                                # Telegram alert is sent by database method when GIF is saved
+                                logger.info(f"[{self.channel_id}] ✅ Service discipline alert GIF saved - Telegram will be sent by database")
                         
                         logger.info(f"[{self.channel_id}] ✅ Service discipline alert GIF saved to database: {gif_filename}")
                         # Clear stored alert info

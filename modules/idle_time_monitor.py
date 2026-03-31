@@ -445,19 +445,8 @@ class IdleTimeMonitor:
                                     alert_data=alert_info
                                 )
 
-                                # Send Telegram alert with the GIF
-                                if snapshot_path and os.path.exists(
-                                    gif_path if gif_path else os.path.join("static", snapshot_path)
-                                ):
-                                    from modules.database import _send_telegram_alert
-                                    _send_telegram_alert(
-                                        channel_id=self.channel_id,
-                                        alert_type='idle_time_alert',
-                                        alert_message=alert_message,
-                                        snapshot_path=snapshot_path,
-                                        alert_data=alert_info
-                                    )
-                                    logger.info(f"[{self.channel_id}] ✅ Telegram idle time alert sent: {gif_filename}")
+                                # Telegram alert is sent by database method when GIF is saved
+                                logger.info(f"[{self.channel_id}] ✅ Idle time alert GIF saved - Telegram will be sent by database")
 
                         self._pending_alert_info = None
                         self._pending_snapshot_id = None

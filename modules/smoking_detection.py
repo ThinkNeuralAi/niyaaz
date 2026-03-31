@@ -42,7 +42,7 @@ class SmokingDetection:
         
         # Detection configuration - use your custom best.pt model
         self.model_weight = "models/best.pt"
-        self.conf_threshold = 0.4  # Confidence threshold for detections
+        self.conf_threshold = 0.9  # Confidence threshold for detections
         self.nms_iou = 0.45
         
         # Target classes for detection (from best.pt model: 10=Smoke, 11=Fire)

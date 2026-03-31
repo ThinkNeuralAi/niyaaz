@@ -1307,19 +1307,8 @@ class TableServiceMonitor:
                                 alert_data=alert_data
                             )
                             
-                            # Now send Telegram alert with the actual GIF path
-                            if snapshot_path and os.path.exists(gif_path if gif_path else os.path.join("static", snapshot_path)):
-                                from modules.database import _send_telegram_alert
-                                _send_telegram_alert(
-                                    channel_id=self.channel_id,
-                                    alert_type='table_cleanliness_violation' if violation_type in ['unclean_table', 'slow_reset'] else 'table_service_violation',
-                                    alert_message=alert_message,
-                                    snapshot_path=snapshot_path,
-                                    alert_data=alert_data
-                                )
-                                logger.info(f"[{self.channel_id}] ✅ Telegram alert sent with GIF: {gif_filename}")
-                            else:
-                                logger.warning(f"[{self.channel_id}] ⚠️ GIF path not found, skipping Telegram alert: {snapshot_path}")
+                            # Telegram alert is sent by database method when GIF is saved
+                            logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved - Telegram will be sent by database")
                     
                     logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved to database: {gif_filename}")
                     # Clear stored alert info
