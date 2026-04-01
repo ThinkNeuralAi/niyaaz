@@ -352,15 +352,19 @@ def send_report_email(filepath, email_config):
         logger.error("Report file not found, cannot send email")
         return False
 
-    smtp_host = email_config.get('smtp_host', '')
+    smtp_host = email_config.get('smtp_host', '').strip()
     smtp_port = email_config.get('smtp_port', 587)
-    smtp_user = email_config.get('smtp_user', '')
-    smtp_password = email_config.get('smtp_password', '')
-    sender = email_config.get('sender', smtp_user)
+    smtp_user = email_config.get('smtp_user', '').strip()
+    smtp_password = email_config.get('smtp_password', '').strip()
+    sender = email_config.get('sender', smtp_user).strip()
     recipients = email_config.get('recipients', [])
 
-    if not smtp_host or not smtp_user or not smtp_password or not recipients:
-        logger.error("Email configuration incomplete. Set EMAIL_SMTP_HOST, EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD, EMAIL_RECIPIENTS env vars.")
+    if not smtp_host or not smtp_user or not smtp_password:
+        logger.error("Email configuration incomplete. Set EMAIL_SMTP_HOST, EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD env vars.")
+        return False
+    
+    if not recipients or (isinstance(recipients, list) and len(recipients) == 0):
+        logger.error("No email recipients configured. Set EMAIL_RECIPIENTS env var.")
         return False
 
     report_date = (datetime.now(IST) - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -383,27 +387,46 @@ Sakshi.AI System"""
     msg.attach(MIMEText(body, 'plain'))
 
     # Attach Excel file
-    with open(filepath, 'rb') as f:
+    try:
+        with open(filepath, 'rb') as f:
+            file_bytes = f.read()
+        
         part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        part.set_payload(f.read())
+        part.set_payload(file_bytes)
         encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+        part.add_header('Content-Disposition', 'attachment', filename=filename)
+        part.add_header('Content-Transfer-Encoding', 'base64')
         msg.attach(part)
+        logger.info(f"Excel file attached: {filename} ({len(file_bytes)} bytes)")
+    except Exception as e:
+        logger.error(f"Failed to attach Excel file: {e}")
+        return False
 
     try:
         use_ssl = email_config.get('use_ssl', False)
+        logger.info(f"Sending email to {recipients} via {smtp_host}:{smtp_port} (SSL={use_ssl})")
+        
         if use_ssl:
             server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30)
         else:
             server = smtplib.SMTP(smtp_host, smtp_port, timeout=30)
             server.starttls()
+        
         server.login(smtp_user, smtp_password)
+        logger.info(f"SMTP login successful for {smtp_user}")
+        
         server.sendmail(sender, recipients, msg.as_string())
         server.quit()
-        logger.info(f"Daily report email sent to {recipients}")
+        logger.info(f"Daily report email successfully sent to {recipients}")
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(f"SMTP Authentication failed: {e}")
+        return False
+    except smtplib.SMTPException as e:
+        logger.error(f"SMTP error while sending daily report email: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Failed to send daily report email: {e}")
+        logger.error(f"Failed to send daily report email: {e}", exc_info=True)
         return False
 
 
@@ -455,12 +478,23 @@ def run_daily_report(app, db_manager):
         logger.info("Starting daily report generation...")
         filepath = generate_daily_report(app, db_manager)
         if filepath:
+            logger.info(f"Report generated successfully: {filepath}")
             email_config = get_email_config()
-            if email_config.get('smtp_host') and email_config.get('recipients'):
-                send_report_email(filepath, email_config)
+            
+            # Check email configuration
+            if not email_config.get('smtp_host'):
+                logger.warning("Email SMTP host not configured - report saved locally only")
+            elif not email_config.get('recipients'):
+                logger.warning("Email recipients not configured - report saved locally only")
             else:
-                logger.warning("Email not configured - report saved locally only. "
-                             "Set EMAIL_SMTP_HOST, EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD, EMAIL_RECIPIENTS env vars.")
+                logger.info(f"Sending email to {email_config.get('recipients')}")
+                success = send_report_email(filepath, email_config)
+                if success:
+                    logger.info("Daily report email sent successfully")
+                else:
+                    logger.warning("Failed to send daily report email (see logs for details)")
+        else:
+            logger.warning("No active stores found or report generation failed")
     except Exception as e:
         logger.error(f"Daily report failed: {e}", exc_info=True)
 

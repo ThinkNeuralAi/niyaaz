@@ -1449,6 +1449,16 @@ class ServiceDisciplineMonitor:
     
     def _trigger_violation_alert_new(self, table_id, customer_track_id, violation_type, wait_time, current_time, frame=None):
         """Trigger alert for new event-based violations"""
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        logger.info(f"[{self.channel_id}] Skipping service discipline alert - outside store operation hours")
+                        return
+            except Exception:
+                pass
+
         customer = self.person_tracks.get(customer_track_id)
         if not customer:
             logger.warning(f"[{self.channel_id}] ⚠️ Cannot trigger alert: customer track {customer_track_id} not found")
