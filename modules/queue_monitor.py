@@ -137,7 +137,7 @@ class QueueMonitor:
             "counter_threshold": 1,        # V3: need at least 1 at counter
             "alert_cooldown": 60.0,        # seconds between alerts
             "wait_time_threshold": 120.0,  # V2: any wait >= 120s (2 minutes)
-            "counter_capacity_max": 4,     # V4: max people allowed at counter (4 for all channels)
+            "counter_capacity_max": 4,     # V4: max people allowed at counter
         }
         
 
@@ -517,6 +517,48 @@ class QueueMonitor:
     @staticmethod
     def _euclidean(p1, p2):
         return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+
+    @staticmethod
+    def _compute_iou(bbox1, bbox2):
+        """Compute Intersection over Union between two bounding boxes [x1, y1, x2, y2]."""
+        x1 = max(bbox1[0], bbox2[0])
+        y1 = max(bbox1[1], bbox2[1])
+        x2 = min(bbox1[2], bbox2[2])
+        y2 = min(bbox1[3], bbox2[3])
+
+        intersection = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+        area2 = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
+        union = area1 + area2 - intersection
+
+        return intersection / union if union > 0 else 0.0
+
+    @staticmethod
+    def _deduplicate_detections(detections, iou_threshold=0.4):
+        """
+        Remove duplicate detections using IoU-based NMS.
+        Keeps the detection with higher confidence when two overlap.
+        This prevents the same person from being counted multiple times
+        when detected by multiple models or as multiple classes.
+        """
+        if len(detections) <= 1:
+            return detections
+
+        # Sort by confidence (highest first)
+        sorted_dets = sorted(detections, key=lambda d: d.get("confidence", 0.5), reverse=True)
+
+        keep = []
+        for det in sorted_dets:
+            is_duplicate = False
+            for kept in keep:
+                iou = QueueMonitor._compute_iou(det["bbox"], kept["bbox"])
+                if iou > iou_threshold:
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                keep.append(det)
+
+        return keep
 
     def _update_person_tracking(self, detections, area_type: str) -> int:
         """
@@ -1272,6 +1314,9 @@ class QueueMonitor:
                         if counter_person_count > 0:
                             logger.info(f"[{self.channel_id}]    📍 Counter_person class detected: {counter_person_count} instance(s) from best.pt")
                         counter_dets.extend(uniform_dets)
+                        # Deduplicate uniform detections (same person may be detected as multiple classes)
+                        counter_dets = self._deduplicate_detections(counter_dets)
+                        logger.info(f"[{self.channel_id}]    After dedup: {len(counter_dets)} unique detections")
                 except Exception as e:
                     logger.warning(f"[{self.channel_id}] ⚠️ Uniform fallback detection failed: {e}")
 
@@ -1294,6 +1339,10 @@ class QueueMonitor:
                 (0, 255, 0),
                 2,
             )
+
+        # Deduplicate counter detections before tracking
+        # Prevents same person counted multiple times from forgiving ROI checks
+        counter_dets = self._deduplicate_detections(counter_dets)
 
         # Update tracking & counts
         self.queue_count = self._update_person_tracking(queue_dets, "queue")
@@ -1377,8 +1426,10 @@ class QueueMonitor:
                         logger.warning(f"[{self.channel_id}]    Breakdown: {breakdown_str}")
                         if counter_person_count_fallback > 0:
                             logger.warning(f"[{self.channel_id}]    📍 Counter_person class: {counter_person_count_fallback} instance(s) from best.pt")
-                        # Directly set counter count based on uniform detections
-                        # This bypasses tracking/dwell time issues
+                        # Deduplicate before counting (same person may have multiple uniform classes)
+                        uniform_dets_in_counter = self._deduplicate_detections(uniform_dets_in_counter)
+                        logger.warning(f"[{self.channel_id}]    After dedup: {len(uniform_dets_in_counter)} unique detections")
+                        # Directly set counter count based on deduplicated uniform detections
                         self.counter_count = len(uniform_dets_in_counter)
                 except Exception as e:
                     logger.warning(f"[{self.channel_id}] ⚠️ Second-level uniform fallback failed: {e}")
