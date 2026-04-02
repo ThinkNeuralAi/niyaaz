@@ -137,14 +137,10 @@ class QueueMonitor:
             "counter_threshold": 1,        # V3: need at least 1 at counter
             "alert_cooldown": 60.0,        # seconds between alerts
             "wait_time_threshold": 120.0,  # V2: any wait >= 120s (2 minutes)
-            "counter_capacity_max": None,  # V4: max people allowed at counter (None = no limit, set per channel)
+            "counter_capacity_max": 4,     # V4: max people allowed at counter (4 for all channels)
         }
         
-        # Set counter capacity limits per channel
-        if channel_id == "camera_1":
-            self.settings["counter_capacity_max"] = 4
-        elif channel_id == "camera_2":
-            self.settings["counter_capacity_max"] = 3
+
 
         # Tracking (simple nearest-neighbor like your prototype)
         self.person_tracking = []  # list of dict tracks
