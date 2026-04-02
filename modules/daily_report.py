@@ -37,7 +37,8 @@ USECASE_CONFIG = {
         'table': 'table_service_violations',
     },
     'Unauthorised Entry': {
-        'table': 'restricted_area_snapshots',
+        'table': 'alert_gifs',
+        'alert_type_filter': 'unauthorized_entry',
     },
       'Material Theft': {
         'table': 'alert_gifs',
