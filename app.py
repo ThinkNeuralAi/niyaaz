@@ -49,6 +49,7 @@ from modules.rtsp_connection_pool import rtsp_pool
 from modules.database import DatabaseManager
 
 from modules.model_manager import get_model_stats, cleanup_models
+from modules.daily_report import start_daily_report_scheduler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -970,6 +971,64 @@ def get_stores():
         })
     except Exception as e:
         logger.error(f"Error getting stores: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/get_store_operation_hours/<store_id>')
+@login_required
+def get_store_operation_hours(store_id):
+    """Get operation hours for a specific store"""
+    try:
+        store = db_manager.get_store(store_id)
+        if not store:
+            return jsonify({'success': False, 'error': f'Store {store_id} not found'})
+        
+        return jsonify({
+            'success': True,
+            'store_id': store_id,
+            'operation_start_time': store.get('operation_start_time'),
+            'operation_end_time': store.get('operation_end_time')
+        })
+    except Exception as e:
+        logger.error(f"Error getting operation hours for store {store_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/set_store_operation_hours', methods=['POST'])
+@login_required
+def set_store_operation_hours():
+    """Set operation hours for a store. Alerts/violations will only trigger within these hours."""
+    try:
+        data = request.json
+        store_id = data.get('store_id')
+        start_time = data.get('operation_start_time')  # HH:MM format
+        end_time = data.get('operation_end_time')        # HH:MM format
+        
+        if not store_id:
+            return jsonify({'success': False, 'error': 'store_id is required'})
+        
+        # Validate time format if provided
+        import re
+        time_pattern = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
+        if start_time and not time_pattern.match(start_time):
+            return jsonify({'success': False, 'error': 'Invalid start time format. Use HH:MM (24-hour)'})
+        if end_time and not time_pattern.match(end_time):
+            return jsonify({'success': False, 'error': 'Invalid end time format. Use HH:MM (24-hour)'})
+        
+        success = db_manager.update_store(
+            store_id,
+            operation_start_time=start_time,
+            operation_end_time=end_time
+        )
+        
+        if success:
+            logger.info(f"Operation hours updated for store {store_id}: {start_time} - {end_time}")
+            return jsonify({
+                'success': True,
+                'message': f'Operation hours set for store {store_id}: {start_time or "not set"} - {end_time or "not set"}'
+            })
+        else:
+            return jsonify({'success': False, 'error': f'Store {store_id} not found'})
+    except Exception as e:
+        logger.error(f"Error setting operation hours: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/get_channels_by_store/<store_id>')
@@ -3057,6 +3116,55 @@ def get_queue_report(channel_id):
         return jsonify(report_data)
     except Exception as e:
         return jsonify({'error': str(e)})
+
+@app.route('/api/generate_daily_report', methods=['POST'])
+def api_generate_daily_report():
+    """Manually trigger daily alert report generation and optional email"""
+    try:
+        from modules.daily_report import generate_daily_report, send_report_email, get_email_config
+        target_date = request.json.get('date') if request.is_json else None
+        filepath = generate_daily_report(app, db_manager, target_date=target_date)
+        if not filepath:
+            return jsonify({'success': False, 'error': 'No active stores or report generation failed'})
+
+        result = {'success': True, 'file': filepath}
+
+        # Optionally send email
+        send_email = request.json.get('send_email', False) if request.is_json else False
+        if send_email:
+            email_config = get_email_config()
+            sent = send_report_email(filepath, email_config)
+            result['email_sent'] = sent
+
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error generating daily report: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/download_daily_report')
+def api_download_daily_report():
+    """Download the latest or a specific date's daily report"""
+    from pathlib import Path
+    report_date = request.args.get('date')
+    reports_dir = os.path.join(BASE_DIR, 'data', 'reports')
+
+    if report_date:
+        filename = f'Daily_Alerts_Report_{report_date}.xlsx'
+    else:
+        # Find the latest report
+        reports_path = Path(reports_dir)
+        if not reports_path.exists():
+            return jsonify({'error': 'No reports found'}), 404
+        files = sorted(reports_path.glob('Daily_Alerts_Report_*.xlsx'), reverse=True)
+        if not files:
+            return jsonify({'error': 'No reports found'}), 404
+        filename = files[0].name
+
+    filepath = os.path.join(reports_dir, filename)
+    if not os.path.exists(filepath):
+        return jsonify({'error': f'Report not found: {filename}'}), 404
+
+    return send_from_directory(reports_dir, filename, as_attachment=True)
 
 @app.route('/api/get_alert_gifs')
 def get_alert_gifs():
@@ -5668,6 +5776,9 @@ if __name__ == '__main__':
     # Start channel loading in background thread
     channel_loader_thread = threading.Thread(target=load_channels_in_background, daemon=True)
     channel_loader_thread.start()
+    
+    # Start daily report scheduler (sends Excel report at 10:30 AM IST)
+    start_daily_report_scheduler(app, db_manager)
     
     # Start Flask server (this will block, but server is now running)
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

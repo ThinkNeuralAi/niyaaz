@@ -707,6 +707,15 @@ class ServiceDisciplineMonitor:
                     )
 
     def _trigger_violation_alert(self, table_id, customer_track, waiting_time, current_time, frame=None):
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        return
+            except Exception:
+                pass
+
         logger.warning(
             f"[{self.channel_id}] Service discipline violation: Table {table_id} "
             f"waiting {waiting_time:.1f}s (threshold {self.settings['wait_time_threshold']}s)"
@@ -967,19 +976,8 @@ class ServiceDisciplineMonitor:
                                     alert_data=alert_info
                                 )
                                 
-                                # Now send Telegram alert with the actual GIF path
-                                if snapshot_path and os.path.exists(gif_path if gif_path else os.path.join("static", snapshot_path)):
-                                    from modules.database import _send_telegram_alert
-                                    _send_telegram_alert(
-                                        channel_id=self.channel_id,
-                                        alert_type='table_service_violation',
-                                        alert_message=alert_message,
-                                        snapshot_path=snapshot_path,
-                                        alert_data=alert_info
-                                    )
-                                    logger.info(f"[{self.channel_id}] ✅ Telegram alert sent with GIF: {gif_filename}")
-                                else:
-                                    logger.warning(f"[{self.channel_id}] ⚠️ GIF path not found, skipping Telegram alert: {snapshot_path}")
+                                # Telegram alert is sent by database method when GIF is saved
+                                logger.info(f"[{self.channel_id}] ✅ Service discipline alert GIF saved - Telegram will be sent by database")
                         
                         logger.info(f"[{self.channel_id}] ✅ Service discipline alert GIF saved to database: {gif_filename}")
                         # Clear stored alert info
@@ -1451,6 +1449,16 @@ class ServiceDisciplineMonitor:
     
     def _trigger_violation_alert_new(self, table_id, customer_track_id, violation_type, wait_time, current_time, frame=None):
         """Trigger alert for new event-based violations"""
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        logger.info(f"[{self.channel_id}] Skipping service discipline alert - outside store operation hours")
+                        return
+            except Exception:
+                pass
+
         customer = self.person_tracks.get(customer_track_id)
         if not customer:
             logger.warning(f"[{self.channel_id}] ⚠️ Cannot trigger alert: customer track {customer_track_id} not found")

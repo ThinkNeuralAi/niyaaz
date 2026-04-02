@@ -254,6 +254,15 @@ class UnauthorizedEntryMonitor:
             frame: Current frame
         """
         try:
+            # Check if within store operation hours
+            if self.db_manager and self.app:
+                try:
+                    with self.app.app_context():
+                        if not self.db_manager.is_within_operation_hours(self.channel_id):
+                            return
+                except Exception:
+                    pass
+
             person_count = len(detections)
             alert_message = f"⚠️ UNAUTHORIZED ENTRY: {person_count} person(s) detected"
             
@@ -301,43 +310,9 @@ class UnauthorizedEntryMonitor:
                     ]
                 })
             
-            # Log to database
-            if self.db_manager:
-                try:
-                    if self.app:
-                        with self.app.app_context():
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                "unauthorized_entry_alert",
-                                alert_message,
-                                {
-                                    "person_count": person_count,
-                                    "detections": [
-                                        {
-                                            "bbox": d["bbox"],
-                                            "confidence": d["confidence"]
-                                        } for d in detections
-                                    ]
-                                }
-                            )
-                    else:
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            "unauthorized_entry_alert",
-                            alert_message,
-                            {
-                                "person_count": person_count,
-                                "detections": [
-                                    {
-                                        "bbox": d["bbox"],
-                                        "confidence": d["confidence"]
-                                    } for d in detections
-                                ]
-                            }
-                        )
-                    logger.info(f"Unauthorized entry alert logged to database: {alert_message}")
-                except Exception as e:
-                    logger.error(f"Failed to log unauthorized entry alert to database: {e}")
+            # NOTE: Database logging is deferred to save_alert_gif (called when 60s GIF recording completes)
+            # This ensures only ONE database entry per alert — with the 60-second GIF attached
+            # Telegram notification is also sent only when the GIF is ready (via save_alert_gif)
             
             self.total_alerts += 1
             self.detection_sessions += 1

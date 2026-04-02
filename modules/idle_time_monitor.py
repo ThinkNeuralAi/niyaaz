@@ -445,19 +445,8 @@ class IdleTimeMonitor:
                                     alert_data=alert_info
                                 )
 
-                                # Send Telegram alert with the GIF
-                                if snapshot_path and os.path.exists(
-                                    gif_path if gif_path else os.path.join("static", snapshot_path)
-                                ):
-                                    from modules.database import _send_telegram_alert
-                                    _send_telegram_alert(
-                                        channel_id=self.channel_id,
-                                        alert_type='idle_time_alert',
-                                        alert_message=alert_message,
-                                        snapshot_path=snapshot_path,
-                                        alert_data=alert_info
-                                    )
-                                    logger.info(f"[{self.channel_id}] ✅ Telegram idle time alert sent: {gif_filename}")
+                                # Telegram alert is sent by database method when GIF is saved
+                                logger.info(f"[{self.channel_id}] ✅ Idle time alert GIF saved - Telegram will be sent by database")
 
                         self._pending_alert_info = None
                         self._pending_snapshot_id = None
@@ -568,6 +557,15 @@ class IdleTimeMonitor:
 
     def _trigger_alert(self, track_id, idle_time, current_time, frame=None):
         """Trigger an idle time alert — start GIF recording, save to DB, emit socketio event."""
+        # Check if within store operation hours
+        if self.db_manager and self.app:
+            try:
+                with self.app.app_context():
+                    if not self.db_manager.is_within_operation_hours(self.channel_id):
+                        return
+            except Exception:
+                pass
+
         track = self.person_tracks.get(track_id)
         if not track:
             return

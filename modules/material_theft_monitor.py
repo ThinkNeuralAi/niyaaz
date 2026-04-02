@@ -505,6 +505,15 @@ class MaterialTheftMonitor:
     def _trigger_alert(self, frame, current_time, detection_count, alert_type="object_placed", person_count=None):
         """Trigger material theft alert with GIF recording"""
         try:
+            # Check if within store operation hours
+            if self.db_manager and self.app:
+                try:
+                    with self.app.app_context():
+                        if not self.db_manager.is_within_operation_hours(self.channel_id):
+                            return
+                except Exception:
+                    pass
+
             if alert_type == "person_near":
                 alert_message = f"👤 Person detected near weighing machine (count: {person_count})"
                 alert_data = {
