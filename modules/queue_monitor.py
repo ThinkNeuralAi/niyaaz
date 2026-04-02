@@ -1074,9 +1074,10 @@ class QueueMonitor:
             logger.debug(f"[{self.channel_id}] V2 violation detected: max_wait={max_wait:.1f}s >= threshold={wait_threshold}s")
 
         # V3: No staff at counter
-        # Only trigger if queue has people AND counter is actually empty (not just below threshold)
-        # This prevents false positives when staff are present but detection is slightly off
-        if self.queue_count > 0 and self.counter_count < counter_required:
+        # Only trigger if customers have been waiting >= 3 minutes AND counter is empty
+        # This avoids false positives during brief staff absences or detection gaps
+        no_counter_staff_wait_threshold = 180.0  # 3 minutes
+        if self.queue_count > 0 and max_wait >= no_counter_staff_wait_threshold and self.counter_count < counter_required:
             # Additional checks to prevent false positives:
             # 1. Check if we have any detections classified as "counter" (even if not counted yet)
             counter_detections = len([t for t in self.person_tracking if t.get("area_type") == "counter" and t.get("in_roi")])
@@ -1090,13 +1091,11 @@ class QueueMonitor:
                 # People detected but not counted - likely tracking/dwell time issue, not absence
                 logger.info(f"[{self.channel_id}] V3 check: {counter_detections} tracked + {current_counter_count} current detections in counter but count=0 (likely tracking issue, skipping alert)")
             else:
-                # No detections at all in counter area - this is a real absence
-                # Don't include counts in the message - they may be stale when displayed
-                # The current counts are shown separately in the display
+                # No detections at all in counter area and customers waiting 3+ minutes
                 violations.append(
-                    "No staff at counter"
+                    f"No staff at counter (customers waiting {int(max_wait)}s)"
                 )
-                logger.info(f"[{self.channel_id}] V3 violation detected: queue={self.queue_count} > 0, counter={self.counter_count} < required={counter_required}, no counter detections found")
+                logger.info(f"[{self.channel_id}] V3 violation detected: queue={self.queue_count}, max_wait={max_wait:.1f}s >= {no_counter_staff_wait_threshold}s, counter={self.counter_count} < required={counter_required}")
 
         # V4: Counter capacity exceeded
         if counter_capacity_max is not None and self.counter_count > counter_capacity_max:
