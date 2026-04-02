@@ -416,41 +416,20 @@ class QueueMonitor:
             # Check if in counter area (only if not in queue)
             # Use bbox overlap check for counter - more forgiving for staff at edges
             elif counter_roi:
-                # Use bbox overlap for counter (more forgiving for staff behind counter)
-                # Use very low overlap ratio (0.1 = 10%) to catch staff who are mostly in ROI
-                in_counter = self._bbox_overlaps_roi(
-                    det["bbox"], counter_roi["polygon"], counter_roi["bbox"], min_overlap_ratio=0.1
+                # Use center point for counter ROI check (same strictness as queue)
+                # Previously used ultra-forgiving checks (100px buffer, 7-point bbox, low overlap)
+                # which caused over-counting by pulling in customers near the counter
+                counter_point = det["center"]
+                in_counter = self._point_in_polygon_optimized(
+                    counter_point, counter_roi["polygon"], counter_roi["bbox"]
                 )
                 
-                # Also check if person's center point is near the counter ROI (within 100 pixels)
-                # This helps catch staff who are slightly outside the ROI but clearly at the counter
-                # Increased from 50 to 100 pixels to be more forgiving for seated staff
+                # Also check bottom-center (feet position) as a secondary check
                 if not in_counter:
-                    center = det.get("center")
-                    if center:
-                        # Check distance from center to ROI polygon
-                        dist = cv2.pointPolygonTest(counter_roi["polygon"], (float(center[0]), float(center[1])), True)
-                        # If within 100 pixels of ROI edge, consider them at counter
-                        if dist > -100:  # Negative means outside, but if within 100px, count it
-                            in_counter = True
-                            if self.frame_count <= 10 or self.frame_count % 60 == 0:
-                                logger.info(f"  Person near counter ROI (within 100px): center={center}, dist={dist:.1f}px")
-                
-                # Also check if any part of the bbox (top, center, bottom) is in the ROI
-                # This is especially important for seated staff whose bbox might be positioned differently
-                if not in_counter:
-                    x1, y1, x2, y2 = det["bbox"]
-                    bbox_top = ((x1 + x2) / 2, y1)
-                    bbox_center = det.get("center", ((x1 + x2) / 2, (y1 + y2) / 2))
-                    bbox_bottom = ((x1 + x2) / 2, y2)
-                    
-                    # Check if any key point is in ROI
-                    for point in [bbox_top, bbox_center, bbox_bottom]:
-                        if cv2.pointPolygonTest(counter_roi["polygon"], (float(point[0]), float(point[1])), False) >= 0:
-                            in_counter = True
-                            if self.frame_count <= 10 or self.frame_count % 60 == 0:
-                                logger.info(f"  Person detected in counter via point check: point={point}")
-                            break
+                    bottom_center = det.get("bottom_center", (counter_point[0], det["bbox"][3]))
+                    in_counter = self._point_in_polygon_optimized(
+                        bottom_center, counter_roi["polygon"], counter_roi["bbox"]
+                    )
                 
                 if in_counter:
                     det["area_type"] = "counter"
