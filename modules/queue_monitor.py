@@ -151,6 +151,10 @@ class QueueMonitor:
         # Counts
         self.queue_count = 0
         self.counter_count = 0
+        
+        # Temporal smoothing for counter count (prevents single-frame spikes)
+        self.counter_count_history = []  # Rolling window of recent counter counts
+        self.counter_smoothing_window = 10  # Use last 10 readings
 
         # Alert state
         self.last_alert_time = None
@@ -1412,6 +1416,22 @@ class QueueMonitor:
                         self.counter_count = len(uniform_dets_in_counter)
                 except Exception as e:
                     logger.warning(f"[{self.channel_id}] ⚠️ Second-level uniform fallback failed: {e}")
+        
+        # Apply temporal smoothing to counter count (prevents single-frame spikes)
+        # Use median of last N readings so transient over-counts don't trigger V4
+        raw_counter_count = self.counter_count
+        self.counter_count_history.append(raw_counter_count)
+        if len(self.counter_count_history) > self.counter_smoothing_window:
+            self.counter_count_history.pop(0)
+        
+        if len(self.counter_count_history) >= 3:
+            # Use median to filter out spikes
+            sorted_history = sorted(self.counter_count_history)
+            mid = len(sorted_history) // 2
+            self.counter_count = sorted_history[mid]
+        
+        if raw_counter_count != self.counter_count and (self.frame_count <= 10 or self.frame_count % 30 == 0):
+            logger.info(f"[{self.channel_id}] Counter smoothing: raw={raw_counter_count}, smoothed={self.counter_count} (history={self.counter_count_history})")
         
         # Store current detections for alert checking
         self._last_counter_dets = counter_dets
