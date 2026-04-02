@@ -66,11 +66,6 @@ class PPEMonitoring:
         # Alert configuration
         self.alert_cooldown = 30.0  # seconds between alerts for same violation
         self.violation_duration_threshold = 0.5  # seconds to confirm violation (reduced for faster alerts)
-
-        # Hairnet false-positive suppression:
-        # If the top of the person bbox is too close to the top of the frame, the head is likely cut off.
-        # In that case, skip "Hairnet not detected" because we cannot see the head region reliably.
-        self.hairnet_head_cut_margin_ratio = 0.03  # 3% of frame height
         
         # State tracking
         self.last_alert_time = {}  # employee_id -> timestamp
@@ -171,30 +166,6 @@ class PPEMonitoring:
             except Exception as e:
                 logger.error(f"Failed to save PPE settings: {e}")
     
-    def _is_head_visible(self, detections, frame_shape):
-        """
-        Heuristic: head is considered visible if we have at least one Person detection whose bbox top (y1)
-        is not near the top edge of the frame (i.e., not truncated).
-        """
-        if not detections or frame_shape is None:
-            return True  # can't decide; keep existing behavior
-        h = int(frame_shape[0])
-        margin_px = int(max(5, self.hairnet_head_cut_margin_ratio * h))
-
-        persons = [d for d in detections if str(d.get('class', '')).lower() == 'person' and d.get('bbox')]
-        if not persons:
-            return True  # can't decide; keep existing behavior
-
-        # If ANY person has y1 > margin, we assume at least one head is visible in frame.
-        for p in persons:
-            try:
-                y1 = int(p['bbox'][1])
-                if y1 > margin_px:
-                    return True
-            except Exception:
-                continue
-        return False
-
     def check_compliance(self, detected_classes, detections=None, frame_shape=None):
         """
         Check PPE compliance based on detected classes
@@ -222,29 +193,13 @@ class PPEMonitoring:
                 pass  # Compliant
         
         # Check hairnet requirement
-        # Note: Model only has "Hairnet" class (no "No_hairnet")
-        # If hairnet is required and not detected, it's a violation
-        # But only flag if we have other detections (person/PPE) to avoid false positives
+        # Model has both "Hairnet" and "No_hairnet" classes.
+        # Only flag a violation when "No_hairnet" is explicitly detected by the model,
+        # meaning the model actually saw a head without a hairnet.
+        # If neither class is detected, the head is simply not visible — not a violation.
         if self.required_items.get('hairnet', False):
-            # Only check hairnet if we have other detections (person or other PPE items)
-            # This prevents false violations when no one is in frame
-            has_other_detections = (
-                'Person' in detected_classes or
-                'Apron' in detected_classes or
-                'No_apron' in detected_classes or
-                'Gloves' in detected_classes or
-                'No_gloves' in detected_classes
-            )
-            
-            if has_other_detections and self.hairnet_positive_class not in detected_classes:
-                # Suppress hairnet violations when heads are cut off at the top of the frame
-                head_visible = self._is_head_visible(detections or [], frame_shape)
-                if not head_visible:
-                    logger.debug(
-                        f"[{self.channel_id}] Skipping hairnet violation (head likely cut off in frame)"
-                    )
-                else:
-                    violations.append('Hairnet not detected')
+            if self.hairnet_violation_class in detected_classes and self.hairnet_positive_class not in detected_classes:
+                violations.append('Hairnet not detected')
         
         is_compliant = len(violations) == 0
         return is_compliant, violations
