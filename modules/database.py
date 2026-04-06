@@ -3085,27 +3085,26 @@ class DatabaseManager:
             logger.error(traceback.format_exc())
             return None
     
-    def get_dresscode_alerts(self, channel_id=None, limit=50):
+    def get_dresscode_alerts(self, channel_id=None, limit=50, store_id=None, days=None):
         """Get recent dress code alerts"""
         try:
+            from datetime import datetime, timedelta
+            
             query = self.DressCodeAlert.query
             
+            if days:
+                start_date = datetime.now() - timedelta(days=days)
+                query = query.filter(self.DressCodeAlert.created_at >= start_date)
+            
             if channel_id:
-                query = query.filter_by(channel_id=channel_id)
+                if isinstance(channel_id, list):
+                    query = query.filter(self.DressCodeAlert.channel_id.in_(channel_id))
+                else:
+                    query = query.filter_by(channel_id=channel_id)
             
             alerts = query.order_by(self.DressCodeAlert.created_at.desc()).limit(limit).all()
             
-            return [{
-                'id': alert.id,
-                'channel_id': alert.channel_id,
-                'employee_id': alert.employee_id,
-                'snapshot_path': alert.snapshot_path,
-                'snapshot_filename': alert.snapshot_filename,
-                'violations': alert.violations,
-                'uniform_color': alert.uniform_color,
-                'created_at': alert.created_at.isoformat() if alert.created_at else None,
-                'timestamp': alert.created_at.isoformat() if alert.created_at else None
-            } for alert in alerts]
+            return alerts
             
         except Exception as e:
             logger.error(f"Error getting dress code alerts: {e}")

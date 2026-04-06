@@ -1473,7 +1473,7 @@
       "channel_id": "camera_18",
       "channel_name": "Dining2",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=4&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=6&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1591,7 +1591,7 @@
       "channel_id": "camera_19",
       "channel_name": "1st floor Dining2",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=1&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=8&subtype=0",
       "enabled": true,
       "modules": [
         {
