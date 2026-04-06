@@ -1271,7 +1271,7 @@
       "channel_id": "camera_16",
       "channel_name": "Takeaway1",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:81/cam/realmonitor?channel=2&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=2&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1423,7 +1423,7 @@
       "channel_id": "camera_17",
       "channel_name": "Takeaway2",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:81/cam/realmonitor?channel=3&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=3&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1567,7 +1567,7 @@
       "channel_id": "camera_18",
       "channel_name": "Dining2",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:81/cam/realmonitor?channel=6&subtype=0",
+      "rtsp_url": "",
       "enabled": true,
       "modules": [
         {
@@ -1685,7 +1685,7 @@
       "channel_id": "camera_19",
       "channel_name": "1st floor Dining2",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:81/cam/realmonitor?channel=8&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=1&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1787,7 +1787,7 @@
       "channel_id": "camera_20",
       "channel_name": "Pantry",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:81/cam/realmonitor?channel=9&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=9&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1849,7 +1849,7 @@
       "channel_id": "camera_21",
       "channel_name": "Staff Dining",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:81/cam/realmonitor?channel=13&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=13&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1889,7 +1889,7 @@
       "channel_id": "camera_22",
       "channel_name": "Channel15",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:81/cam/realmonitor?channel=15&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=15&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1963,7 +1963,7 @@
       "channel_id": "camera_23",
       "channel_name": "Channel16",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:81/cam/realmonitor?channel=16&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=16&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -2049,7 +2049,7 @@
       "channel_id": "camera_24",
       "channel_name": "CAM1",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:82/cam/realmonitor?channel=1&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=1&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -2085,7 +2085,7 @@
       "channel_id": "camera_25",
       "channel_name": "CAM4",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:82/cam/realmonitor?channel=4&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=4&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -2147,7 +2147,7 @@
       "channel_id": "camera_26",
       "channel_name": "CAM5",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:82/cam/realmonitor?channel=5&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=5&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -2209,7 +2209,7 @@
       "channel_id": "camera_27",
       "channel_name": "CAM6",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@115.247.155.102:82/cam/realmonitor?channel=6&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=6&subtype=0",
       "enabled": true,
       "modules": [
         {
