@@ -131,7 +131,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -291,7 +291,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.4,
+            "conf_threshold": 0.9,
             "alert_cooldown": 180.0,
             "detection_duration_threshold": 2.0
           }
@@ -338,7 +338,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -425,7 +425,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -548,7 +548,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -643,7 +643,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -730,7 +730,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -821,7 +821,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -941,7 +941,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1004,7 +1004,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1018,100 +1018,6 @@
               "aspect_ratio_threshold": 0.6,
               "height_drop_ratio": 0.7,
               "cooldown_secs": 60
-            }
-          }
-        }
-      ]
-    },
-    {
-      "channel_id": "camera_11",
-      "channel_name": "Kitchen 3",
-      "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:570/cam/realmonitor?channel=1&subtype=1",
-      "enabled": true,
-      "modules": [
-        {
-          "type": "DressCodeMonitoring",
-          "config": {
-            "uniform_only": true,
-            "enable_hairnet_check": false,
-            "require_hairnet": false,
-            "required_items": {
-              "apron": false,
-              "gloves": false,
-              "hairnet": false
-            },
-            "settings": {
-              "alert_cooldown": 180.0,
-              "violation_duration_threshold": 2.0,
-              "conf_threshold": 0.5
-            }
-          }
-        },
-        {
-          "type": "SmokingDetection",
-          "config": {
-            "conf_threshold": 0.8,
-            "alert_cooldown": 300.0,
-            "detection_duration_threshold": 2.0
-          }
-        },
-        {
-          "type": "FallDetection",
-          "config": {
-            "settings": {
-              "conf_threshold": 0.9,
-              "down_speed_threshold": 40,
-              "aspect_ratio_threshold": 0.6,
-              "height_drop_ratio": 0.7,
-              "cooldown_secs": 180
-            }
-          }
-        }
-      ]
-    },
-    {
-      "channel_id": "camera_12",
-      "channel_name": "Kitchen 4",
-      "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:567/cam/realmonitor?channel=1&subtype=1",
-      "enabled": true,
-      "modules": [
-        {
-          "type": "DressCodeMonitoring",
-          "config": {
-            "uniform_only": true,
-            "enable_hairnet_check": false,
-            "require_hairnet": false,
-            "required_items": {
-              "apron": false,
-              "gloves": false,
-              "hairnet": false
-            },
-            "settings": {
-              "alert_cooldown": 180.0,
-              "violation_duration_threshold": 2.0,
-              "conf_threshold": 0.5
-            }
-          }
-        },
-        {
-          "type": "SmokingDetection",
-          "config": {
-            "conf_threshold": 0.8,
-            "alert_cooldown": 300.0,
-            "detection_duration_threshold": 2.0
-          }
-        },
-        {
-          "type": "FallDetection",
-          "config": {
-            "settings": {
-              "conf_threshold": 0.9,
-              "down_speed_threshold": 40,
-              "aspect_ratio_threshold": 0.6,
-              "height_drop_ratio": 0.7,
-              "cooldown_secs": 180
             }
           }
         }
@@ -1134,7 +1040,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1188,7 +1094,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1196,7 +1102,7 @@
         {
           "type": "PersonSmokingDetection",
           "config": {
-            "conf_threshold": 0.7,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1252,7 +1158,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1271,7 +1177,7 @@
       "channel_id": "camera_16",
       "channel_name": "Takeaway1",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=2&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=2&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1412,7 +1318,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1423,7 +1329,7 @@
       "channel_id": "camera_17",
       "channel_name": "Takeaway2",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=3&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=3&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1556,7 +1462,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1567,7 +1473,7 @@
       "channel_id": "camera_18",
       "channel_name": "Dining2",
       "store_id": "store_2",
-      "rtsp_url": "",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=4&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1674,7 +1580,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 30.0,
             "detection_duration_threshold": 2.0
           }
@@ -1685,7 +1591,7 @@
       "channel_id": "camera_19",
       "channel_name": "1st floor Dining2",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=1&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=1&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1776,7 +1682,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1787,7 +1693,7 @@
       "channel_id": "camera_20",
       "channel_name": "Pantry",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=9&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=9&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1838,7 +1744,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1849,7 +1755,7 @@
       "channel_id": "camera_21",
       "channel_name": "Staff Dining",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=13&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=13&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1867,7 +1773,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 30.0,
             "detection_duration_threshold": 2.0
           }
@@ -1889,7 +1795,7 @@
       "channel_id": "camera_22",
       "channel_name": "Channel15",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=15&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=15&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -1952,7 +1858,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -1963,7 +1869,7 @@
       "channel_id": "camera_23",
       "channel_name": "Channel16",
       "store_id": "store_2",
-      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:82/cam/realmonitor?channel=16&subtype=0",
+      "rtsp_url": "rtsp://admin:NIVPL*@5566@132.154.32.209:81/cam/realmonitor?channel=16&subtype=0",
       "enabled": true,
       "modules": [
         {
@@ -2038,7 +1944,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -2074,7 +1980,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -2136,7 +2042,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -2198,7 +2104,7 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
           }
@@ -2260,9 +2166,598 @@
         {
           "type": "SmokingDetection",
           "config": {
-            "conf_threshold": 0.8,
+            "conf_threshold": 0.9,
             "alert_cooldown": 300.0,
             "detection_duration_threshold": 2.0
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_28",
+      "channel_name": "Takeaway Counter2",
+      "store_id": "store_3",
+      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=2&stream=0.sdp?",
+      "video_file": "",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "QueueMonitor",
+          "config": {
+            "queue_roi": {
+              "points": [
+                {
+                  "x": 0.31781005859375,
+                  "y": 0.8971217105263158
+                },
+                {
+                  "x": 0.36468505859375,
+                  "y": 0.036595394736842105
+                },
+                {
+                  "x": 0.16702880859375,
+                  "y": 0.026069078947368422
+                },
+                {
+                  "x": 0,
+                  "y": 0.526
+                },
+                {
+                  "x": -0.008,
+                  "y": 1.009
+                },
+                {
+                  "x": 0.2,
+                  "y": 0.995
+                }
+              ]
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.40791015625,
+                  "y": 0.05911183608205695
+                },
+                {
+                  "x": 0.99984130859375,
+                  "y": 0.04975328947368421
+                },
+                {
+                  "x": 0.99359130859375,
+                  "y": 0.9984375
+                },
+                {
+                  "x": 0.54697265625,
+                  "y": 0.9983223764519943
+                },
+                {
+                  "x": 0.44931640625,
+                  "y": 0.9956907975046259
+                }
+              ]
+            },
+            "settings": {
+              "dwell_time_threshold": 120,
+              "queue_alert_threshold": 3,
+              "counter_threshold": 1,
+              "alert_cooldown": 180
+            }
+          }
+        },
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 180.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            },
+            "counter_roi": {
+              "points": [
+                {
+                  "x": 0.40791015625,
+                  "y": 0.05911183608205695
+                },
+                {
+                  "x": 0.99984130859375,
+                  "y": 0.04975328947368421
+                },
+                {
+                  "x": 0.99359130859375,
+                  "y": 0.9984375
+                },
+                {
+                  "x": 0.54697265625,
+                  "y": 0.9983223764519943
+                },
+                {
+                  "x": 0.44931640625,
+                  "y": 0.9956907975046259
+                }
+              ]
+            },
+            "allowed_uniforms": {
+              "counter": [
+                "Uniform_grey",
+                "Uniform_black",
+                "Uniform_cream"
+              ]
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.9,
+            "alert_cooldown": 300.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_29",
+      "channel_name": "Dining1",
+      "store_id": "store_3",
+      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=5&stream=0.sdp?",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": true,
+            "require_hairnet": true,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": true
+            },
+            "settings": {
+              "alert_cooldown": 180.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.9,
+            "alert_cooldown": 300.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 10.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_14": {
+                "points": [
+                  {
+                    "x": 0.4690331995487213,
+                    "y": 0.2191145896911621
+                  },
+                  {
+                    "x": 0.88525390625,
+                    "y": 0.24461805555555555
+                  },
+                  {
+                    "x": 0.99384765625,
+                    "y": 0.5779513888888889
+                  },
+                  {
+                    "x": 0.4448144495487213,
+                    "y": 0.6677257008022732
+                  },
+                  {
+                    "x": 0.4690331995487213,
+                    "y": 0.2191145896911621
+                  },
+                  {
+                    "x": 0.4448144495487213,
+                    "y": 0.6677257008022732
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_30",
+      "channel_name": "Dining2",
+      "store_id": "store_3",
+      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=6&stream=0.sdp?",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": true,
+            "require_hairnet": true,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": true
+            },
+            "settings": {
+              "alert_cooldown": 180.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.9,
+            "alert_cooldown": 300.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 10.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_15": {
+                "points": [
+                  {
+                    "x": 0.4690331995487213,
+                    "y": 0.2191145896911621
+                  },
+                  {
+                    "x": 0.88525390625,
+                    "y": 0.24461805555555555
+                  },
+                  {
+                    "x": 0.99384765625,
+                    "y": 0.5779513888888889
+                  },
+                  {
+                    "x": 0.4448144495487213,
+                    "y": 0.6677257008022732
+                  },
+                  {
+                    "x": 0.4690331995487213,
+                    "y": 0.2191145896911621
+                  },
+                  {
+                    "x": 0.4448144495487213,
+                    "y": 0.6677257008022732
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_31",
+      "channel_name": "Dining3",
+      "store_id": "store_3",
+      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=7&stream=0.sdp?",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "enable_hairnet_check": true,
+            "require_hairnet": true,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": true
+            },
+            "settings": {
+              "alert_cooldown": 180.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.9,
+            "alert_cooldown": 300.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "TableServiceMonitor",
+          "config": {
+            "table_rois": {},
+            "settings": {
+              "unclean_duration_threshold": 10.0,
+              "unclean_alert_cooldown": 180.0
+            }
+          }
+        },
+        {
+          "type": "ServiceDisciplineMonitor",
+          "config": {
+            "table_rois": {
+              "table_16": {
+                "points": [
+                  {
+                    "x": 0.4690331995487213,
+                    "y": 0.2191145896911621
+                  },
+                  {
+                    "x": 0.88525390625,
+                    "y": 0.24461805555555555
+                  },
+                  {
+                    "x": 0.99384765625,
+                    "y": 0.5779513888888889
+                  },
+                  {
+                    "x": 0.4448144495487213,
+                    "y": 0.6677257008022732
+                  },
+                  {
+                    "x": 0.4690331995487213,
+                    "y": 0.2191145896911621
+                  },
+                  {
+                    "x": 0.4448144495487213,
+                    "y": 0.6677257008022732
+                  }
+                ]
+              }
+            },
+            "settings": {
+              "wait_time_threshold": 120.0,
+              "alert_cooldown": 300.0
+            }
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_32",
+      "channel_name": "kitchen2",
+      "store_id": "store_3",
+      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=10&stream=0.sdp?",
+      "video_file": "",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 180.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "PPEMonitoring",
+          "config": {
+            "required_items": {
+              "apron": true,
+              "gloves": false,
+              "hairnet": true
+            },
+            "settings": {
+              "alert_cooldown": 300.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.9,
+            "alert_cooldown": 300.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 60
+            }
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_33",
+      "channel_name": "kitchen1",
+      "store_id": "store_3",
+      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=11&stream=0.sdp?",
+      "video_file": "",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "DressCodeMonitoring",
+          "config": {
+            "uniform_only": true,
+            "enable_hairnet_check": false,
+            "require_hairnet": false,
+            "required_items": {
+              "apron": false,
+              "gloves": false,
+              "hairnet": false
+            },
+            "settings": {
+              "alert_cooldown": 180.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "PPEMonitoring",
+          "config": {
+            "required_items": {
+              "apron": true,
+              "gloves": false,
+              "hairnet": true
+            },
+            "settings": {
+              "alert_cooldown": 300.0,
+              "violation_duration_threshold": 2.0,
+              "conf_threshold": 0.5
+            }
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.9,
+            "alert_cooldown": 300.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 60
+            }
+          }
+        }
+      ]
+    },
+    {
+      "channel_id": "camera_34",
+      "channel_name": "Store Room",
+      "store_id": "store_3",
+      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=12&stream=0.sdp?",
+      "enabled": true,
+      "modules": [
+        {
+          "type": "UnauthorizedEntryMonitor",
+          "config": {
+            "alert_cooldown": 180.0,
+            "conf_threshold": 0.5
+          }
+        },
+        {
+          "type": "SmokingDetection",
+          "config": {
+            "conf_threshold": 0.9,
+            "alert_cooldown": 300.0,
+            "detection_duration_threshold": 2.0
+          }
+        },
+        {
+          "type": "FallDetection",
+          "config": {
+            "settings": {
+              "conf_threshold": 0.9,
+              "down_speed_threshold": 40,
+              "aspect_ratio_threshold": 0.6,
+              "height_drop_ratio": 0.7,
+              "cooldown_secs": 180
+            }
           }
         }
       ]

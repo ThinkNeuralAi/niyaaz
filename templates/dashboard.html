@@ -839,10 +839,14 @@
         <div class="app-section">
             <div class="app-header">
                 <h2>📊 Analytics Dashboard</h2>
-                <div class="status">
+                <div class="status" style="display: flex; align-items: center; gap: 15px;">
+                    <button class="btn btn-primary" onclick="downloadDailyReport()" id="download-report-btn"
+                        style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px;">
+                        📥 Download Daily Report
+                    </button>
                     <span class="online-dot"></span>
                     <span>All Services Online</span>
-                    <span style="margin-left: 15px; font-size: 0.85em; color: var(--text-secondary);"
+                    <span style="font-size: 0.85em; color: var(--text-secondary);"
                         id="analytics-refresh-status">
                         Last updated: Just now
                     </span>
@@ -2695,6 +2699,45 @@
         });
 
         // Analytics Dashboard Functions
+
+        // ====== DAILY REPORT DOWNLOAD ======
+        async function downloadDailyReport() {
+            const btn = document.getElementById('download-report-btn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating...';
+
+            try {
+                // Step 1: Generate today's report
+                const genRes = await fetch('/api/generate_daily_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const genData = await genRes.json();
+
+                if (!genData.success) {
+                    alert('Report generation failed: ' + (genData.error || 'Unknown error'));
+                    return;
+                }
+
+                // Step 2: Download the generated report
+                btn.innerHTML = '📥 Downloading...';
+                const link = document.createElement('a');
+                link.href = '/api/download_daily_report';
+                link.download = '';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+            } catch (err) {
+                console.error('Error downloading daily report:', err);
+                alert('Failed to download report. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
 
         // ====== STORE MANAGEMENT FUNCTIONS ======
 
