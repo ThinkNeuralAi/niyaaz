@@ -113,13 +113,14 @@ def _count_alerts_sql(db_manager, channel_ids, usecase_cfg, yesterday_start, yes
         return 0
 
 
-def generate_daily_report(app, db_manager, target_date=None):
+def generate_daily_report(app, db_manager, target_date=None, store_id=None):
     """Generate Excel report for a specific date's alerts across all stores and usecases.
     
     Args:
         app: Flask app instance
         db_manager: DatabaseManager instance
         target_date: Optional date object or string (YYYY-MM-DD). Defaults to yesterday.
+        store_id: Optional store_id to filter report to a single store.
     """
     try:
         import openpyxl
@@ -144,6 +145,10 @@ def generate_daily_report(app, db_manager, target_date=None):
         # Get all active stores
         stores = db_manager.get_all_stores()
         active_stores = [s for s in stores if s.get('is_active')]
+
+        # Filter to specific store if requested
+        if store_id:
+            active_stores = [s for s in active_stores if s.get('store_id') == store_id]
 
         if not active_stores:
             logger.warning("No active stores found, skipping report generation")
@@ -333,7 +338,8 @@ def generate_daily_report(app, db_manager, target_date=None):
     # Save to file
     reports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'reports')
     os.makedirs(reports_dir, exist_ok=True)
-    filename = f'Daily_Alerts_Report_{report_date}.xlsx'
+    store_suffix = f'_{store_id}' if store_id else ''
+    filename = f'Daily_Alerts_Report_{report_date}{store_suffix}.xlsx'
     filepath = os.path.join(reports_dir, filename)
     # If file is locked (e.g. open in Excel), use a timestamped name
     try:

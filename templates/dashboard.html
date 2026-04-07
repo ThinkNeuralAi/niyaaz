@@ -839,10 +839,16 @@
         <div class="app-section">
             <div class="app-header">
                 <h2>📊 Analytics Dashboard</h2>
-                <div class="status" style="display: flex; align-items: center; gap: 15px;">
+                <div class="status" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <input type="date" id="report-date-picker" class="btn"
+                        style="font-size: 0.85em; padding: 5px 10px; color: var(--text-primary); background: #21262d; cursor: pointer;">
+                    <button class="btn" onclick="viewDailyReport()" id="view-report-btn"
+                        style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px;">
+                        👁️ View Report
+                    </button>
                     <button class="btn btn-primary" onclick="downloadDailyReport()" id="download-report-btn"
                         style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px;">
-                        📥 Download Daily Report
+                        📥 Download Report
                     </button>
                     <span class="online-dot"></span>
                     <span>All Services Online</span>
@@ -850,6 +856,16 @@
                         id="analytics-refresh-status">
                         Last updated: Just now
                     </span>
+                </div>
+            </div>
+            <!-- Daily Report View Section (hidden by default) -->
+            <div id="daily-report-view" style="display: none; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 12px 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;">
+                    <h3 id="report-view-title" style="margin: 0; font-size: 1.1em; color: var(--text-primary);">📋 Daily Alert Report</h3>
+                    <button class="btn" onclick="closeDailyReportView()" style="font-size: 0.8em; padding: 4px 12px;">✕ Close</button>
+                </div>
+                <div id="report-table-container" style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 8px;">
+                    <!-- Table will be injected here -->
                 </div>
             </div>
             <div class="app-content">
@@ -2700,19 +2716,39 @@
 
         // Analytics Dashboard Functions
 
-        // ====== DAILY REPORT DOWNLOAD ======
+        // ====== DAILY REPORT FUNCTIONS ======
+
+        // Initialize date picker to yesterday's date
+        (function initReportDatePicker() {
+            const picker = document.getElementById('report-date-picker');
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            picker.value = yesterday.toISOString().split('T')[0];
+            // Don't allow future dates
+            picker.max = new Date().toISOString().split('T')[0];
+        })();
+
+        function getSelectedReportDate() {
+            return document.getElementById('report-date-picker').value;
+        }
+
+        function getSelectedStoreId() {
+            return document.getElementById('store-selector').value;
+        }
+
         async function downloadDailyReport() {
             const btn = document.getElementById('download-report-btn');
             const originalText = btn.innerHTML;
+            const date = getSelectedReportDate();
+            const storeId = getSelectedStoreId();
             btn.disabled = true;
             btn.innerHTML = '⏳ Generating...';
 
             try {
-                // Step 1: Generate today's report
                 const genRes = await fetch('/api/generate_daily_report', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
+                    body: JSON.stringify({ date: date || undefined, store_id: storeId || undefined })
                 });
                 const genData = await genRes.json();
 
@@ -2721,10 +2757,13 @@
                     return;
                 }
 
-                // Step 2: Download the generated report
                 btn.innerHTML = '📥 Downloading...';
+                const params = new URLSearchParams();
+                if (date) params.set('date', date);
+                if (storeId) params.set('store_id', storeId);
+                const queryStr = params.toString() ? '?' + params.toString() : '';
                 const link = document.createElement('a');
-                link.href = '/api/download_daily_report';
+                link.href = '/api/download_daily_report' + queryStr;
                 link.download = '';
                 document.body.appendChild(link);
                 link.click();
@@ -2737,6 +2776,98 @@
                 btn.disabled = false;
                 btn.innerHTML = originalText;
             }
+        }
+
+        async function viewDailyReport() {
+            const btn = document.getElementById('view-report-btn');
+            const originalText = btn.innerHTML;
+            const date = getSelectedReportDate();
+            const storeId = getSelectedStoreId();
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Loading...';
+
+            try {
+                const params = new URLSearchParams();
+                if (date) params.set('date', date);
+                if (storeId) params.set('store_id', storeId);
+                const queryStr = params.toString() ? '?' + params.toString() : '';
+                const res = await fetch('/api/daily_report_data' + queryStr);
+                const data = await res.json();
+
+                if (!data.success) {
+                    alert('Failed to load report: ' + (data.error || 'Unknown error'));
+                    return;
+                }
+
+                renderReportTable(data);
+                document.getElementById('daily-report-view').style.display = 'block';
+                document.getElementById('daily-report-view').scrollIntoView({ behavior: 'smooth' });
+
+            } catch (err) {
+                console.error('Error viewing daily report:', err);
+                alert('Failed to load report. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        function renderReportTable(data) {
+            const container = document.getElementById('report-table-container');
+            const storeName = data.store_id
+                ? document.querySelector(`#store-selector option[value="${data.store_id}"]`)?.textContent || data.store_id
+                : 'All Stores';
+            document.getElementById('report-view-title').textContent = `📋 Daily Alert Report — ${data.date} — ${storeName}`;
+
+            const columns = data.columns;
+            const rows = data.rows;
+
+            let html = `<table style="width: 100%; border-collapse: collapse; font-size: 0.85em; min-width: 800px;">`;
+
+            // Header row
+            html += `<thead><tr style="background: #1F4E79;">
+                <th style="padding: 10px 8px; color: #fff; text-align: center; border: 1px solid #2E75B6; white-space: nowrap;">Location/Outlet</th>
+                <th style="padding: 10px 8px; color: #fff; text-align: center; border: 1px solid #2E75B6;">Total</th>`;
+            for (const col of columns) {
+                html += `<th style="padding: 10px 8px; color: #fff; text-align: center; border: 1px solid #2E75B6; white-space: nowrap;">${col}</th>`;
+            }
+            html += `<th style="padding: 10px 8px; color: #fff; text-align: center; border: 1px solid #2E75B6;">%</th>`;
+            html += `</tr></thead><tbody>`;
+
+            // Data rows
+            rows.forEach((row, idx) => {
+                const bgColor = idx % 2 === 1 ? '#1a2332' : 'transparent';
+                html += `<tr style="background: ${bgColor};">
+                    <td style="padding: 8px; border: 1px solid var(--border-color); color: var(--text-primary); white-space: nowrap;">${row.store_name}</td>
+                    <td style="padding: 8px; border: 1px solid var(--border-color); color: var(--text-primary); text-align: center; font-weight: bold;">${row.total}</td>`;
+                for (const col of columns) {
+                    const val = row.usecases[col] || 0;
+                    const cellColor = val > 0 ? '#ff6b6b' : 'var(--text-secondary)';
+                    html += `<td style="padding: 8px; border: 1px solid var(--border-color); text-align: center; color: ${cellColor};">${val}</td>`;
+                }
+                html += `<td style="padding: 8px; border: 1px solid var(--border-color); text-align: center; color: var(--text-primary);">${row.percentage}%</td>`;
+                html += `</tr>`;
+            });
+
+            // Grand total row
+            html += `<tr style="background: #1F4E79; font-weight: bold;">
+                <td style="padding: 10px 8px; color: #fff; border: 1px solid #2E75B6;">Grand Total</td>
+                <td style="padding: 10px 8px; color: #fff; text-align: center; border: 1px solid #2E75B6;">${data.grand_total}</td>`;
+            const colTotals = {};
+            for (const col of columns) {
+                let colSum = 0;
+                rows.forEach(r => colSum += (r.usecases[col] || 0));
+                colTotals[col] = colSum;
+                html += `<td style="padding: 10px 8px; color: #fff; text-align: center; border: 1px solid #2E75B6;">${colSum}</td>`;
+            }
+            html += `<td style="padding: 10px 8px; color: #fff; text-align: center; border: 1px solid #2E75B6;">100%</td>`;
+            html += `</tr></tbody></table>`;
+
+            container.innerHTML = html;
+        }
+
+        function closeDailyReportView() {
+            document.getElementById('daily-report-view').style.display = 'none';
         }
 
         // ====== STORE MANAGEMENT FUNCTIONS ======

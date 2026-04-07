@@ -3123,7 +3123,8 @@ def api_generate_daily_report():
     try:
         from modules.daily_report import generate_daily_report, send_report_email, get_email_config
         target_date = request.json.get('date') if request.is_json else None
-        filepath = generate_daily_report(app, db_manager, target_date=target_date)
+        store_id = request.json.get('store_id') if request.is_json else None
+        filepath = generate_daily_report(app, db_manager, target_date=target_date, store_id=store_id)
         if not filepath:
             return jsonify({'success': False, 'error': 'No active stores or report generation failed'})
 
@@ -3146,10 +3147,12 @@ def api_download_daily_report():
     """Download the latest or a specific date's daily report"""
     from pathlib import Path
     report_date = request.args.get('date')
+    store_id = request.args.get('store_id')
     reports_dir = os.path.join(BASE_DIR, 'data', 'reports')
 
     if report_date:
-        filename = f'Daily_Alerts_Report_{report_date}.xlsx'
+        store_suffix = f'_{store_id}' if store_id else ''
+        filename = f'Daily_Alerts_Report_{report_date}{store_suffix}.xlsx'
     else:
         # Find the latest report
         reports_path = Path(reports_dir)
@@ -3165,6 +3168,71 @@ def api_download_daily_report():
         return jsonify({'error': f'Report not found: {filename}'}), 404
 
     return send_from_directory(reports_dir, filename, as_attachment=True)
+
+@app.route('/api/daily_report_data')
+def api_daily_report_data():
+    """Return daily report data as JSON for viewing in dashboard"""
+    from modules.daily_report import USECASE_CONFIG, _count_alerts_sql, _get_yesterday_range, IST
+    from datetime import datetime as dt
+
+    report_date = request.args.get('date')
+    store_id = request.args.get('store_id')
+    try:
+        if report_date:
+            target = dt.strptime(report_date, '%Y-%m-%d').date()
+            report_start = dt.combine(target, dt.min.time()).replace(tzinfo=IST)
+            report_end = dt.combine(target, dt.max.time()).replace(tzinfo=IST)
+        else:
+            report_start, report_end = _get_yesterday_range()
+
+        date_str = report_start.strftime('%Y-%m-%d')
+
+        with app.app_context():
+            stores = db_manager.get_all_stores()
+            active_stores = [s for s in stores if s.get('is_active')]
+            if store_id:
+                active_stores = [s for s in active_stores if s.get('store_id') == store_id]
+            all_links = db_manager.get_all_rtsp_links()
+            store_channels = {}
+            for link in all_links:
+                if link.get('is_active') and link.get('channel_id'):
+                    sid = link.get('store_id', '')
+                    store_channels.setdefault(sid, []).append(link['channel_id'])
+
+            usecase_names = list(USECASE_CONFIG.keys())
+            rows = []
+            grand_total = 0
+            for store in active_stores:
+                store_id = store.get('store_id', '')
+                store_name = store.get('name', store_id)
+                channels = store_channels.get(store_id, [])
+                usecases = {}
+                for uc_name, uc_cfg in USECASE_CONFIG.items():
+                    cnt = _count_alerts_sql(db_manager, channels, uc_cfg, report_start, report_end)
+                    usecases[uc_name] = cnt
+                row_total = sum(usecases.values())
+                grand_total += row_total
+                rows.append({
+                    'store_name': store_name,
+                    'total': row_total,
+                    'usecases': usecases
+                })
+
+            # Compute percentages
+            for row in rows:
+                row['percentage'] = round(row['total'] / grand_total * 100, 1) if grand_total > 0 else 0
+
+        return jsonify({
+            'success': True,
+            'date': date_str,
+            'store_id': store_id,
+            'columns': usecase_names,
+            'rows': rows,
+            'grand_total': grand_total
+        })
+    except Exception as e:
+        logger.error(f"Error getting daily report data: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/get_alert_gifs')
 def get_alert_gifs():
