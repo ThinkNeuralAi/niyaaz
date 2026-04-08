@@ -155,7 +155,112 @@ class ServiceDisciplineMonitor:
         self._pending_alert_info = None  # Store alert info for database saving when GIF completes
         self._pending_snapshot_id = None  # Store snapshot ID to update with GIF path when complete
 
+        # Table display names mapping {table_id: display_name}
+        self.table_display_names = {}
+
         self.load_configuration()
+
+    def _get_table_display_name(self, table_id):
+        """Get a human-readable display name for a table.
+        Uses custom label from config if available, otherwise extracts
+        number from table_id (e.g. 'table_1' -> 'Table 1').
+        """
+        if table_id in self.table_display_names:
+            return self.table_display_names[table_id]
+        import re
+        match = re.search(r'(\d+)', str(table_id))
+        if match:
+            return f"Table {match.group(1)}"
+        return str(table_id)
+
+    def _get_table_number(self, table_id):
+        """Extract just the table number/identifier for compact display."""
+        import re
+        if table_id in self.table_display_names:
+            return self.table_display_names[table_id]
+        match = re.search(r'(\d+)', str(table_id))
+        if match:
+            return match.group(1)
+        return str(table_id)
+
+    def _annotate_frame_for_gif(self, frame):
+        """Annotate a frame with the alert table ROI and table number for GIF recording.
+        Draws the table polygon highlighted and a prominent table label so reviewers
+        can immediately identify which table triggered the alert.
+        """
+        if not self._pending_alert_info:
+            return frame
+        
+        table_id = self._pending_alert_info.get('table_id')
+        if not table_id or table_id not in self.table_rois:
+            return frame
+        
+        annotated = frame.copy()
+        h, w = annotated.shape[:2]
+        roi_info = self.table_rois[table_id]
+        polygon = roi_info.get("polygon", [])
+        
+        if not polygon or len(polygon) < 3:
+            return annotated
+        
+        # Convert normalized polygon to pixel coordinates
+        polygon_pixels = []
+        for p in polygon:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                px, py = int(float(p[0]) * w), int(float(p[1]) * h)
+            elif isinstance(p, dict) and 'x' in p and 'y' in p:
+                px, py = int(float(p['x']) * w), int(float(p['y']) * h)
+            else:
+                continue
+            polygon_pixels.append((px, py))
+        
+        if len(polygon_pixels) < 3:
+            return annotated
+        
+        pts = np.array(polygon_pixels, np.int32)
+        
+        # Draw semi-transparent red overlay on the table area
+        overlay = annotated.copy()
+        cv2.fillPoly(overlay, [pts], (0, 0, 180))
+        cv2.addWeighted(overlay, 0.25, annotated, 0.75, 0, annotated)
+        
+        # Draw bright red border around the table
+        cv2.polylines(annotated, [pts], True, (0, 0, 255), 3)
+        
+        # Calculate center of polygon for label placement
+        cx = int(np.mean([p[0] for p in polygon_pixels]))
+        cy = int(np.mean([p[1] for p in polygon_pixels]))
+        
+        table_name = self._get_table_display_name(table_id)
+        violation_type = self._pending_alert_info.get('violation_type', '')
+        wait_time = self._pending_alert_info.get('wait_time', 0)
+        
+        # Draw table label with background
+        label = f"{table_name}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.9
+        thickness = 2
+        (tw, th), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+        
+        # Position label above the polygon center
+        lx = cx - tw // 2
+        ly = cy - 10
+        
+        # Draw background rectangle for readability
+        cv2.rectangle(annotated, (lx - 5, ly - th - 5), (lx + tw + 5, ly + baseline + 5), (0, 0, 180), -1)
+        cv2.putText(annotated, label, (lx, ly), font, font_scale, (255, 255, 255), thickness)
+        
+        # Draw violation info below the table label
+        if violation_type:
+            vtype_label = "Order Wait" if violation_type == "order_wait" else "Service Wait" if violation_type == "service_wait" else violation_type
+            info_label = f"{vtype_label}: {wait_time:.0f}s"
+            (iw, ih), _ = cv2.getTextSize(info_label, font, 0.6, 2)
+            ix = cx - iw // 2
+            iy = ly + baseline + 25
+            cv2.rectangle(annotated, (ix - 4, iy - ih - 4), (ix + iw + 4, iy + 4), (0, 0, 0), -1)
+            cv2.putText(annotated, info_label, (ix, iy), font, 0.6, (0, 255, 255), 2)
+        
+        return annotated
 
     # --- Configuration helpers ---
     def load_configuration(self):
@@ -278,7 +383,10 @@ class ServiceDisciplineMonitor:
                                         "polygon": polygon,
                                         "bbox": (min_x, min_y, max_x, max_y)
                                     }
-                                    logger.info(f"[{self.channel_id}]     ✓ Loaded table '{table_id}' with {len(polygon)} points, bbox: ({min_x:.3f}, {min_y:.3f}, {max_x:.3f}, {max_y:.3f})")
+                                    # Load optional label for display name
+                                    if roi_data.get('label'):
+                                        self.table_display_names[table_id] = roi_data['label']
+                                    logger.info(f"[{self.channel_id}]     ✓ Loaded table '{table_id}' (display: '{self._get_table_display_name(table_id)}') with {len(polygon)} points, bbox: ({min_x:.3f}, {min_y:.3f}, {max_x:.3f}, {max_y:.3f})")
                                 else:
                                     logger.warning(f"[{self.channel_id}]     ⚠️ Table '{table_id}' has only {len(polygon)} valid points (need 3+)")
                             else:
@@ -716,8 +824,10 @@ class ServiceDisciplineMonitor:
             except Exception:
                 pass
 
+        table_name = self._get_table_display_name(table_id)
+        table_number = self._get_table_number(table_id)
         logger.warning(
-            f"[{self.channel_id}] Service discipline violation: Table {table_id} "
+            f"[{self.channel_id}] Service discipline violation: {table_name} "
             f"waiting {waiting_time:.1f}s (threshold {self.settings['wait_time_threshold']}s)"
         )
 
@@ -727,6 +837,8 @@ class ServiceDisciplineMonitor:
             self.socketio.emit("service_discipline_alert", {
                 "channel_id": self.channel_id,
                 "table_id": table_id,
+                "table_name": table_name,
+                "table_number": table_number,
                 "waiting_time": round(waiting_time, 1),
                 "threshold": self.settings["wait_time_threshold"],
                 "timestamp": current_time.isoformat(),
@@ -736,33 +848,30 @@ class ServiceDisciplineMonitor:
         if self.db_manager:
             try:
                 # Log to alerts table as service_discipline_alert
-                alert_message = f"Service discipline violation: Table {table_id} waiting {waiting_time:.1f}s"
+                alert_message = f"Service discipline violation: {table_name} (#{table_number}) waiting {waiting_time:.1f}s"
+                alert_data_legacy = {
+                    "violation_type": "service_discipline",
+                    "table_id": table_id,
+                    "table_name": table_name,
+                    "table_number": table_number,
+                    "waiting_time": waiting_time,
+                    "threshold": self.settings.get("wait_time_threshold", 300.0),
+                    "snapshot_path": snapshot_path
+                }
                 if self.app:
                     with self.app.app_context():
                         self.db_manager.log_alert(
                             self.channel_id,
                             'service_discipline_alert',
                             alert_message,
-                            alert_data={
-                                "violation_type": "service_discipline",
-                                "table_id": table_id,
-                                "waiting_time": waiting_time,
-                                "threshold": self.settings.get("wait_time_threshold", 300.0),
-                                "snapshot_path": snapshot_path
-                            }
+                            alert_data=alert_data_legacy
                         )
                 else:
                     self.db_manager.log_alert(
                         self.channel_id,
                         'service_discipline_alert',
                         alert_message,
-                        alert_data={
-                            "violation_type": "service_discipline",
-                            "table_id": table_id,
-                            "waiting_time": waiting_time,
-                            "threshold": self.settings.get("wait_time_threshold", 300.0),
-                            "snapshot_path": snapshot_path
-                        }
+                        alert_data=alert_data_legacy
                     )
                 logger.info(f"Service discipline alert logged to general alerts table: {alert_message}")
             except Exception as e:
@@ -898,8 +1007,9 @@ class ServiceDisciplineMonitor:
             was_recording = self.gif_recorder.is_recording_alert
             
             if was_recording:
-                # Add frame during alert recording
-                self.gif_recorder.add_alert_frame(frame)
+                # Annotate frame with table ROI and number for GIF, then add
+                gif_frame = self._annotate_frame_for_gif(frame)
+                self.gif_recorder.add_alert_frame(gif_frame)
                 # stop_alert_recording() is called automatically by add_alert_frame when duration is reached
             
             # Check if recording just finished (was recording, now stopped)
@@ -934,7 +1044,12 @@ class ServiceDisciplineMonitor:
                         }
                         
                         alert_info = self._pending_alert_info
-                        alert_message = f"Service discipline violation: Table {alert_info.get('table_id', 'unknown')} {alert_info.get('violation_type', 'violation')} = {alert_info.get('wait_time', 0):.1f}s"
+                        tbl_id = alert_info.get('table_id', 'unknown')
+                        tbl_name = alert_info.get('table_name') or self._get_table_display_name(tbl_id)
+                        tbl_number = alert_info.get('table_number') or self._get_table_number(tbl_id)
+                        alert_info['table_name'] = tbl_name
+                        alert_info['table_number'] = tbl_number
+                        alert_message = f"Service discipline violation: {tbl_name} (#{tbl_number}) {alert_info.get('violation_type', 'violation')} = {alert_info.get('wait_time', 0):.1f}s"
                         
                         if self.app:
                             with self.app.app_context():
@@ -1442,10 +1557,16 @@ class ServiceDisciplineMonitor:
         else:
             logger.info(f"[{self.channel_id}] 📸 Starting GIF recording: frame shape={frame.shape}, table={table_id}, violation={violation_type}")
         
+        # Get human-readable table display name
+        table_name = self._get_table_display_name(table_id)
+        table_number = self._get_table_number(table_id)
+        
         # Prepare alert info for GIF recording
         alert_info = {
             "type": "service_discipline_alert",
             "table_id": table_id,
+            "table_name": table_name,
+            "table_number": table_number,
             "violation_type": violation_type,
             "wait_time": wait_time,
             "channel_id": self.channel_id,
@@ -1526,6 +1647,8 @@ class ServiceDisciplineMonitor:
             self.socketio.emit("service_discipline_alert", {
                 "channel_id": self.channel_id,
                 "table_id": table_id,
+                "table_name": table_name,
+                "table_number": table_number,
                 "customer_track_id": customer_track_id,
                 "violation_type": violation_type,
                 "wait_time": round(wait_time, 1),
@@ -1536,7 +1659,7 @@ class ServiceDisciplineMonitor:
         
         if self.db_manager:
             try:
-                logger.info(f"[{self.channel_id}] 💾 Saving service discipline alert to database: Table {table_id}, {violation_type} = {wait_time:.1f}s")
+                logger.info(f"[{self.channel_id}] 💾 Saving service discipline alert to database: {table_name}, {violation_type} = {wait_time:.1f}s")
                 
                 # Log to alerts table as service_discipline_alert (not table_service_violation)
                 # Determine the correct threshold based on violation type
@@ -1547,7 +1670,23 @@ class ServiceDisciplineMonitor:
                 else:
                     threshold = self.settings.get("wait_time_threshold", 120.0)
                 
-                alert_message = f"Service discipline violation: Table {table_id} {violation_type} = {wait_time:.1f}s (threshold: {threshold}s)"
+                alert_message = f"Service discipline violation: {table_name} (#{table_number}) {violation_type} = {wait_time:.1f}s (threshold: {threshold}s)"
+                
+                alert_data_payload = {
+                    "violation_type": violation_type,
+                    "table_id": table_id,
+                    "table_name": table_name,
+                    "table_number": table_number,
+                    "wait_time": wait_time,
+                    "threshold": threshold,
+                    "snapshot_path": snapshot_path,
+                    "T_seated": customer.get("T_seated"),
+                    "T_order_start": customer.get("T_order_start"),
+                    "T_order_end": customer.get("T_order_end"),
+                    "T_food_served": customer.get("T_food_served"),
+                    "order_wait_time": order_wait_time,
+                    "service_wait_time": service_wait_time
+                }
                 
                 try:
                     if self.app:
@@ -1556,38 +1695,14 @@ class ServiceDisciplineMonitor:
                                 self.channel_id,
                                 'service_discipline_alert',
                                 alert_message,
-                                alert_data={
-                                    "violation_type": violation_type,
-                                    "table_id": table_id,
-                                    "wait_time": wait_time,
-                                    "threshold": threshold,
-                                    "snapshot_path": snapshot_path,
-                                    "T_seated": customer.get("T_seated"),
-                                    "T_order_start": customer.get("T_order_start"),
-                                    "T_order_end": customer.get("T_order_end"),
-                                    "T_food_served": customer.get("T_food_served"),
-                                    "order_wait_time": order_wait_time,  # Use calculated value, not customer dict
-                                    "service_wait_time": service_wait_time  # Use calculated value, not customer dict
-                                }
+                                alert_data=alert_data_payload
                             )
                     else:
                         self.db_manager.log_alert(
                             self.channel_id,
                             'service_discipline_alert',
                             alert_message,
-                            alert_data={
-                                "violation_type": violation_type,
-                                "table_id": table_id,
-                                "wait_time": wait_time,
-                                "threshold": threshold,
-                                "snapshot_path": snapshot_path,
-                                "T_seated": customer.get("T_seated"),
-                                "T_order_start": customer.get("T_order_start"),
-                                "T_order_end": customer.get("T_order_end"),
-                                "T_food_served": customer.get("T_food_served"),
-                                "order_wait_time": order_wait_time,  # Use calculated value, not customer dict
-                                "service_wait_time": service_wait_time  # Use calculated value, not customer dict
-                            }
+                            alert_data=alert_data_payload
                         )
                     logger.info(f"[{self.channel_id}] ✅ Alert logged to general alerts table: {alert_message}")
                 except Exception as e2:
@@ -1750,15 +1865,19 @@ class ServiceDisciplineMonitor:
             # Save to database as service_discipline_alert (not table_service_violation)
             if self.db_manager and self.app:
                 try:
+                    t_name = self._get_table_display_name(table_id)
+                    t_number = self._get_table_number(table_id)
+                    alert_data["table_name"] = t_name
+                    alert_data["table_number"] = t_number
                     with self.app.app_context():
-                        alert_message = f"Service discipline violation: Table {table_id} {wait_type} = {wait_time:.1f}s"
+                        alert_message = f"Service discipline violation: {t_name} (#{t_number}) {wait_type} = {wait_time:.1f}s"
                         self.db_manager.log_alert(
                             self.channel_id,
                             'service_discipline_alert',
                             alert_message,
                             alert_data=alert_data
                         )
-                        logger.info(f"[{self.channel_id}] ✅ Violation saved: Table {table_id}, {wait_type} = {wait_time:.1f}s")
+                        logger.info(f"[{self.channel_id}] ✅ Violation saved: {t_name}, {wait_type} = {wait_time:.1f}s")
                 except Exception as e:
                     logger.error(f"Error saving violation to database: {e}")
             

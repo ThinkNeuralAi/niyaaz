@@ -347,7 +347,12 @@ class TelegramNotifier:
                         service_wait_min = alert_data['service_wait_time'] / 60
                         message_parts.append(f"🍽️ <b>Service Wait:</b> {service_wait_min:.1f} min")
                     if 'table_id' in alert_data:
-                        message_parts.append(f"🪑 <b>Table:</b> {alert_data['table_id']}")
+                        table_display = alert_data.get('table_name') or alert_data['table_id']
+                        table_num = alert_data.get('table_number', '')
+                        if table_num:
+                            message_parts.append(f"🪑 <b>Table:</b> {table_display} (#{table_num})")
+                        else:
+                            message_parts.append(f"🪑 <b>Table:</b> {table_display}")
                     if 'violation_type' in alert_data:
                         violation_type = alert_data['violation_type']
                         if violation_type == 'order_wait':
