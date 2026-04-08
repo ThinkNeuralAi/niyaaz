@@ -735,22 +735,7 @@ class ServiceDisciplineMonitor:
 
         if self.db_manager:
             try:
-                # Save to table_service_violations table
-                # Wrap in app context to avoid "Working outside of application context" error
-                if self.app:
-                    with self.app.app_context():
-                        self.db_manager.add_table_service_violation(
-                            channel_id=self.channel_id,
-                            table_id=table_id,
-                            waiting_time=waiting_time,
-                            snapshot_path=snapshot_path,
-                            timestamp=current_time,
-                            alert_data={"violation_type": "service_discipline", "waiting_time": waiting_time}
-                        )
-                else:
-                    logger.warning(f"[{self.channel_id}] ⚠️ Cannot save violation: Flask app context not available")
-                
-                # Also log to general alerts table for consistency with other modules
+                # Log to alerts table as service_discipline_alert
                 alert_message = f"Service discipline violation: Table {table_id} waiting {waiting_time:.1f}s"
                 if self.app:
                     with self.app.app_context():
@@ -940,22 +925,7 @@ class ServiceDisciplineMonitor:
                         else:
                             snapshot_path = None
                         
-                        # Update TableServiceViolation record with GIF path (if snapshot_id was set)
-                        if self._pending_snapshot_id and self.app:
-                            with self.app.app_context():
-                                violation = self.db_manager.TableServiceViolation.query.get(self._pending_snapshot_id)
-                                if violation:
-                                    violation.snapshot_path = snapshot_path
-                                    violation.snapshot_filename = gif_filename
-                                    # Update file_size if GIF exists
-                                    if gif_path and os.path.exists(gif_path):
-                                        violation.file_size = os.path.getsize(gif_path)
-                                    self.db_manager.db.session.commit()
-                                    logger.info(f"[{self.channel_id}] ✅ Updated violation {self._pending_snapshot_id} with GIF path: {snapshot_path}")
-                                else:
-                                    logger.warning(f"[{self.channel_id}] ⚠️ Violation {self._pending_snapshot_id} not found for update")
-                        
-                        # Also save to alert_gifs table
+                        # Save to alert_gifs table (service_discipline_alert only)
                         gif_payload = {
                             'gif_filename': gif_filename,
                             'gif_path': gif_path,
@@ -1566,31 +1536,9 @@ class ServiceDisciplineMonitor:
         
         if self.db_manager:
             try:
-                logger.info(f"[{self.channel_id}] 💾 Saving violation to database: Table {table_id}, {violation_type} = {wait_time:.1f}s")
+                logger.info(f"[{self.channel_id}] 💾 Saving service discipline alert to database: Table {table_id}, {violation_type} = {wait_time:.1f}s")
                 
-                # Save to table_service_violations table
-                # Wrap in app context to avoid "Working outside of application context" error
-                if self.app:
-                    with self.app.app_context():
-                        result = self.db_manager.add_table_service_violation(
-                            channel_id=self.channel_id,
-                            table_id=table_id,
-                            waiting_time=wait_time,
-                            snapshot_path=snapshot_path,  # Placeholder - will be updated when GIF completes
-                            timestamp=current_time,
-                            alert_data=alert_data
-                        )
-                        if result:
-                            if gif_recording_started:
-                                self._pending_snapshot_id = result  # Store ID to update with GIF path later
-                            logger.info(f"[{self.channel_id}] ✅ Violation saved to table_service_violations: ID={result}, order_wait={order_wait_time}, service_wait={service_wait_time} (GIF recording {'in progress' if gif_recording_started else 'skipped'})")
-                        else:
-                            logger.error(f"[{self.channel_id}] ❌ Failed to save violation: add_table_service_violation returned None")
-                else:
-                    logger.warning(f"[{self.channel_id}] ⚠️ Cannot save violation: Flask app context not available")
-                    result = None
-                
-                # Also log to general alerts table for consistency with other modules
+                # Log to alerts table as service_discipline_alert (not table_service_violation)
                 # Determine the correct threshold based on violation type
                 if violation_type == "order_wait":
                     threshold = self.settings.get("order_wait_threshold", 120.0)
@@ -1799,16 +1747,15 @@ class ServiceDisciplineMonitor:
                 "service_wait_time": customer.get("service_wait_time")
             }
             
-            # Save to database - only violations are saved
+            # Save to database as service_discipline_alert (not table_service_violation)
             if self.db_manager and self.app:
                 try:
                     with self.app.app_context():
-                        self.db_manager.add_table_service_violation(
-                            channel_id=self.channel_id,
-                            table_id=table_id,
-                            waiting_time=wait_time,
-                            snapshot_path=snapshot_path,
-                            timestamp=current_time,
+                        alert_message = f"Service discipline violation: Table {table_id} {wait_type} = {wait_time:.1f}s"
+                        self.db_manager.log_alert(
+                            self.channel_id,
+                            'service_discipline_alert',
+                            alert_message,
                             alert_data=alert_data
                         )
                         logger.info(f"[{self.channel_id}] ✅ Violation saved: Table {table_id}, {wait_type} = {wait_time:.1f}s")

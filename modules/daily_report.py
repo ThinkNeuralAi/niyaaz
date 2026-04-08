@@ -34,7 +34,8 @@ USECASE_CONFIG = {
         'table': 'table_cleanliness_violations',
     },
     'Service Discipline': {
-        'table': 'table_service_violations',
+        'table': 'alert_gifs',
+        'alert_type_filter': 'service_discipline_alert',
     },
     'Unauthorised Entry': {
         'table': 'alert_gifs',
