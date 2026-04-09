@@ -848,7 +848,11 @@
                     </button>
                     <button class="btn btn-primary" onclick="downloadDailyReport()" id="download-report-btn"
                         style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px;">
-                        📥 Download Report
+                        📥 Download Store Report
+                    </button>
+                    <button class="btn" onclick="downloadAllStoresReport()" id="download-all-report-btn"
+                        style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px; background: #1a7f37; border-color: #1a7f37; color: #fff;">
+                        📥 Download All Stores Report
                     </button>
                     <span class="online-dot"></span>
                     <span>All Services Online</span>
@@ -2771,6 +2775,46 @@
 
             } catch (err) {
                 console.error('Error downloading daily report:', err);
+                alert('Failed to download report. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        async function downloadAllStoresReport() {
+            const btn = document.getElementById('download-all-report-btn');
+            const originalText = btn.innerHTML;
+            const date = getSelectedReportDate();
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating...';
+
+            try {
+                const genRes = await fetch('/api/generate_daily_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ date: date || undefined })
+                });
+                const genData = await genRes.json();
+
+                if (!genData.success) {
+                    alert('Report generation failed: ' + (genData.error || 'Unknown error'));
+                    return;
+                }
+
+                btn.innerHTML = '📥 Downloading...';
+                const params = new URLSearchParams();
+                if (date) params.set('date', date);
+                const queryStr = params.toString() ? '?' + params.toString() : '';
+                const link = document.createElement('a');
+                link.href = '/api/download_daily_report' + queryStr;
+                link.download = '';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+            } catch (err) {
+                console.error('Error downloading all stores report:', err);
                 alert('Failed to download report. Please try again.');
             } finally {
                 btn.disabled = false;

@@ -169,9 +169,9 @@ def generate_daily_report(app, db_manager, target_date=None, store_id=None):
         # Collect data: {store_name: {usecase: count}}
         report_data = []
         for store in active_stores:
-            store_id = store.get('store_id', '')
-            store_name = store.get('name', store_id)
-            channels = store_channels.get(store_id, [])
+            sid = store.get('store_id', '')
+            store_name = store.get('name', sid)
+            channels = store_channels.get(sid, [])
 
             row = {'store_name': store_name, 'usecases': {}}
             for uc_name, uc_cfg in USECASE_CONFIG.items():

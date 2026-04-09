@@ -3203,9 +3203,9 @@ def api_daily_report_data():
             rows = []
             grand_total = 0
             for store in active_stores:
-                store_id = store.get('store_id', '')
-                store_name = store.get('name', store_id)
-                channels = store_channels.get(store_id, [])
+                sid = store.get('store_id', '')
+                store_name = store.get('name', sid)
+                channels = store_channels.get(sid, [])
                 usecases = {}
                 for uc_name, uc_cfg in USECASE_CONFIG.items():
                     cnt = _count_alerts_sql(db_manager, channels, uc_cfg, report_start, report_end)
