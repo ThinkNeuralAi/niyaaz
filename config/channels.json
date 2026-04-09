@@ -1282,7 +1282,7 @@
             "allowed_uniforms": {
               "counter": [
                 "Uniform_grey",
-                "Uniform_black",
+                "Uniform_brown",
                 "Uniform_cream"
               ]
             }
@@ -1426,7 +1426,7 @@
             "allowed_uniforms": {
               "counter": [
                 "Uniform_grey",
-                "Uniform_black",
+                "Uniform_brown",
                 "Uniform_cream"
               ]
             }
@@ -2287,8 +2287,7 @@
             "allowed_uniforms": {
               "counter": [
                 "Uniform_grey",
-                "Uniform_black",
-                "Uniform_cream"
+                "Uniform_white"
               ]
             }
           }

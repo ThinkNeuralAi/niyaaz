@@ -114,7 +114,7 @@ class DressCodeMonitoring:
         }
         
         # Alert configuration
-        self.alert_cooldown = 30.0  # seconds between alerts for same violation
+        self.alert_cooldown = 180.0  # seconds (3 minutes) between alerts for same violation
         self.violation_duration_threshold = 0.5  # seconds to confirm violation (reduced for faster alerts)
         
         # State tracking - track violations by uniform position (rounded to grid for stability)
