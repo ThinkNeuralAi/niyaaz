@@ -169,33 +169,7 @@ class YOLODetector:
                 logger.warning("detect_persons: Frame is None or empty")
                 return []
             
-            # **DEBUG: First try without class filtering to see all detections**
-            # This helps diagnose if the model is detecting anything at all
-            results_all = self.model(
-                frame, 
-                verbose=False,
-                imgsz=self.img_size,
-                conf=0.25,  # Lower threshold to see more detections
-                iou=0.45,
-                max_det=50,
-                device=self.device
-            )
-            
-            # Log all detections for debugging
-            all_detections_count = 0
-            all_classes_found = set()
-            for result in results_all:
-                boxes = result.boxes
-                if boxes is not None:
-                    cls = boxes.cls.cpu().numpy()
-                    conf = boxes.conf.cpu().numpy()
-                    all_detections_count += len(boxes)
-                    for class_id, confidence in zip(cls, conf):
-                        all_classes_found.add((int(class_id), float(confidence)))
-            
-            # Now run with person class filtering
-            # Use the confidence threshold directly (no reduction) for yolov8n.pt
-            # YOLOv8 models work well with standard thresholds
+            # Run YOLO with person class filtering
             results = self.model(
                 frame, 
                 verbose=False,
@@ -253,18 +227,11 @@ class YOLODetector:
                 logger.info(f"   - Model: {self.model_path}")
                 logger.info(f"   - Person class ID expected: {self.person_class_id}")
                 logger.info(f"   - Confidence threshold: {self.confidence_threshold}")
-                logger.info(f"   - All detections (conf>=0.25): {all_detections_count}")
-                if all_classes_found:
-                    logger.info(f"   - All classes found: {sorted(all_classes_found)}")
-                else:
-                    logger.warning(f"   - ⚠️ No detections found at all (conf>=0.25)!")
                 logger.info(f"   - Person detections (class={self.person_class_id}, conf>={self.confidence_threshold}): {len(detections)}")
                 if len(detections) > 0:
                     logger.info(f"   - Sample person detection: bbox={detections[0]['bbox']}, conf={detections[0]['confidence']:.2f}, center={detections[0]['center']}")
-                elif all_detections_count > 0:
-                    logger.warning(f"   - ⚠️ Found {all_detections_count} detections but NONE are person class {self.person_class_id}!")
                 else:
-                    logger.warning(f"   - ⚠️ No detections found - model may not be detecting anything in this frame")
+                    logger.warning(f"   - ⚠️ No person detections found in this frame")
             
             return detections
             

@@ -7472,64 +7472,26 @@
 
         async function loadServiceDisciplineAlerts() {
             try {
-                // Fetch all violations, then filter to include only service discipline violations
-                // This includes violations with waiting_time > 0 or violation_type = 'service_discipline'
+                // Fetch service discipline alerts from alert_gifs table
                 const selectedStore = localStorage.getItem('selected_store') || 'store_1';
-                const response = await fetch(`/api/get_table_service_violations?limit=100&days=7&store_id=${selectedStore}`);
+                const response = await fetch(`/api/get_alert_gifs?alert_type=service_discipline_alert&limit=100&days=7&store_id=${selectedStore}`);
                 const result = await response.json();
 
                 if (result.success) {
-                    const allViolations = result.violations || [];
+                    const allAlerts = result.alert_gifs || [];
 
-                    // Filter to include ONLY service discipline violations:
-                    // 1. Must have a table_id (service discipline violations are table-specific)
-                    // 2. Must be explicitly marked as service_discipline in alert_data
-                    // 3. Must NOT be queue-related violations (exclude queue violations that might have been incorrectly saved)
-                    const serviceDisciplineViolations = allViolations.filter(violation => {
-                        // Must have a table_id - service discipline violations are always table-specific
-                        if (!violation.table_id) {
+                    // Filter to only include alerts with actual GIF/media (skip placeholder log_alert entries)
+                    const serviceDisciplineAlerts = allAlerts.filter(alert => {
+                        // Must have a gif_path (real alert with media, not just a log_alert placeholder)
+                        if (!alert.gif_path && !alert.gif_filename) {
                             return false;
                         }
-
-                        // Check alert_data for violation type
-                        if (violation.alert_data) {
-                            try {
-                                const alertData = typeof violation.alert_data === 'string'
-                                    ? JSON.parse(violation.alert_data)
-                                    : violation.alert_data;
-
-                                // Must be explicitly marked as service_discipline
-                                if (alertData?.violation_type === 'service_discipline' ||
-                                    alertData?.violation_type === 'order_wait' ||
-                                    alertData?.violation_type === 'service_wait') {
-                                    // Exclude queue-related violations
-                                    const violationMessage = alertData?.violation_message || alertData?.message || '';
-                                    if (violationMessage.toLowerCase().includes('queue') ||
-                                        violationMessage.toLowerCase().includes('staff at counter')) {
-                                        return false;
-                                    }
-                                    return true;
-                                }
-                            } catch (e) {
-                                // Continue to next check
-                            }
-                        }
-
-                        // If no alert_data, check if it has order_wait_time or service_wait_time
-                        // (these are specific to service discipline, not queue monitoring)
-                        if (violation.order_wait_time !== null && violation.order_wait_time !== undefined) {
-                            return true;
-                        }
-                        if (violation.service_wait_time !== null && violation.service_wait_time !== undefined) {
-                            return true;
-                        }
-
-                        return false;
+                        return true;
                     });
 
-                    console.log(`✅ Found ${serviceDisciplineViolations.length} service discipline violations (filtered from ${allViolations.length} total)`);
-                    displayServiceDisciplineAlerts(serviceDisciplineViolations);
-                    updateServiceDisciplineStats(serviceDisciplineViolations);
+                    console.log(`✅ Found ${serviceDisciplineAlerts.length} service discipline alerts (filtered from ${allAlerts.length} total)`);
+                    displayServiceDisciplineAlerts(serviceDisciplineAlerts);
+                    updateServiceDisciplineStats(serviceDisciplineAlerts);
                 } else {
                     console.error('Failed to load service discipline alerts:', result.error);
                     document.getElementById('service-discipline-alerts-grid').innerHTML = `
@@ -7548,10 +7510,10 @@
             }
         }
 
-        function displayServiceDisciplineAlerts(violations) {
+        function displayServiceDisciplineAlerts(alerts) {
             const grid = document.getElementById('service-discipline-alerts-grid');
 
-            if (!violations || violations.length === 0) {
+            if (!alerts || alerts.length === 0) {
                 grid.innerHTML = `
                 <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
                     <h3>🕒 No Service Discipline Violations</h3>
@@ -7561,76 +7523,70 @@
                 return;
             }
 
-            grid.innerHTML = violations.map(violation => {
-                // Handle snapshot path - normalize Windows backslashes and construct URL
+            grid.innerHTML = alerts.map(alert => {
+                // Parse alert_data for violation details
+                let alertData = alert.alert_data || {};
+                if (typeof alertData === 'string') {
+                    try { alertData = JSON.parse(alertData); } catch(e) { alertData = {}; }
+                }
+
+                // Build snapshot URL from gif_path
                 let snapshotUrl = '/static/icon.png';
-                if (violation.snapshot_path) {
-                    // Normalize path separators (Windows backslashes to forward slashes)
-                    let normalizedPath = violation.snapshot_path.replace(/\\/g, '/');
-
-                    // Remove leading/trailing slashes
-                    normalizedPath = normalizedPath.replace(/^\/+|\/+$/g, '');
-
-                    // Remove 'static/' prefix if present (to avoid double prefix)
-                    if (normalizedPath.toLowerCase().startsWith('static/')) {
-                        normalizedPath = normalizedPath.substring(7);
-                    }
-
-                    // Construct URL - path should already be relative to static/
-                    if (normalizedPath.startsWith('http://') || normalizedPath.startsWith('https://')) {
+                if (alert.gif_path) {
+                    let normalizedPath = alert.gif_path.replace(/\\/g, '/');
+                    if (normalizedPath.startsWith('/')) {
                         snapshotUrl = normalizedPath;
-                    } else if (normalizedPath.startsWith('/')) {
-                        snapshotUrl = normalizedPath;
+                    } else if (normalizedPath.startsWith('static/')) {
+                        snapshotUrl = `/${normalizedPath}`;
                     } else {
                         snapshotUrl = `/static/${normalizedPath}`;
                     }
+                } else if (alert.gif_url) {
+                    snapshotUrl = alert.gif_url;
                 }
 
-                // Debug: log the snapshot URL for troubleshooting
-                console.log('Service Discipline Violation:', {
-                    id: violation.id,
-                    snapshot_path: violation.snapshot_path,
-                    snapshotUrl: snapshotUrl
-                });
-
-                const timestamp = violation.timestamp || violation.created_at || new Date().toISOString();
-                const waitTime = violation.waiting_time || 0; // seconds
-                const orderWaitTime = violation.order_wait_time || null; // seconds
-                const serviceWaitTime = violation.service_wait_time || null; // seconds
+                const timestamp = alert.created_at || new Date().toISOString();
+                const tableId = alertData.table_id || 'Unknown';
+                const tableName = alertData.table_name || `Table ${tableId}`;
+                const tableNumber = alertData.table_number || tableId;
+                const violationType = alertData.violation_type || '';
+                const waitTime = alertData.wait_time || 0; // seconds
+                const orderWaitTime = alertData.order_wait_time || null;
+                const serviceWaitTime = alertData.service_wait_time || null;
 
                 const waitTimeMin = waitTime / 60.0;
                 const orderWaitTimeMin = orderWaitTime ? (orderWaitTime / 60.0) : null;
                 const serviceWaitTimeMin = serviceWaitTime ? (serviceWaitTime / 60.0) : null;
 
-                const thresholdSec = 120;
-                const thresholdMin = thresholdSec / 60.0;
-                const waitTimeColor = waitTime > 180 ? '#ef4444' : (waitTime > thresholdSec ? '#f59e0b' : '#22c55e');
-                const exceededBy = waitTime - thresholdSec; // seconds
-                const exceededByMin = exceededBy / 60.0;
-                const exceededByColor = exceededBy > 0 ? '#ef4444' : '#22c55e';
-
-                // Color coding for order and service wait times
+                const waitTimeColor = waitTime > 180 ? '#ef4444' : (waitTime > 120 ? '#f59e0b' : '#22c55e');
                 const orderWaitColor = orderWaitTime && orderWaitTime > 60 ? '#ef4444' : (orderWaitTime && orderWaitTime > 30 ? '#f59e0b' : '#22c55e');
                 const serviceWaitColor = serviceWaitTime && serviceWaitTime > 300 ? '#ef4444' : (serviceWaitTime && serviceWaitTime > 180 ? '#f59e0b' : '#22c55e');
+
+                // Violation type label
+                let violationLabel = '';
+                if (violationType === 'order_wait') violationLabel = '📝 Order Wait Exceeded';
+                else if (violationType === 'service_wait') violationLabel = '🍽️ Service Wait Exceeded';
+                else violationLabel = '⏱️ Wait Time Exceeded';
 
                 return `
             <div class="alert-gif-card" style="border-left: 4px solid ${waitTimeColor};">
                 <div class="gif-preview">
-                    <img src="${snapshotUrl}" alt="Service Discipline Violation" loading="lazy" style="width: 100%; border-radius: 4px; cursor: pointer; min-height: 150px; object-fit: cover;" onclick="openLightboxFromImage(this)" onerror="this.src='/static/icon.png'; this.onerror=null; console.error('Failed to load image:', '${snapshotUrl}');">
+                    <img src="${snapshotUrl}" alt="Service Discipline Violation" loading="lazy" style="width: 100%; border-radius: 4px; cursor: pointer; min-height: 150px; object-fit: cover;" onclick="openLightboxFromImage(this)" onerror="this.src='/static/icon.png'; this.onerror=null;">
                 </div>
                 <div class="gif-info">
-                    <div class="gif-channel"><strong>📹 Channel:</strong> ${violation.channel_id}</div>
+                    <div class="gif-channel"><strong>📹 Channel:</strong> ${alert.channel_id}</div>
                     <div class="gif-time"><strong>🕐 Time:</strong> ${new Date(timestamp).toLocaleString()}</div>
-                    <div style="color: #f59e0b;"><strong>🍽️ Table:</strong> ${violation.table_id || 'Unknown'}</div>
+                    <div style="color: #f59e0b;"><strong>🍽️ Table:</strong> ${tableName} (#${tableNumber})</div>
+                    <div style="color: ${waitTimeColor}; font-weight: bold; margin-top: 4px;">${violationLabel}</div>
                     
-                    ${orderWaitTime !== null ? `
+                    ${orderWaitTimeMin !== null ? `
                     <div style="color: ${orderWaitColor}; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
                         <strong>📝 Order Wait Time:</strong> ${orderWaitTimeMin.toFixed(1)} min
                         <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 2px;">Time from customer sits to order taken</div>
                     </div>
                     ` : ''}
                     
-                    ${serviceWaitTime !== null ? `
+                    ${serviceWaitTimeMin !== null ? `
                     <div style="color: ${serviceWaitColor}; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
                         <strong>🍽️ Service Wait Time:</strong> ${serviceWaitTimeMin.toFixed(1)} min
                         <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 2px;">Time from order taken to food served</div>
@@ -7638,23 +7594,20 @@
                     ` : ''}
                     
                     <div style="color: ${waitTimeColor}; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
-                        <strong>⏱️ Total Wait Time:</strong> ${waitTimeMin.toFixed(1)} min
-                    </div>
-                    <div style="color: ${exceededByColor}; font-size: 0.9em; margin-top: 4px;">
-                        <strong>Threshold:</strong> ${thresholdMin.toFixed(1)} min | <strong>Exceeded by:</strong> ${exceededBy > 0 ? '+' : ''}${exceededByMin.toFixed(1)} min
+                        <strong>⏱️ Wait Time:</strong> ${waitTimeMin.toFixed(1)} min
                     </div>
                 </div>
                 <div class="gif-actions">
-                    <button class="btn btn-sm btn-primary" onclick="downloadServiceDisciplineSnapshot(${violation.id}, '${violation.snapshot_path || snapshotUrl}')">📥 Download</button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteServiceDisciplineViolation(${violation.id})">🗑️ Delete</button>
+                    <button class="btn btn-sm btn-primary" onclick="downloadServiceDisciplineSnapshot(${alert.id}, '${snapshotUrl}')">📥 Download</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteServiceDisciplineAlert(${alert.id})">🗑️ Delete</button>
                 </div>
             </div>
         `;
             }).join('');
         }
 
-        function updateServiceDisciplineStats(violations) {
-            if (!violations || violations.length === 0) {
+        function updateServiceDisciplineStats(alerts) {
+            if (!alerts || alerts.length === 0) {
                 document.getElementById('sdm-max-order-wait').textContent = '0.0 min';
                 document.getElementById('sdm-max-service-wait').textContent = '0.0 min';
                 document.getElementById('sdm-max-wait').textContent = '0.0 min';
@@ -7662,33 +7615,35 @@
                 return;
             }
 
-            // Calculate stats separately for order wait time and service wait time
-            // Filter out unrealistic/outlier values (e.g., > 1 hour = 3600s)
             const maxReasonableWait = 3600; // 1 hour maximum
 
-            // Calculate max order wait time (time from customer sits to order taken)
-            const orderWaitTimes = violations
-                .map(v => v.order_wait_time)
-                .filter(w => w !== null && w !== undefined && w > 0 && w <= maxReasonableWait);
+            // Extract wait times from alert_data
+            const orderWaitTimes = [];
+            const serviceWaitTimes = [];
+            const totalWaitTimes = [];
+
+            alerts.forEach(alert => {
+                let alertData = alert.alert_data || {};
+                if (typeof alertData === 'string') {
+                    try { alertData = JSON.parse(alertData); } catch(e) { alertData = {}; }
+                }
+                const owt = alertData.order_wait_time;
+                const swt = alertData.service_wait_time;
+                const wt = alertData.wait_time;
+
+                if (owt !== null && owt !== undefined && owt > 0 && owt <= maxReasonableWait) orderWaitTimes.push(owt);
+                if (swt !== null && swt !== undefined && swt > 0 && swt <= maxReasonableWait) serviceWaitTimes.push(swt);
+                if (wt !== null && wt !== undefined && wt > 0 && wt <= maxReasonableWait) totalWaitTimes.push(wt);
+            });
+
             const maxOrderWait = orderWaitTimes.length > 0 ? Math.max(...orderWaitTimes) : 0;
-
-            // Calculate max service wait time (time from order taken to food served)
-            const serviceWaitTimes = violations
-                .map(v => v.service_wait_time)
-                .filter(w => w !== null && w !== undefined && w > 0 && w <= maxReasonableWait);
             const maxServiceWait = serviceWaitTimes.length > 0 ? Math.max(...serviceWaitTimes) : 0;
-
-            // Calculate max total wait time
-            const totalWaitTimes = violations
-                .map(v => v.waiting_time || 0)
-                .filter(w => w > 0 && w <= maxReasonableWait);
             const maxTotalWait = totalWaitTimes.length > 0 ? Math.max(...totalWaitTimes) : 0;
 
-            // Update display
             document.getElementById('sdm-max-order-wait').textContent = `${(maxOrderWait / 60).toFixed(1)} min`;
             document.getElementById('sdm-max-service-wait').textContent = `${(maxServiceWait / 60).toFixed(1)} min`;
             document.getElementById('sdm-max-wait').textContent = `${(maxTotalWait / 60).toFixed(1)} min`;
-            document.getElementById('sdm-alerts-7d').textContent = violations.length;
+            document.getElementById('sdm-alerts-7d').textContent = alerts.length;
         }
 
         function downloadServiceDisciplineSnapshot(violationId, snapshotPath) {
@@ -7701,29 +7656,28 @@
             document.body.removeChild(link);
         }
 
-        async function deleteServiceDisciplineViolation(violationId) {
-            if (!confirm('Delete this service discipline violation?')) {
+        async function deleteServiceDisciplineAlert(alertId) {
+            if (!confirm('Delete this service discipline alert?')) {
                 return;
             }
 
             try {
-                const response = await fetch('/api/delete_table_service_violation', {
-                    method: 'POST',
+                const response = await fetch(`/api/delete_alert_gif/${alertId}`, {
+                    method: 'DELETE',
                     headers: {
                         'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ violation_id: violationId })
+                    }
                 });
 
                 const result = await response.json();
                 if (result.success) {
                     loadServiceDisciplineAlerts();
                 } else {
-                    alert('Error deleting violation: ' + result.error);
+                    alert('Error deleting alert: ' + result.error);
                 }
             } catch (error) {
-                console.error('Error deleting service discipline violation:', error);
-                alert('Error deleting violation. Please try again.');
+                console.error('Error deleting service discipline alert:', error);
+                alert('Error deleting alert. Please try again.');
             }
         }
 
@@ -7732,16 +7686,17 @@
                 return;
             }
 
-            if (!confirm('Are you absolutely sure? This will permanently delete all service discipline violations and orders.')) {
+            if (!confirm('Are you absolutely sure? This will permanently delete all service discipline alerts.')) {
                 return;
             }
 
             try {
-                const response = await fetch('/api/clear_all_table_service_violations', {
+                const response = await fetch('/api/clear_old_alerts', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    body: JSON.stringify({ days: 0, alert_type: 'service_discipline_alert' })
                 });
 
                 const result = await response.json();

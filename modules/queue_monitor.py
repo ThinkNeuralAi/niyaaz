@@ -406,9 +406,9 @@ class QueueMonitor:
                 det["center"] = (cx, cy)
                 det["bottom_center"] = (cx, int(y2))
 
-            # For queue area: use bottom-right corner (feet position) - more accurate for customers
+            # For queue area: use bottom-center (feet position) - accurate for customers
             # For counter area: use center point - better for staff who may be further back
-            queue_point = (x2, y2)  # Bottom-right corner for queue
+            queue_point = det["bottom_center"]  # Bottom-center for queue (feet position)
             counter_point = det["center"]  # Center point for counter (more forgiving for staff behind counter)
 
             # Check if in queue area first (reference uses if/elif, so person can only be in one area)
@@ -445,7 +445,7 @@ class QueueMonitor:
             
             # Debug logging for first few detections
             if self.frame_count <= 10 and len(detections) > 0:
-                logger.info(f"  Detection: bbox={det['bbox']}, center={det.get('center')}, bottom_right=({x2}, {y2}), area={det['area_type']}")
+                logger.info(f"  Detection: bbox={det['bbox']}, center={det.get('center')}, bottom_center={det.get('bottom_center')}, area={det['area_type']}")
 
         # Debug logging
         if self.frame_count <= 10 or self.frame_count % 30 == 0:
@@ -478,16 +478,18 @@ class QueueMonitor:
             if len(queue_dets) > 0:
                 logger.info(f"  Queue detections (first 3):")
                 for i, det in enumerate(queue_dets[:3]):
-                    logger.info(f"    Queue det {i+1}: bbox={det['bbox']}, bottom_right={det.get('bottom_center', 'N/A')}")
+                    logger.info(f"    Queue det {i+1}: bbox={det['bbox']}, bottom_center={det.get('bottom_center', 'N/A')}")
             elif len(detections) > 0 and queue_roi:
                 logger.warning(f"  ⚠️ WARNING: {len(detections)} detections but 0 in queue area! Queue ROI may need adjustment.")
                 # Check first few detections to see why they're not in queue
                 for i, det in enumerate(detections[:3]):
-                    bottom_right = (det['bbox'][2], det['bbox'][3]) if len(det.get('bbox', [])) >= 4 else None
+                    bottom_center = det.get('bottom_center')
+                    if not bottom_center and len(det.get('bbox', [])) >= 4:
+                        bottom_center = ((det['bbox'][0] + det['bbox'][2]) // 2, det['bbox'][3])
                     in_queue = self._point_in_polygon_optimized(
-                        bottom_right, queue_roi["polygon"], queue_roi["bbox"]
-                    ) if bottom_right else False
-                    logger.info(f"    Det {i+1}: bbox={det.get('bbox')}, bottom_right={bottom_right}, in_queue={in_queue}")
+                        bottom_center, queue_roi["polygon"], queue_roi["bbox"]
+                    ) if bottom_center else False
+                    logger.info(f"    Det {i+1}: bbox={det.get('bbox')}, bottom_center={bottom_center}, in_queue={in_queue}")
             if len(counter_dets) > 0:
                 logger.info(f"  Counter detections (first 3):")
                 for i, det in enumerate(counter_dets[:3]):
@@ -567,6 +569,10 @@ class QueueMonitor:
             # Still update tracking for visualization, but count immediately
             centers = [d.get("center") for d in detections if d.get("center")]
             tracks = [t for t in self.person_tracking if t["area_type"] == area_type]
+            
+            # Reset matched flags before matching
+            for t in tracks:
+                t["matched"] = False
             
             # Quick tracking update for visualization
             for c in centers:
@@ -709,9 +715,10 @@ class QueueMonitor:
                         dist = self._euclidean(positions[i-1], positions[i])
                         total_distance += dist
                     
-                    # If person moved more than 100 pixels in last few frames, they're likely passing through
-                    # (adjust threshold based on frame rate - assuming ~10-15 fps, 100 pixels over 3-5 frames is fast)
-                    if total_distance > 100:
+                    # If person moved more than 200 pixels in last few frames, they're likely passing through
+                    # (adjust threshold: at ~10-15 fps, normal queue fidgeting is ~25px/frame,
+                    #  so 5 frames * 25px = 125px is normal. Use 200px to avoid false negatives)
+                    if total_distance > 200:
                         is_stationary = False
                         # Reset entered_roi_time if person is moving too fast (they're passing through)
                         t["entered_roi_time"] = now_ts

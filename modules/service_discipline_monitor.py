@@ -1305,33 +1305,6 @@ class ServiceDisciplineMonitor:
                                             f"customer {customer_id} at table {table_id} "
                                             f"(service wait: {customer['service_wait_time']:.1f}s from order end)"
                                         )
-                                        
-                                        # Save completed order to database (all orders, not just violations)
-                                        if self.db_manager:
-                                            try:
-                                                current_dt = datetime.fromtimestamp(now_ts)
-                                                
-                                                if self.app:
-                                                    with self.app.app_context():
-                                                        self.db_manager.add_table_service_order(
-                                                            channel_id=self.channel_id,
-                                                            table_id=table_id,
-                                                            order_wait_time=customer.get("order_wait_time"),
-                                                            service_wait_time=customer.get("service_wait_time"),
-                                                            timestamp=current_dt,
-                                                            alert_data={
-                                                                "T_seated": customer.get("T_seated"),
-                                                                "T_order_start": customer.get("T_order_start"),
-                                                                "T_order_end": customer.get("T_order_end"),
-                                                                "T_food_served": customer.get("T_food_served"),
-                                                                "order_wait_time": customer.get("order_wait_time"),
-                                                                "service_wait_time": customer.get("service_wait_time")
-                                                            }
-                                                        )
-                                                else:
-                                                    logger.warning(f"[{self.channel_id}] ⚠️ Cannot save completed order: Flask app context not available")
-                                            except Exception as e:
-                                                logger.error(f"[{self.channel_id}] ❌ Failed to save completed order: {e}", exc_info=True)
                     else:
                         # Waiter moved away - clear interaction
                         if interaction_key in ongoing_interactions:
