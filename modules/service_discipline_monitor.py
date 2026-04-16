@@ -1420,6 +1420,18 @@ class ServiceDisciplineMonitor:
                             table_info["last_alert_time"] = now_ts
                             # Update last snapshot time to prevent duplicate
                             customer["last_snapshot_time"] = now_ts
+                            
+                            # Transition to service_wait monitoring:
+                            # Set T_order_start and T_order_end so the next alert for this
+                            # table will be a service_wait alert, not another order_wait.
+                            customer["T_order_start"] = now_ts
+                            customer["T_order_end"] = now_ts
+                            customer["order_wait_time"] = order_wait
+                            logger.info(
+                                f"[{self.channel_id}] 🔄 Table {table_id}, customer {customer_id}: "
+                                f"Transitioned to service_wait monitoring after order_wait alert "
+                                f"(T_order_start={now_ts}, T_order_end={now_ts})"
+                            )
                         else:
                             logger.debug(
                                 f"[{self.channel_id}] Order wait violation detected but in cooldown: "
