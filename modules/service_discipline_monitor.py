@@ -62,6 +62,11 @@ class ServiceDisciplineMonitor:
             "Uniform_cream"
         }
 
+        # Table cleanliness classes (from best.pt)
+        self.table_clean_class = "Table_clean"    # Class 15
+        self.table_unclean_class = "Table_unclean"  # Class 16
+        self.unclean_conf_threshold = 0.85  # High threshold to reduce false positives
+
         # Person class IDs
         self.person_class_id_yolo11n = 0  # Person class in YOLOv11n.pt
         self.person_class_id_best = 12    # Person class in best.pt (for reference)
@@ -142,6 +147,11 @@ class ServiceDisciplineMonitor:
         # Food/plate detection tracking
         # Track food objects near customers
         self.food_detections = []  # List of {bbox, center, timestamp}
+
+        # Table cleanliness state per table
+        # {table_id: {"is_unclean": bool, "last_detected": timestamp, "consecutive_frames": int}}
+        self.table_cleanliness = {}
+        self.unclean_frames_required = 3  # Require consecutive detections before marking unclean
 
         self.frame_count = 0
         self.total_alerts = 0
@@ -972,6 +982,9 @@ class ServiceDisciplineMonitor:
             else:
                 tracks = []
             
+            # 3. Detect table cleanliness from best.pt results (Table_clean / Table_unclean)
+            self._update_table_cleanliness(uniform_results, h, w, now_ts)
+            
             # Process tracked persons and classify them
             self._process_tracked_persons(tracks, person_detections_list, uniform_detections_list, current_time, frame)
             
@@ -1082,6 +1095,95 @@ class ServiceDisciplineMonitor:
             logger.error(f"ServiceDiscipline processing error: {e}", exc_info=True)
             return frame
 
+    # --- Table cleanliness detection ---
+    
+    def _update_table_cleanliness(self, uniform_results, frame_h, frame_w, now_ts):
+        """Detect Table_clean / Table_unclean from best.pt and update per-table state.
+        If a table ROI contains an unclean_table detection, suppress service discipline alerts
+        for that table until the table is detected as clean again."""
+        if len(uniform_results) == 0 or uniform_results[0].boxes is None:
+            return
+        
+        boxes = uniform_results[0].boxes
+        class_names = uniform_results[0].names
+        
+        # Collect clean/unclean detections with their centres (normalised)
+        clean_centers = []
+        unclean_centers = []
+        
+        for box in boxes:
+            class_id = int(box.cls[0])
+            class_name = class_names[class_id]
+            conf = float(box.conf[0])
+            
+            if class_name == self.table_unclean_class and conf >= self.unclean_conf_threshold:
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                cx, cy = (x1 + x2) / 2 / frame_w, (y1 + y2) / 2 / frame_h
+                unclean_centers.append((cx, cy, conf))
+            elif class_name == self.table_clean_class and conf >= self.conf_threshold:
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                cx, cy = (x1 + x2) / 2 / frame_w, (y1 + y2) / 2 / frame_h
+                clean_centers.append((cx, cy, conf))
+        
+        # For each table ROI, check if an unclean or clean detection falls inside
+        for table_id, roi_info in self.table_rois.items():
+            polygon = roi_info.get("polygon")
+            bbox_norm = roi_info.get("bbox")
+            if polygon is None or bbox_norm is None:
+                continue
+            
+            # Initialise cleanliness state if needed
+            if table_id not in self.table_cleanliness:
+                self.table_cleanliness[table_id] = {
+                    "is_unclean": False,
+                    "last_detected": None,
+                    "consecutive_frames": 0
+                }
+            
+            state = self.table_cleanliness[table_id]
+            
+            found_unclean = False
+            found_clean = False
+            
+            for cx, cy, conf in unclean_centers:
+                if self._point_in_polygon((cx, cy), polygon, bbox_norm):
+                    found_unclean = True
+                    break
+            
+            for cx, cy, conf in clean_centers:
+                if self._point_in_polygon((cx, cy), polygon, bbox_norm):
+                    found_clean = True
+                    break
+            
+            if found_unclean:
+                state["consecutive_frames"] += 1
+                state["last_detected"] = now_ts
+                if state["consecutive_frames"] >= self.unclean_frames_required and not state["is_unclean"]:
+                    state["is_unclean"] = True
+                    logger.info(
+                        f"[{self.channel_id}] 🍽️ Table {table_id} marked UNCLEAN "
+                        f"(suppressing service discipline alerts)"
+                    )
+            elif found_clean:
+                if state["is_unclean"]:
+                    logger.info(
+                        f"[{self.channel_id}] ✨ Table {table_id} marked CLEAN "
+                        f"(service discipline alerts re-enabled)"
+                    )
+                state["is_unclean"] = False
+                state["consecutive_frames"] = 0
+                state["last_detected"] = now_ts
+            else:
+                # No detection this frame – keep current state but don't increment counter
+                pass
+    
+    def _is_table_unclean(self, table_id):
+        """Return True if the table is currently detected as unclean (has food/plates)."""
+        state = self.table_cleanliness.get(table_id)
+        if state is None:
+            return False
+        return state["is_unclean"]
+    
     # --- New event-based tracking methods ---
     
     def _process_tracked_persons(self, tracks, person_detections, uniform_detections, current_time, frame):
@@ -1368,6 +1470,15 @@ class ServiceDisciplineMonitor:
         for table_id, table_info in self.table_tracking.items():
             customer_ids = table_info.get("customer_track_ids", [])
             last_alert_time = table_info.get("last_alert_time")
+            
+            # Skip alerts for tables detected as unclean (food still on table)
+            if self._is_table_unclean(table_id):
+                if self.frame_count % 300 == 0:
+                    logger.info(
+                        f"[{self.channel_id}] 🍽️ Table {table_id}: Unclean table detected – "
+                        f"suppressing service discipline alerts until table is clean"
+                    )
+                continue
             
             for customer_id in customer_ids:
                 if customer_id not in self.person_tracks:
