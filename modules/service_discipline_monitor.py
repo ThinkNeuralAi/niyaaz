@@ -65,7 +65,7 @@ class ServiceDisciplineMonitor:
         # Table cleanliness classes (from best.pt)
         self.table_clean_class = "Table_clean"    # Class 15
         self.table_unclean_class = "Table_unclean"  # Class 16
-        self.unclean_conf_threshold = 0.85  # High threshold to reduce false positives
+        self.unclean_conf_threshold = 0.6  # High threshold to reduce false positives
 
         # Person class IDs
         self.person_class_id_yolo11n = 0  # Person class in YOLOv11n.pt
