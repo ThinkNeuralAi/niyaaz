@@ -1630,61 +1630,13 @@ class ServiceDisciplineMonitor:
                 "alert_data": alert_data
             })
         
-        if self.db_manager:
-            try:
-                logger.info(f"[{self.channel_id}] 💾 Saving service discipline alert to database: {table_name}, {violation_type} = {wait_time:.1f}s")
-                
-                # Log to alerts table as service_discipline_alert (not table_service_violation)
-                # Determine the correct threshold based on violation type
-                if violation_type == "order_wait":
-                    threshold = self.settings.get("order_wait_threshold", 120.0)
-                elif violation_type == "service_wait":
-                    threshold = self.settings.get("service_wait_threshold", 300.0)
-                else:
-                    threshold = self.settings.get("wait_time_threshold", 120.0)
-                
-                alert_message = f"Service discipline violation: {table_name} (#{table_number}) {violation_type} = {wait_time:.1f}s (threshold: {threshold}s)"
-                
-                alert_data_payload = {
-                    "violation_type": violation_type,
-                    "table_id": table_id,
-                    "table_name": table_name,
-                    "table_number": table_number,
-                    "wait_time": wait_time,
-                    "threshold": threshold,
-                    "snapshot_path": snapshot_path,
-                    "T_seated": customer.get("T_seated"),
-                    "T_order_start": customer.get("T_order_start"),
-                    "T_order_end": customer.get("T_order_end"),
-                    "T_food_served": customer.get("T_food_served"),
-                    "order_wait_time": order_wait_time,
-                    "service_wait_time": service_wait_time
-                }
-                
-                try:
-                    if self.app:
-                        with self.app.app_context():
-                            self.db_manager.log_alert(
-                                self.channel_id,
-                                'service_discipline_alert',
-                                alert_message,
-                                alert_data=alert_data_payload
-                            )
-                    else:
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'service_discipline_alert',
-                            alert_message,
-                            alert_data=alert_data_payload
-                        )
-                    logger.info(f"[{self.channel_id}] ✅ Alert logged to general alerts table: {alert_message}")
-                except Exception as e2:
-                    logger.error(f"[{self.channel_id}] ❌ Failed to log to general alerts table: {e2}", exc_info=True)
-                    
-            except Exception as e:
-                logger.error(f"[{self.channel_id}] ❌ Failed to save service discipline violation: {e}", exc_info=True)
-        else:
+        # NOTE: DB save is handled when GIF recording completes (in process_frame).
+        # save_alert_gif() is called there, which also sends Telegram notification.
+        # Removed duplicate log_alert() call here to prevent double DB entries.
+        if not self.db_manager:
             logger.warning(f"[{self.channel_id}] ⚠️ db_manager is None - cannot save violation to database")
+        else:
+            logger.info(f"[{self.channel_id}] 💾 Service discipline alert will be saved when GIF recording completes: {table_name}, {violation_type} = {wait_time:.1f}s")
     
     def _save_snapshot_new(self, table_id, customer, violation_type, wait_time, current_time, frame=None):
         """Save snapshot with event information"""

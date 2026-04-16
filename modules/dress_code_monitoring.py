@@ -43,7 +43,7 @@ class DressCodeMonitoring:
         
         # Model configuration - Use custom trained model
         self.model_weight = "models/best.pt"
-        self.conf_threshold = 0.5
+        self.conf_threshold = 0.7
         self.nms_iou = 0.45
         
         # Dress code / uniform classes (from your best.pt model)

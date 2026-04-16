@@ -1539,30 +1539,33 @@ class TableServiceMonitor:
                             else:
                                 logger.warning(f"[{self.channel_id}] ⚠️ Violation {self._pending_violation_id} not found for update")
                     
-                    # Also save to alert_gifs table
-                    gif_payload = {
-                        'gif_filename': gif_filename,
-                        'gif_path': gif_path,
-                        'frame_count': gif_info.get('frame_count', 0),
-                        'duration': gif_info.get('duration', 0.0)
-                    }
-                    
-                    alert_message = self._last_alert_message or f"Table service violation: {violation_type}"
-                    
-                    if self.app:
-                        with self.app.app_context():
-                            self.db_manager.save_alert_gif(
-                                self.channel_id,
-                                'table_cleanliness_alert' if violation_type in ['unclean_table', 'slow_reset'] else 'table_service_alert',
-                                gif_payload,
-                                alert_message=alert_message,
-                                alert_data=alert_data
-                            )
-                            
-                            # Telegram alert is sent by database method when GIF is saved
-                            logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved - Telegram will be sent by database")
-                    
-                    logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved to database: {gif_filename}")
+                    # Also save to alert_gifs table (skip wrong_uniform - only service discipline violations should be saved)
+                    if violation_type == 'wrong_uniform':
+                        logger.info(f"[{self.channel_id}] ℹ️ Skipping alert_gifs save for wrong_uniform - only service discipline violations are saved")
+                    else:
+                        gif_payload = {
+                            'gif_filename': gif_filename,
+                            'gif_path': gif_path,
+                            'frame_count': gif_info.get('frame_count', 0),
+                            'duration': gif_info.get('duration', 0.0)
+                        }
+                        
+                        alert_message = self._last_alert_message or f"Table service violation: {violation_type}"
+                        
+                        if self.app:
+                            with self.app.app_context():
+                                self.db_manager.save_alert_gif(
+                                    self.channel_id,
+                                    'table_cleanliness_alert' if violation_type in ['unclean_table', 'slow_reset'] else 'table_service_alert',
+                                    gif_payload,
+                                    alert_message=alert_message,
+                                    alert_data=alert_data
+                                )
+                                
+                                # Telegram alert is sent by database method when GIF is saved
+                                logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved - Telegram will be sent by database")
+                        
+                        logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved to database: {gif_filename}")
                     # Clear stored alert info
                     self._last_alert_data = None
                     self._last_alert_message = None
@@ -1792,17 +1795,9 @@ class TableServiceMonitor:
             "message": alert_message
         }
         
-        # Start GIF recording (only update tracking data if recording actually starts)
-        logger.info(f"[{self.channel_id}] 🎬 Starting GIF recording for wrong uniform violation")
+        # Skip GIF recording for wrong uniform - not saving to DB/Telegram
+        logger.info(f"[{self.channel_id}] ℹ️ Skipping GIF recording for wrong uniform violation (not saved to DB/Telegram)")
         gif_recording_started = False
-        if not self.gif_recorder.is_recording_alert:
-            self.gif_recorder.start_alert_recording(alert_info)
-            self._last_alert_message = alert_message
-            self._last_alert_data = alert_info
-            self._pending_violation_id = None  # Will be set when violation is saved
-            gif_recording_started = True
-        else:
-            logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this violation")
         
         # Save JPG snapshot immediately to alerts folder
         snapshot_rel_path = self._save_uniform_violation_snapshot(wrong_uniforms, current_time, frame)
@@ -1824,64 +1819,10 @@ class TableServiceMonitor:
                 "message": alert_message
             })
         
-        # Save to database
+        # Skip saving wrong uniform alerts to database and Telegram
+        # Only service_discipline_alert violations should be saved
         if self.db_manager:
-            try:
-                if self.app:
-                    with self.app.app_context():
-                        result = self.db_manager.add_table_service_violation(
-                            channel_id=self.channel_id,
-                            table_id="N/A",  # Uniform violation is not table-specific
-                            waiting_time=0.0,  # Uniform violation doesn't have waiting time
-                            snapshot_path=snapshot_path,  # Placeholder - will be updated when GIF completes
-                            timestamp=current_time,
-                            alert_data={
-                                "violation_type": "wrong_uniform",
-                                "wrong_uniforms": wrong_uniforms,
-                                "message": alert_message
-                            }
-                        )
-                        if result and gif_recording_started:
-                            self._pending_violation_id = result
-                        # Also log to general alerts table
-                        self.db_manager.log_alert(
-                            self.channel_id,
-                            'table_service_alert',
-                            alert_message,
-                            alert_data={
-                                "violation_type": "wrong_uniform",
-                                "wrong_uniforms": wrong_uniforms
-                            }
-                        )
-                        logger.info(f"[{self.channel_id}] ✅ Uniform violation alert saved to database: {uniform_names} (GIF recording in progress)")
-                else:
-                    result = self.db_manager.add_table_service_violation(
-                        channel_id=self.channel_id,
-                        table_id="N/A",  # Uniform violation is not table-specific
-                        waiting_time=0.0,  # Uniform violation doesn't have waiting time
-                        snapshot_path=snapshot_path,  # Placeholder - will be updated when GIF completes
-                        timestamp=current_time,
-                        alert_data={
-                            "violation_type": "wrong_uniform",
-                            "wrong_uniforms": wrong_uniforms,
-                            "message": alert_message
-                        }
-                    )
-                    if result and gif_recording_started:
-                        self._pending_violation_id = result
-                    # Also log to general alerts table
-                    self.db_manager.log_alert(
-                        self.channel_id,
-                        'table_service_alert',
-                        alert_message,
-                        alert_data={
-                            "violation_type": "wrong_uniform",
-                            "wrong_uniforms": wrong_uniforms
-                        }
-                    )
-                    logger.info(f"[{self.channel_id}] ✅ Uniform violation alert saved to database: {uniform_names} (GIF recording in progress)")
-            except Exception as e:
-                logger.error(f"Failed to save uniform violation to database: {e}", exc_info=True)
+            logger.info(f"[{self.channel_id}] ℹ️ Wrong uniform detected ({uniform_names}) - skipping DB/Telegram save (only service discipline violations are saved)")
         
         self.total_alerts += 1
     
