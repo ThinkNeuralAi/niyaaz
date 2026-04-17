@@ -71,6 +71,16 @@ class ServiceDisciplineMonitor:
         self.person_class_id_yolo11n = 0  # Person class in YOLOv11n.pt
         self.person_class_id_best = 12    # Person class in best.pt (for reference)
 
+        # Uniform detection filtering settings
+        # Use bbox overlap (IoU) + center distance for person-uniform matching
+        self.uniform_iou_threshold = 0.15        # Min IoU between person bbox and uniform bbox
+        self.uniform_proximity_px = 150           # Max center distance (px) for fallback matching
+        self.uniform_memory_frames = 90           # Frames to remember uniform status (~3s at 30fps)
+        self.uniform_crop_recheck = True          # Re-run uniform model on cropped person in ROI
+        self.uniform_crop_conf_threshold = 0.3    # Lower confidence for crop-based uniform detection
+        # Per-track uniform memory: {track_id: last_frame_with_uniform}
+        self._track_uniform_memory = {}
+
         # Load both models
         # YOLOv11n for person detection (using YOLODetector for better person detection)
         self.person_detector = YOLODetector(
@@ -619,6 +629,93 @@ class ServiceDisciplineMonitor:
             p1x, p1y = p2x, p2y
         return inside
 
+    # --- Uniform detection helpers ---
+    def _bbox_iou(self, box1, box2):
+        """Calculate IoU between two bounding boxes [x1,y1,x2,y2]."""
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = max(0, box1[2] - box1[0]) * max(0, box1[3] - box1[1])
+        area2 = max(0, box2[2] - box2[0]) * max(0, box2[3] - box2[1])
+        union = area1 + area2 - inter
+        return inter / union if union > 0 else 0.0
+
+    def _check_uniform_on_person(self, person_bbox, uniform_detections):
+        """Check if any uniform detection overlaps with a person bbox using IoU + proximity."""
+        px1, py1, px2, py2 = person_bbox
+        pcx, pcy = (px1 + px2) / 2, (py1 + py2) / 2
+        person_h = max(1, py2 - py1)
+
+        for uni_det in uniform_detections:
+            uni_bbox = uni_det.get("bbox", [])
+            if len(uni_bbox) != 4:
+                continue
+            # IoU check
+            iou = self._bbox_iou(person_bbox, uni_bbox)
+            if iou >= self.uniform_iou_threshold:
+                return True
+            # Proximity check scaled to person height
+            ucx, ucy = (uni_bbox[0] + uni_bbox[2]) / 2, (uni_bbox[1] + uni_bbox[3]) / 2
+            dist = math.hypot(pcx - ucx, pcy - ucy)
+            if dist < self.uniform_proximity_px and dist < person_h * 0.8:
+                return True
+        return False
+
+    def _crop_uniform_recheck(self, frame, person_bbox):
+        """Crop the person region and run the uniform model to verify uniform presence."""
+        try:
+            h, w = frame.shape[:2]
+            x1 = max(0, int(person_bbox[0]))
+            y1 = max(0, int(person_bbox[1]))
+            x2 = min(w, int(person_bbox[2]))
+            y2 = min(h, int(person_bbox[3]))
+            if x2 - x1 < 20 or y2 - y1 < 20:
+                return False
+            crop = frame[y1:y2, x1:x2]
+            results = self.uniform_model(crop, conf=self.uniform_crop_conf_threshold, iou=self.nms_iou, verbose=False)
+            if len(results) > 0 and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    cls_id = int(box.cls[0])
+                    cls_name = results[0].names[cls_id]
+                    if cls_name in self.server_uniform_classes:
+                        return True
+            return False
+        except Exception as e:
+            logger.debug(f"[{self.channel_id}] Uniform crop recheck failed: {e}")
+            return False
+
+    def _is_person_in_uniform(self, track_id, person_bbox, uniform_detections, frame=None):
+        """Determine if a person is wearing a uniform using multi-stage detection.
+
+        Stage 1: Check bbox overlap / proximity with existing uniform detections.
+        Stage 2: Check temporal memory (uniform detected in recent frames).
+        Stage 3: Crop-based re-check using the uniform model on the person region.
+        """
+        # Stage 1: Check overlap with current-frame uniform detections
+        if self._check_uniform_on_person(person_bbox, uniform_detections):
+            self._track_uniform_memory[track_id] = self.frame_count
+            return True
+
+        # Stage 2: Temporal memory – was uniform seen on this track recently?
+        last_uniform_frame = self._track_uniform_memory.get(track_id)
+        if last_uniform_frame is not None:
+            if (self.frame_count - last_uniform_frame) <= self.uniform_memory_frames:
+                return True
+            else:
+                # Memory expired
+                del self._track_uniform_memory[track_id]
+
+        # Stage 3: Crop-based re-check (only if person is inside a table ROI)
+        if self.uniform_crop_recheck and frame is not None:
+            if self._crop_uniform_recheck(frame, person_bbox):
+                self._track_uniform_memory[track_id] = self.frame_count
+                logger.debug(f"[{self.channel_id}] Uniform detected via crop recheck for track {track_id}")
+                return True
+
+        return False
+
     # --- Processing helpers ---
     def _classify_detections(self, detections, frame_shape):
         h, w = frame_shape[:2]
@@ -641,25 +738,19 @@ class ServiceDisciplineMonitor:
                 if self._point_in_polygon(point_to_check, polygon, bbox_norm):
                     # Check if this is a person detection (from YOLOv11n, class_id=0)
                     if class_id == self.person_class_id_yolo11n or class_name == "Person":
-                        # Check nearby uniform to exclude servers
-                        has_uniform = False
-                        for other_det in detections:
-                            other_class = other_det.get("class_name", "")
-                            if other_class in self.server_uniform_classes:
-                                ob = other_det.get("bbox", [])
-                                if len(ob) == 4:
-                                    ocx = (ob[0] + ob[2]) / 2
-                                    ocy = (ob[1] + ob[3]) / 2
-                                    dcx = (x1 + x2) / 2
-                                    dcy = (y1 + y2) / 2
-                                    distance = math.hypot(ocx - dcx, ocy - dcy)
-                                    if distance < 100:
-                                        has_uniform = True
-                                        logger.debug(f"[{self.channel_id}] Table {table_id}: Person has nearby uniform (dist={distance:.1f}px), excluding from customers")
-                                        break
+                        # Check nearby uniform to exclude servers using improved matching
+                        uniform_dets = [
+                            d for d in detections
+                            if d.get("class_name", "") in self.server_uniform_classes and len(d.get("bbox", [])) == 4
+                        ]
+                        has_uniform = self._check_uniform_on_person([x1, y1, x2, y2], [
+                            {"bbox": d["bbox"]} for d in uniform_dets
+                        ])
                         if not has_uniform:
                             table_detections[table_id]["customers"].append(det)
                             logger.debug(f"[{self.channel_id}] Table {table_id}: Classified as customer (Person without nearby uniform)")
+                        else:
+                            logger.debug(f"[{self.channel_id}] Table {table_id}: Person has uniform, excluding from customers")
                     elif class_name in self.server_uniform_classes:
                         table_detections[table_id]["servers"].append(det)
                         logger.debug(f"[{self.channel_id}] Table {table_id}: Classified as server (Uniform: {class_name})")
@@ -1187,7 +1278,14 @@ class ServiceDisciplineMonitor:
     # --- New event-based tracking methods ---
     
     def _process_tracked_persons(self, tracks, person_detections, uniform_detections, current_time, frame):
-        """Process DeepSORT tracks and classify as customer/waiter, detect T_seated event"""
+        """Process DeepSORT tracks and classify as customer/waiter, detect T_seated event.
+
+        Uses multi-stage uniform detection to prevent false alerts when staff
+        enter table ROI areas (e.g. arranging tables/plates):
+          1. Bbox overlap / proximity with uniform detections in current frame
+          2. Temporal memory — uniform seen on this track in recent frames
+          3. Crop-based re-check — run uniform model on cropped person region
+        """
         h, w = frame.shape[:2]
         now_ts = current_time.timestamp()
         
@@ -1200,15 +1298,6 @@ class ServiceDisciplineMonitor:
             ltrb = track.to_tlbr()  # left, top, right, bottom
             track_bbox = [int(ltrb[0]), int(ltrb[1]), int(ltrb[2]), int(ltrb[3])]
             track_center = [(track_bbox[0] + track_bbox[2]) / 2, (track_bbox[1] + track_bbox[3]) / 2]
-            
-            # Check if this track has a uniform detection nearby
-            is_waiter = False
-            for uni_det in uniform_detections:
-                uni_center = uni_det["center"]
-                distance = math.hypot(track_center[0] - uni_center[0], track_center[1] - uni_center[1])
-                if distance < 50:  # Uniform detection is very close to person
-                    is_waiter = True
-                    break
             
             # Determine which table this person is in
             table_id = None
@@ -1227,6 +1316,19 @@ class ServiceDisciplineMonitor:
             # Ensure table tracking structure exists
             if table_id:
                 self._ensure_table_tracking(table_id)
+            
+            # Multi-stage uniform check (IoU + temporal memory + crop recheck)
+            # Only do crop-based recheck for persons inside a table ROI to save GPU
+            is_waiter = self._is_person_in_uniform(
+                track_id, track_bbox, uniform_detections,
+                frame=frame if table_id else None
+            )
+            
+            if is_waiter and table_id:
+                logger.debug(
+                    f"[{self.channel_id}] Table {table_id}: Track {track_id} identified as STAFF "
+                    f"(uniform detected) - skipping service discipline monitoring"
+                )
             
             # Initialize or update track
             if track_id not in self.person_tracks:
@@ -1269,9 +1371,25 @@ class ServiceDisciplineMonitor:
                 self.person_tracks[track_id]["bbox"] = track_bbox
                 self.person_tracks[track_id]["last_seen"] = now_ts
                 
-                # Update type if we detect uniform
+                # Update type if we detect uniform — also reclassify customer→waiter
                 if is_waiter:
+                    prev_type = self.person_tracks[track_id]["type"]
                     self.person_tracks[track_id]["type"] = "waiter"
+                    
+                    # If previously classified as customer, remove from customer list
+                    if prev_type == "customer" and table_id and table_id in self.table_tracking:
+                        if track_id in self.table_tracking[table_id]["customer_track_ids"]:
+                            self.table_tracking[table_id]["customer_track_ids"].remove(track_id)
+                            # Reset customer timing events since this is actually staff
+                            self.person_tracks[track_id]["T_seated"] = None
+                            self.person_tracks[track_id]["T_order_start"] = None
+                            self.person_tracks[track_id]["T_order_end"] = None
+                            self.person_tracks[track_id]["T_food_served"] = None
+                            logger.info(
+                                f"[{self.channel_id}] 👔 Track {track_id} reclassified: customer → waiter "
+                                f"(uniform detected at table {table_id}) - service discipline reset"
+                            )
+                    
                     if table_id and table_id not in self.table_tracking:
                         self.table_tracking[table_id] = {
                             "customer_track_ids": [],
@@ -1625,6 +1743,9 @@ class ServiceDisciplineMonitor:
                 else:
                     if track_id in self.table_tracking[table_id]["waiter_track_ids"]:
                         self.table_tracking[table_id]["waiter_track_ids"].remove(track_id)
+            
+            # Clean up uniform memory for this track
+            self._track_uniform_memory.pop(track_id, None)
             
             del self.person_tracks[track_id]
     
