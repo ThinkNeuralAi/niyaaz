@@ -438,7 +438,7 @@ def load_channels_from_config(config_file='config/channels.json'):
                     continue
                     
                 # Start the channel processing
-                start_channel_processing(channel_id, app_name, 'rtsp', video_source=rtsp_url)
+                start_channel_processing(channel_id, app_name, 'rtsp', video_source=rtsp_url, config=module.get('config', {}))
                 
         logger.info("✅ JSON configuration loaded successfully")
         
@@ -528,6 +528,18 @@ def start_channel_processing(channel_id, app_name, source_type, video_source=Non
             module = DressCodeMonitoring(channel_id, socketio, db_manager, app)
         elif app_name == 'PPEMonitoring':
             module = PPEMonitoring(channel_id, socketio, db_manager, app)
+            # Apply config from channels.json (kitchen_roi, settings, required_items)
+            if config:
+                if 'settings' in config:
+                    module.set_settings(config['settings'])
+                if 'required_items' in config:
+                    module.required_items.update(config['required_items'])
+                if 'kitchen_roi' in config and config['kitchen_roi']:
+                    roi_data = config['kitchen_roi']
+                    if isinstance(roi_data, dict) and 'points' in roi_data:
+                        module.set_kitchen_roi(roi_data['points'])
+                    elif isinstance(roi_data, list):
+                        module.set_kitchen_roi(roi_data)
         elif app_name == 'CrowdDetection':
             module = CrowdDetection(channel_id, socketio, db_manager, app)
         elif app_name == 'TableServiceMonitor':
@@ -5201,6 +5213,30 @@ def set_queue_roi():
         return jsonify({'success': False, 'error': f'DressCodeMonitoring not found for channel {channel_id}'})
     except Exception as e:
         logger.error(f"Error setting queue ROI: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/set_kitchen_roi', methods=['POST'])
+@login_required
+def set_kitchen_roi():
+    """Set kitchen ROI for PPE compliance monitoring"""
+    data = request.json
+    channel_id = data.get('channel_id')
+    roi_points = data.get('roi_points', [])
+    
+    if not channel_id:
+        return jsonify({'success': False, 'error': 'channel_id is required'})
+    
+    try:
+        if channel_id in shared_video_processors:
+            processor = shared_video_processors[channel_id]
+            if 'PPEMonitoring' in processor.modules:
+                module = processor.modules['PPEMonitoring']
+                module.set_kitchen_roi(roi_points)
+                return jsonify({'success': True, 'message': 'Kitchen ROI set successfully for PPE monitoring'})
+        
+        return jsonify({'success': False, 'error': f'PPEMonitoring not found for channel {channel_id}'})
+    except Exception as e:
+        logger.error(f"Error setting kitchen ROI: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/set_table_roi', methods=['POST'])

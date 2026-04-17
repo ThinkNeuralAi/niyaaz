@@ -63,6 +63,9 @@ class PPEMonitoring:
             "hairnet": True     # Default: require hairnet
         }
         
+        # Kitchen ROI for area-specific PPE compliance
+        self.kitchen_roi = []  # List of normalized points [{'x': 0.0-1.0, 'y': 0.0-1.0}, ...]
+        
         # Alert configuration
         self.alert_cooldown = 30.0  # seconds between alerts for same violation
         self.violation_duration_threshold = 0.5  # seconds to confirm violation (reduced for faster alerts)
@@ -109,6 +112,87 @@ class PPEMonitoring:
         logger.info(f"PPE Monitoring initialized for channel {channel_id}")
         self.load_configuration()
     
+    def set_kitchen_roi(self, roi_points):
+        """
+        Set kitchen area ROI for PPE compliance checking
+        
+        Args:
+            roi_points: List of normalized points [{'x': 0.0-1.0, 'y': 0.0-1.0}, ...]
+        """
+        self.kitchen_roi = roi_points
+        logger.info(f"Kitchen ROI set for channel {self.channel_id}: {len(roi_points)} points")
+        
+        # Save to database if available
+        if self.db_manager:
+            try:
+                from flask import has_app_context
+                if has_app_context():
+                    self.db_manager.save_channel_config(
+                        self.channel_id, 'PPEMonitoring', 'kitchen_roi', roi_points
+                    )
+            except Exception as e:
+                logger.error(f"Failed to save kitchen ROI: {e}")
+    
+    def point_in_polygon(self, point, polygon):
+        """Check if a point is inside a polygon (using ray casting algorithm)"""
+        if len(polygon) < 3:
+            return False
+        
+        x, y = point
+        n = len(polygon)
+        inside = False
+        
+        p1x, p1y = polygon[0]
+        for i in range(1, n + 1):
+            p2x, p2y = polygon[i % n]
+            if y > min(p1y, p2y):
+                if y <= max(p1y, p2y):
+                    if x <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+        
+        return inside
+    
+    def get_kitchen_roi_pixels(self, frame_width, frame_height):
+        """Convert normalized kitchen ROI coordinates to pixel coordinates"""
+        if not self.kitchen_roi:
+            return []
+        
+        pixel_points = []
+        for point in self.kitchen_roi:
+            x = int(point['x'] * frame_width)
+            y = int(point['y'] * frame_height)
+            pixel_points.append((x, y))
+        return pixel_points
+    
+    def is_detection_in_kitchen(self, bbox, frame_width, frame_height):
+        """
+        Check if a detection's center is within the kitchen ROI
+        
+        Args:
+            bbox: Bounding box [x1, y1, x2, y2]
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
+            
+        Returns:
+            bool: True if detection is in kitchen area
+        """
+        if not self.kitchen_roi:
+            return True  # No kitchen ROI configured, process all detections
+        
+        kitchen_polygon = self.get_kitchen_roi_pixels(frame_width, frame_height)
+        if not kitchen_polygon:
+            return True
+        
+        x1, y1, x2, y2 = bbox
+        center_x = int((x1 + x2) / 2)
+        center_y = int((y1 + y2) / 2)
+        
+        return self.point_in_polygon((center_x, center_y), kitchen_polygon)
+    
     def load_configuration(self):
         """Load saved configuration from database"""
         if self.db_manager:
@@ -131,6 +215,14 @@ class PPEMonitoring:
                     if 'conf_threshold' in config:
                         self.conf_threshold = float(config['conf_threshold'])
                     logger.info(f"Loaded PPE configuration from database for {self.channel_id}")
+                
+                # Load kitchen ROI
+                kitchen_roi = self.db_manager.get_channel_config(
+                    self.channel_id, 'PPEMonitoring', 'kitchen_roi'
+                )
+                if kitchen_roi:
+                    self.kitchen_roi = kitchen_roi
+                    logger.info(f"Loaded kitchen ROI for channel {self.channel_id}: {len(kitchen_roi)} points")
             except Exception as e:
                 logger.error(f"Failed to load PPE configuration: {e}")
     
@@ -253,6 +345,8 @@ class PPEMonitoring:
         detections = []
         detected_classes = set()
         
+        frame_height, frame_width = frame.shape[:2]
+        
         if results.boxes is not None and len(results.boxes) > 0:
             for box in results.boxes:
                 cls_id = int(box.cls[0])
@@ -264,8 +358,14 @@ class PPEMonitoring:
                     # Process PPE-related classes and Person class (for context)
                     if class_name in self.ppe_classes or class_name == 'Person':
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        bbox = [int(x1), int(y1), int(x2), int(y2)]
+                        
+                        # Filter by kitchen ROI if configured
+                        if not self.is_detection_in_kitchen(bbox, frame_width, frame_height):
+                            continue
+                        
                         detections.append({
-                            'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                            'bbox': bbox,
                             'class': class_name,
                             'confidence': conf
                         })
@@ -460,6 +560,18 @@ class PPEMonitoring:
     def _annotate_frame(self, frame, detections, is_compliant, violations):
         """Annotate frame with PPE detection results"""
         annotated = frame.copy()
+        frame_height, frame_width = annotated.shape[:2]
+        
+        # Draw kitchen ROI if configured
+        if self.kitchen_roi:
+            kitchen_polygon = self.get_kitchen_roi_pixels(frame_width, frame_height)
+            if len(kitchen_polygon) >= 3:
+                pts = np.array(kitchen_polygon, dtype=np.int32).reshape((-1, 1, 2))
+                cv2.polylines(annotated, [pts], isClosed=True, color=(255, 165, 0), thickness=2)
+                # Label the ROI
+                if kitchen_polygon:
+                    cv2.putText(annotated, "Kitchen ROI", (kitchen_polygon[0][0] + 5, kitchen_polygon[0][1] + 20),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 165, 0), 2)
         
         # Draw bounding boxes
         for det in detections:
