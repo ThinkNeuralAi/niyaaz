@@ -605,6 +605,7 @@ class ServiceDisciplineMonitor:
         self.table_tracking[table_id].setdefault("customer_track_ids", [])
         self.table_tracking[table_id].setdefault("waiter_track_ids", [])
         self.table_tracking[table_id].setdefault("last_alert_time", None)
+        self.table_tracking[table_id].setdefault("order_alert_triggered", False)
         # Legacy keys for compatibility
         self.table_tracking[table_id].setdefault("customer_tracks", [])
         self.table_tracking[table_id].setdefault("server_tracks", [])
@@ -1598,6 +1599,10 @@ class ServiceDisciplineMonitor:
                     )
                 continue
             
+            # Reset order_alert_triggered when table has no customers
+            if not customer_ids:
+                table_info["order_alert_triggered"] = False
+            
             for customer_id in customer_ids:
                 if customer_id not in self.person_tracks:
                     continue
@@ -1608,6 +1613,19 @@ class ServiceDisciplineMonitor:
                 
                 # Check order wait time violation
                 if customer["T_order_start"] is None:
+                    # If order_wait alert was already triggered for this table,
+                    # auto-transition this customer to service_wait monitoring
+                    if table_info.get("order_alert_triggered"):
+                        customer["T_order_start"] = now_ts
+                        customer["T_order_end"] = now_ts
+                        customer["order_wait_time"] = now_ts - customer["T_seated"]
+                        logger.info(
+                            f"[{self.channel_id}] 🔄 Table {table_id}, customer {customer_id}: "
+                            f"Auto-transitioned to service_wait monitoring "
+                            f"(table already has order_wait alert)"
+                        )
+                        continue
+                    
                     # Still waiting for order
                     order_wait = now_ts - customer["T_seated"]
                     
@@ -1661,6 +1679,25 @@ class ServiceDisciplineMonitor:
                                 f"Transitioned to service_wait monitoring after order_wait alert "
                                 f"(T_order_start={now_ts}, T_order_end={now_ts})"
                             )
+                            
+                            # Mark table-level flag so ALL customers at this table
+                            # transition to service_wait (no more order_wait alerts)
+                            table_info["order_alert_triggered"] = True
+                            
+                            # Transition ALL other customers at this table to service_wait
+                            for other_id in customer_ids:
+                                if other_id == customer_id:
+                                    continue
+                                other = self.person_tracks.get(other_id)
+                                if other and other.get("T_order_start") is None and other.get("T_seated"):
+                                    other["T_order_start"] = now_ts
+                                    other["T_order_end"] = now_ts
+                                    other["order_wait_time"] = now_ts - other["T_seated"]
+                                    logger.info(
+                                        f"[{self.channel_id}] 🔄 Table {table_id}, customer {other_id}: "
+                                        f"Auto-transitioned to service_wait monitoring "
+                                        f"(table order_wait alert triggered by customer {customer_id})"
+                                    )
                         else:
                             logger.debug(
                                 f"[{self.channel_id}] Order wait violation detected but in cooldown: "
