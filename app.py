@@ -3131,7 +3131,7 @@ def get_queue_report(channel_id):
 
 @app.route('/api/generate_daily_report', methods=['POST'])
 def api_generate_daily_report():
-    """Manually trigger daily alert report generation and optional email"""
+    """Manually trigger daily alert report generation and email (enabled by default)."""
     try:
         from modules.daily_report import generate_daily_report, send_report_email, get_email_config
         target_date = request.json.get('date') if request.is_json else None
@@ -3142,12 +3142,18 @@ def api_generate_daily_report():
 
         result = {'success': True, 'file': filepath}
 
-        # Optionally send email
-        send_email = request.json.get('send_email', False) if request.is_json else False
+        # Send email by default unless explicitly disabled.
+        send_email = True
+        if request.is_json and 'send_email' in request.json:
+            send_email = bool(request.json.get('send_email'))
+
         if send_email:
             email_config = get_email_config()
             sent = send_report_email(filepath, email_config)
             result['email_sent'] = sent
+        else:
+            result['email_sent'] = False
+            result['email_skipped'] = True
 
         return jsonify(result)
     except Exception as e:

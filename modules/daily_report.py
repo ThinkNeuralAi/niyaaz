@@ -440,9 +440,15 @@ Sakshi.AI System"""
 
 def get_email_config():
     """Load email configuration from environment variables or config file"""
+    smtp_port_env = os.getenv('EMAIL_SMTP_PORT', '587')
+    try:
+        smtp_port = int(smtp_port_env)
+    except (TypeError, ValueError):
+        smtp_port = 587
+
     config = {
         'smtp_host': os.getenv('EMAIL_SMTP_HOST', ''),
-        'smtp_port': int(os.getenv('EMAIL_SMTP_PORT', '587')),
+        'smtp_port': smtp_port,
         'smtp_user': os.getenv('EMAIL_SMTP_USER', ''),
         'smtp_password': os.getenv('EMAIL_SMTP_PASSWORD', ''),
         'sender': os.getenv('EMAIL_SENDER', ''),
@@ -455,24 +461,45 @@ def get_email_config():
     if recipients_str:
         config['recipients'] = [r.strip() for r in recipients_str.split(',') if r.strip()]
 
-    # Fallback to config file
-    if not config['smtp_host']:
-        try:
-            import json
-            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'default.json')
-            with open(config_path, 'r') as f:
-                file_config = json.load(f)
-                email_cfg = file_config.get('email', {})
-                config['smtp_host'] = email_cfg.get('smtp_host', config['smtp_host'])
-                config['smtp_port'] = email_cfg.get('smtp_port', config['smtp_port'])
-                config['smtp_user'] = email_cfg.get('smtp_user', config['smtp_user'])
-                config['smtp_password'] = email_cfg.get('smtp_password', config['smtp_password'])
-                config['sender'] = email_cfg.get('sender', config['sender'])
-                config['use_ssl'] = email_cfg.get('use_ssl', config['use_ssl'])
-                if not config['recipients']:
-                    config['recipients'] = email_cfg.get('recipients', [])
-        except Exception:
-            pass
+    # Fill missing values from config file. Environment variables keep precedence.
+    try:
+        import json
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'default.json')
+        with open(config_path, 'r') as f:
+            file_config = json.load(f)
+            email_cfg = file_config.get('email', {})
+
+            if not config['smtp_host']:
+                config['smtp_host'] = (email_cfg.get('smtp_host', '') or '').strip()
+
+            if os.getenv('EMAIL_SMTP_PORT') is None:
+                file_port = email_cfg.get('smtp_port')
+                if file_port is not None:
+                    try:
+                        config['smtp_port'] = int(file_port)
+                    except (TypeError, ValueError):
+                        pass
+
+            if not config['smtp_user']:
+                config['smtp_user'] = (email_cfg.get('smtp_user', '') or '').strip()
+
+            if not config['smtp_password']:
+                config['smtp_password'] = (email_cfg.get('smtp_password', '') or '').strip()
+
+            if not config['sender']:
+                config['sender'] = (email_cfg.get('sender', '') or '').strip()
+
+            if os.getenv('EMAIL_USE_SSL') is None:
+                config['use_ssl'] = bool(email_cfg.get('use_ssl', config['use_ssl']))
+
+            if not config['recipients']:
+                file_recipients = email_cfg.get('recipients', [])
+                if isinstance(file_recipients, str):
+                    config['recipients'] = [r.strip() for r in file_recipients.split(',') if r.strip()]
+                elif isinstance(file_recipients, list):
+                    config['recipients'] = [str(r).strip() for r in file_recipients if str(r).strip()]
+    except Exception:
+        pass
 
     if not config['sender']:
         config['sender'] = config['smtp_user']
