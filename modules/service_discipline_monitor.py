@@ -605,7 +605,6 @@ class ServiceDisciplineMonitor:
         self.table_tracking[table_id].setdefault("customer_track_ids", [])
         self.table_tracking[table_id].setdefault("waiter_track_ids", [])
         self.table_tracking[table_id].setdefault("last_alert_time", None)
-        self.table_tracking[table_id].setdefault("order_alert_triggered", False)
         # Legacy keys for compatibility
         self.table_tracking[table_id].setdefault("customer_tracks", [])
         self.table_tracking[table_id].setdefault("server_tracks", [])
@@ -1513,8 +1512,7 @@ class ServiceDisciplineMonitor:
                                     
                                     if not has_previous_interaction or (now_ts - customer["T_order_end"]) >= food_served_gap:
                                         customer["T_food_served"] = now_ts
-                                        # Service wait time = time from when order was taken to when food is served
-                                        # This is the time from T_order_start to T_food_served
+                                        # Service wait time = T_food_served - T_order_start (per spec)
                                         if customer["T_order_start"]:
                                             customer["service_wait_time"] = now_ts - customer["T_order_start"]
                                         else:
@@ -1524,7 +1522,7 @@ class ServiceDisciplineMonitor:
                                         logger.info(
                                             f"[{self.channel_id}] 🍽️ T_food_served: Waiter {waiter_id} served food to "
                                             f"customer {customer_id} at table {table_id} "
-                                            f"(service wait: {customer['service_wait_time']:.1f}s from order end)"
+                                            f"(service wait: {customer['service_wait_time']:.1f}s from order start)"
                                         )
                     else:
                         # Waiter moved away - clear interaction
@@ -1599,10 +1597,6 @@ class ServiceDisciplineMonitor:
                     )
                 continue
             
-            # Reset order_alert_triggered when table has no customers
-            if not customer_ids:
-                table_info["order_alert_triggered"] = False
-            
             for customer_id in customer_ids:
                 if customer_id not in self.person_tracks:
                     continue
@@ -1613,19 +1607,6 @@ class ServiceDisciplineMonitor:
                 
                 # Check order wait time violation
                 if customer["T_order_start"] is None:
-                    # If order_wait alert was already triggered for this table,
-                    # auto-transition this customer to service_wait monitoring
-                    if table_info.get("order_alert_triggered"):
-                        customer["T_order_start"] = now_ts
-                        customer["T_order_end"] = now_ts
-                        customer["order_wait_time"] = now_ts - customer["T_seated"]
-                        logger.info(
-                            f"[{self.channel_id}] 🔄 Table {table_id}, customer {customer_id}: "
-                            f"Auto-transitioned to service_wait monitoring "
-                            f"(table already has order_wait alert)"
-                        )
-                        continue
-                    
                     # Still waiting for order
                     order_wait = now_ts - customer["T_seated"]
                     
@@ -1679,25 +1660,6 @@ class ServiceDisciplineMonitor:
                                 f"Transitioned to service_wait monitoring after order_wait alert "
                                 f"(T_order_start={now_ts}, T_order_end={now_ts})"
                             )
-                            
-                            # Mark table-level flag so ALL customers at this table
-                            # transition to service_wait (no more order_wait alerts)
-                            table_info["order_alert_triggered"] = True
-                            
-                            # Transition ALL other customers at this table to service_wait
-                            for other_id in customer_ids:
-                                if other_id == customer_id:
-                                    continue
-                                other = self.person_tracks.get(other_id)
-                                if other and other.get("T_order_start") is None and other.get("T_seated"):
-                                    other["T_order_start"] = now_ts
-                                    other["T_order_end"] = now_ts
-                                    other["order_wait_time"] = now_ts - other["T_seated"]
-                                    logger.info(
-                                        f"[{self.channel_id}] 🔄 Table {table_id}, customer {other_id}: "
-                                        f"Auto-transitioned to service_wait monitoring "
-                                        f"(table order_wait alert triggered by customer {customer_id})"
-                                    )
                         else:
                             logger.debug(
                                 f"[{self.channel_id}] Order wait violation detected but in cooldown: "
@@ -1712,12 +1674,8 @@ class ServiceDisciplineMonitor:
                 # Check service wait time violation
                 elif customer["T_food_served"] is None and customer["T_order_start"] is not None:
                     # Order taken but food not served
-                    # Use T_order_end if available, otherwise fallback to T_order_start
-                    if customer.get("T_order_end"):
-                        service_wait = now_ts - customer["T_order_end"]
-                    else:
-                        # Waiter still at table or hasn't left yet - don't count service wait
-                        service_wait = 0
+                    # Service wait time = T_food_served - T_order_start (per spec)
+                    service_wait = now_ts - customer["T_order_start"]
                     
                     # Log service wait progress periodically
                     if self.frame_count % 300 == 0 and service_wait > 30:  # Log if waiting more than 30 seconds
@@ -1727,9 +1685,8 @@ class ServiceDisciplineMonitor:
                             f"T_order_end={'set' if customer.get('T_order_end') else 'not set'})"
                         )
                     
-                    # Only track service wait if waiter has left (T_order_end is set)
                     # Only save to database when violation threshold is exceeded
-                    if service_wait > service_threshold and customer.get("T_order_end"):
+                    if service_wait > service_threshold:
                         time_since_last_alert = (now_ts - last_alert_time) if last_alert_time else float('inf')
                         if last_alert_time is None or time_since_last_alert > cooldown:
                             logger.warning(
@@ -1863,12 +1820,8 @@ class ServiceDisciplineMonitor:
         
         if customer.get("T_order_start"):
             if violation_type == "service_wait":
-                # Service wait violation: calculate from T_order_start to now (since T_food_served hasn't happened yet)
-                # Use T_order_end if available, otherwise T_order_start
-                if customer.get("T_order_end"):
-                    service_wait_time = now_ts - customer["T_order_end"]
-                else:
-                    service_wait_time = now_ts - customer["T_order_start"]
+                # Service wait violation: calculate from T_order_start to now (per spec: T_food_served - T_order_start)
+                service_wait_time = now_ts - customer["T_order_start"]
             elif customer.get("T_food_served"):
                 # Food was served: calculate from T_order_start to T_food_served
                 service_wait_time = customer["T_food_served"] - customer["T_order_start"]
@@ -1986,12 +1939,10 @@ class ServiceDisciplineMonitor:
                 else:
                     order_wait_display = now_ts - customer["T_seated"]
             
-            # Calculate service wait time
+            # Calculate service wait time (Service wait time = T_food_served - T_order_start per spec)
             if customer.get("T_order_start"):
                 if customer.get("T_food_served"):
                     service_wait_display = customer["T_food_served"] - customer["T_order_start"]
-                elif customer.get("T_order_end"):
-                    service_wait_display = now_ts - customer["T_order_end"]
                 else:
                     service_wait_display = now_ts - customer["T_order_start"]
             

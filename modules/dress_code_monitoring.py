@@ -114,11 +114,12 @@ class DressCodeMonitoring:
         }
         
         # Alert configuration
-        self.alert_cooldown = 180.0  # seconds between alerts for same violation
+        self.alert_cooldown = 300.0  # seconds between alerts for the same camera/channel
         self.violation_duration_threshold = 0.5  # seconds to confirm violation (reduced for faster alerts)
         
         # State tracking - track violations by uniform position (rounded to grid for stability)
         self.last_alert_time = {}  # position_key -> timestamp
+        self.last_camera_alert_time = 0.0  # camera/channel-level alert timestamp
         self.violation_start_time = {}  # position_key -> timestamp
         self.current_violations = {}  # position_key -> list of violations
         
@@ -892,7 +893,10 @@ class DressCodeMonitoring:
                     
                     # If violation sustained and cooldown passed
                     if violation_duration >= self.violation_duration_threshold:
-                        last_alert = self.last_alert_time.get(position_key, 0)
+                        last_position_alert = self.last_alert_time.get(position_key, 0)
+                        # Enforce cooldown at camera/channel level as well, so repeated alerts
+                        # from the same camera are throttled regardless of tracked position.
+                        last_alert = max(last_position_alert, self.last_camera_alert_time)
                         # Calculate time since last alert (if no previous alert, set to cooldown + 1 to pass)
                         if last_alert == 0:
                             time_since_last_alert = self.alert_cooldown + 1  # No previous alert, allow this one
@@ -941,6 +945,7 @@ class DressCodeMonitoring:
                                 logger.error(f"[{self.channel_id}] ❌ Failed to send alert: {e}", exc_info=True)
                             
                             self.last_alert_time[position_key] = t_now
+                            self.last_camera_alert_time = t_now
                         else:
                             # Still in cooldown
                             if self.frame_count % 5 == 0:
