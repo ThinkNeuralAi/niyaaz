@@ -121,7 +121,7 @@ class ServiceDisciplineMonitor:
         self.settings = {
             "order_wait_threshold": 300.0,   # seconds - alert if order wait > threshold (default: 5 minutes)
             "service_wait_threshold": 180.0, # seconds - alert if service wait > threshold (default: 3 minutes)
-            "alert_cooldown": 300.0,         # seconds between repeated alerts
+            "alert_cooldown": 1800.0,        # seconds between repeated alerts (30 minutes per table)
             "track_timeout": 15.0,           # seconds before removing stale tracks
             "interaction_distance": 200.0,   # pixels - waiter near customer for interaction
             "interaction_duration": 2.0,     # seconds - waiter must stay near customer this long
@@ -1348,7 +1348,9 @@ class ServiceDisciplineMonitor:
                     "service_wait_time": None,
                     "interaction_history": [],
                     "last_snapshot_time": None,
-                    "waiter_at_table": False  # Track if waiter is currently at table
+                    "waiter_at_table": False,  # Track if waiter is currently at table
+                    "order_alert_pending": False,  # Alert fires when staff enters ROI
+                    "service_alert_pending": False  # Alert fires when staff enters ROI again
                 }
                 
                 # If customer and in table ROI, set T_seated
@@ -1492,6 +1494,7 @@ class ServiceDisciplineMonitor:
                                     customer["T_order_start"] = now_ts
                                     customer["order_wait_time"] = now_ts - customer["T_seated"]
                                     customer["waiter_at_table"] = True
+                                    customer["order_alert_pending"] = True  # Staff entered ROI - fire alert
                                     customer["interaction_history"].append((waiter_id, now_ts, "order"))
                                     logger.info(
                                         f"[{self.channel_id}] 📝 T_order_start: Waiter {waiter_id} interacted with "
@@ -1518,6 +1521,7 @@ class ServiceDisciplineMonitor:
                                         else:
                                             # Fallback: use T_order_end if T_order_start not set (shouldn't happen)
                                             customer["service_wait_time"] = now_ts - customer.get("T_order_end", now_ts)
+                                        customer["service_alert_pending"] = True  # Staff entered ROI with food - fire alert
                                         customer["interaction_history"].append((waiter_id, now_ts, "food"))
                                         logger.info(
                                             f"[{self.channel_id}] 🍽️ T_food_served: Waiter {waiter_id} served food to "
@@ -1605,116 +1609,58 @@ class ServiceDisciplineMonitor:
                 if customer["T_seated"] is None:
                     continue
                 
-                # Check order wait time violation
-                if customer["T_order_start"] is None:
-                    # Still waiting for order
-                    order_wait = now_ts - customer["T_seated"]
-                    
-                    # Log wait time progress periodically
-                    if self.frame_count % 300 == 0 and order_wait > 60:  # Log if waiting more than 1 minute
-                        logger.info(
-                            f"[{self.channel_id}] ⏱️ Table {table_id}, customer {customer_id}: "
-                            f"Order wait {order_wait:.1f}s (threshold: {order_threshold}s, "
-                            f"remaining: {order_threshold - order_wait:.1f}s)"
-                        )
-                    # Also log when approaching threshold (within 30 seconds) - ALWAYS log, not just every 300 frames
-                    if order_wait > (order_threshold - 30) and order_wait <= order_threshold:
+                # Check order wait time violation - alert fires when staff enters ROI (not on a timer)
+                if customer.get("order_alert_pending"):
+                    order_wait = customer.get("order_wait_time") or 0
+                    time_since_last_alert = (now_ts - last_alert_time) if last_alert_time else float('inf')
+                    if last_alert_time is None or time_since_last_alert > cooldown:
                         logger.warning(
-                            f"[{self.channel_id}] ⚠️ APPROACHING THRESHOLD: Table {table_id}, customer {customer_id}: "
-                            f"Order wait {order_wait:.1f}s (threshold: {order_threshold}s, "
-                            f"remaining: {order_threshold - order_wait:.1f}s)"
+                            f"[{self.channel_id}] ⚠️ Order wait alert: Table {table_id}, "
+                            f"customer {customer_id} - staff arrived after {order_wait:.1f}s "
+                            f"(threshold: {order_threshold}s)"
                         )
-                    
-                    # Only save to database when violation threshold is exceeded
-                    if order_wait > order_threshold:
-                        time_since_last_alert = (now_ts - last_alert_time) if last_alert_time else float('inf')
-                        if last_alert_time is None or time_since_last_alert > cooldown:
-                            logger.warning(
-                                f"[{self.channel_id}] ⚠️ Order wait violation: Table {table_id}, "
-                                f"customer {customer_id} waiting {order_wait:.1f}s (threshold: {order_threshold}s)"
-                            )
-                            logger.info(
-                                f"[{self.channel_id}] 🔔 Triggering alert: order_wait={order_wait:.1f}s, "
-                                f"threshold={order_threshold}s, cooldown={cooldown}s, "
-                                f"time_since_last_alert={time_since_last_alert:.1f}s"
-                            )
-                            logger.info(
-                                f"[{self.channel_id}] 📊 Violation details: T_seated={customer.get('T_seated')}, "
-                                f"T_order_start={customer.get('T_order_start')}, order_wait={order_wait:.1f}s"
-                            )
-                            self._trigger_violation_alert_new(
-                                table_id, customer_id, "order_wait", order_wait, current_time, frame
-                            )
-                            table_info["last_alert_time"] = now_ts
-                            # Update last snapshot time to prevent duplicate
-                            customer["last_snapshot_time"] = now_ts
-                            
-                            # Transition to service_wait monitoring:
-                            # Set T_order_start and T_order_end so the next alert for this
-                            # table will be a service_wait alert, not another order_wait.
-                            customer["T_order_start"] = now_ts
-                            customer["T_order_end"] = now_ts
-                            customer["order_wait_time"] = order_wait
-                            logger.info(
-                                f"[{self.channel_id}] 🔄 Table {table_id}, customer {customer_id}: "
-                                f"Transitioned to service_wait monitoring after order_wait alert "
-                                f"(T_order_start={now_ts}, T_order_end={now_ts})"
-                            )
-                        else:
-                            logger.debug(
-                                f"[{self.channel_id}] Order wait violation detected but in cooldown: "
-                                f"{time_since_last_alert:.1f}s / {cooldown}s"
-                            )
-                    elif self.frame_count % 300 == 0:  # Log status every 300 frames (~10 seconds at 30fps)
-                        logger.debug(
-                            f"[{self.channel_id}] Table {table_id}, customer {customer_id}: "
-                            f"Order wait {order_wait:.1f}s (threshold: {order_threshold}s) - OK"
-                        )
-                
-                # Check service wait time violation
-                elif customer["T_food_served"] is None and customer["T_order_start"] is not None:
-                    # Order taken but food not served
-                    # Service wait time = T_food_served - T_order_start (per spec)
-                    service_wait = now_ts - customer["T_order_start"]
-                    
-                    # Log service wait progress periodically
-                    if self.frame_count % 300 == 0 and service_wait > 30:  # Log if waiting more than 30 seconds
                         logger.info(
-                            f"[{self.channel_id}] ⏱️ Table {table_id}, customer {customer_id}: "
-                            f"Service wait {service_wait:.1f}s (threshold: {service_threshold}s, "
-                            f"T_order_end={'set' if customer.get('T_order_end') else 'not set'})"
+                            f"[{self.channel_id}] 📊 Alert details: T_seated={customer.get('T_seated')}, "
+                            f"T_order_start={customer.get('T_order_start')}, order_wait={order_wait:.1f}s"
                         )
-                    
-                    # Only save to database when violation threshold is exceeded
-                    if service_wait > service_threshold:
-                        time_since_last_alert = (now_ts - last_alert_time) if last_alert_time else float('inf')
-                        if last_alert_time is None or time_since_last_alert > cooldown:
-                            logger.warning(
-                                f"[{self.channel_id}] ⚠️ Service wait violation: Table {table_id}, "
-                                f"customer {customer_id} waiting {service_wait:.1f}s for food "
-                                f"(threshold: {service_threshold}s)"
-                            )
-                            logger.info(
-                                f"[{self.channel_id}] 📊 Violation details: T_order_start={customer.get('T_order_start')}, "
-                                f"T_order_end={customer.get('T_order_end')}, T_food_served={customer.get('T_food_served')}, "
-                                f"service_wait={service_wait:.1f}s"
-                            )
-                            self._trigger_violation_alert_new(
-                                table_id, customer_id, "service_wait", service_wait, current_time, frame
-                            )
-                            table_info["last_alert_time"] = now_ts
-                            # Update last snapshot time to prevent duplicate
-                            customer["last_snapshot_time"] = now_ts
-                        else:
-                            logger.debug(
-                                f"[{self.channel_id}] Service wait violation detected but in cooldown: "
-                                f"{time_since_last_alert:.1f}s / {cooldown}s"
-                            )
-                    elif self.frame_count % 300 == 0:  # Log status every 300 frames (~10 seconds at 30fps)
+                        self._trigger_violation_alert_new(
+                            table_id, customer_id, "order_wait", order_wait, current_time, frame
+                        )
+                        table_info["last_alert_time"] = now_ts
+                        customer["last_snapshot_time"] = now_ts
+                    else:
                         logger.debug(
-                            f"[{self.channel_id}] Table {table_id}, customer {customer_id}: "
-                            f"Service wait {service_wait:.1f}s (threshold: {service_threshold}s) - OK"
+                            f"[{self.channel_id}] Order wait alert suppressed by cooldown: "
+                            f"{time_since_last_alert:.1f}s / {cooldown}s"
                         )
+                    customer["order_alert_pending"] = False
+                
+                # Check service wait time violation - alert fires when staff enters ROI with food (not on a timer)
+                if customer.get("service_alert_pending"):
+                    service_wait = customer.get("service_wait_time") or 0
+                    time_since_last_alert = (now_ts - last_alert_time) if last_alert_time else float('inf')
+                    if last_alert_time is None or time_since_last_alert > cooldown:
+                        logger.warning(
+                            f"[{self.channel_id}] ⚠️ Service wait alert: Table {table_id}, "
+                            f"customer {customer_id} - food served after {service_wait:.1f}s "
+                            f"(threshold: {service_threshold}s)"
+                        )
+                        logger.info(
+                            f"[{self.channel_id}] 📊 Alert details: T_order_start={customer.get('T_order_start')}, "
+                            f"T_order_end={customer.get('T_order_end')}, T_food_served={customer.get('T_food_served')}, "
+                            f"service_wait={service_wait:.1f}s"
+                        )
+                        self._trigger_violation_alert_new(
+                            table_id, customer_id, "service_wait", service_wait, current_time, frame
+                        )
+                        table_info["last_alert_time"] = now_ts
+                        customer["last_snapshot_time"] = now_ts
+                    else:
+                        logger.debug(
+                            f"[{self.channel_id}] Service wait alert suppressed by cooldown: "
+                            f"{time_since_last_alert:.1f}s / {cooldown}s"
+                        )
+                    customer["service_alert_pending"] = False
     
     def _cleanup_stale_tracks(self, now_ts):
         """Remove tracks that haven't been seen recently"""

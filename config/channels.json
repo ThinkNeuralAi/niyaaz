@@ -83,7 +83,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             },
@@ -274,7 +274,7 @@
               ]
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -329,7 +329,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -380,7 +380,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -416,7 +416,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -503,7 +503,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -539,7 +539,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -590,7 +590,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -626,7 +626,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -685,7 +685,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -721,7 +721,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 30.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -776,7 +776,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -812,7 +812,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -879,7 +879,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -917,7 +917,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -1251,7 +1251,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             },
@@ -1399,7 +1399,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             },
@@ -1549,7 +1549,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -1651,7 +1651,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -1747,7 +1747,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -1898,7 +1898,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -1984,7 +1984,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -2065,7 +2065,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -2127,7 +2127,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -2189,7 +2189,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -2303,7 +2303,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             },
@@ -2379,7 +2379,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -2434,7 +2434,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -2470,7 +2470,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -2557,7 +2557,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -2593,7 +2593,7 @@
               "hairnet": true
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -2656,7 +2656,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 300.0
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -2694,7 +2694,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
@@ -2757,7 +2757,7 @@
               "hairnet": false
             },
             "settings": {
-              "alert_cooldown": 180.0,
+              "alert_cooldown": 300.0,
               "violation_duration_threshold": 2.0,
               "conf_threshold": 0.5
             }
