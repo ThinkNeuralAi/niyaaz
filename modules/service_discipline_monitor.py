@@ -59,8 +59,17 @@ class ServiceDisciplineMonitor:
         self.server_uniform_classes = {
             "Uniform_black",
             "Uniform_grey",
-            "Uniform_cream"
+            "Uniform_cream",
+            "Uniform_blue",
+            "Uniform_brown"
         }
+
+        # Hairnet class — wearing a hairnet is also a strong indicator of kitchen/floor staff.
+        # Detected by best.pt (class 3: 'Hairnet').
+        # A person with a nearby Hairnet detection will be classified as staff even if
+        # no uniform colour is detected (e.g. chef visible only from the waist up).
+        self.server_hairnet_class = "Hairnet"
+        self.hairnet_conf_threshold = 0.4  # Slightly relaxed — hairnets are small targets
 
         # Table cleanliness classes (from best.pt)
         self.table_clean_class = "Table_clean"    # Class 15
@@ -683,7 +692,10 @@ class ServiceDisciplineMonitor:
                 for box in results[0].boxes:
                     cls_id = int(box.cls[0])
                     cls_name = results[0].names[cls_id]
+                    conf = float(box.conf[0])
                     if cls_name in self.server_uniform_classes:
+                        return True
+                    if cls_name == self.server_hairnet_class and conf >= self.hairnet_conf_threshold:
                         return True
             return False
         except Exception as e:
@@ -742,22 +754,24 @@ class ServiceDisciplineMonitor:
                 if self._point_in_polygon(point_to_check, polygon, bbox_norm):
                     # Check if this is a person detection (from YOLOv11n, class_id=0)
                     if class_id == self.person_class_id_yolo11n or class_name == "Person":
-                        # Check nearby uniform to exclude servers using improved matching
+                        # Check nearby uniform OR hairnet to exclude staff using improved matching
                         uniform_dets = [
                             d for d in detections
-                            if d.get("class_name", "") in self.server_uniform_classes and len(d.get("bbox", [])) == 4
+                            if (d.get("class_name", "") in self.server_uniform_classes or
+                                d.get("class_name", "") == self.server_hairnet_class)
+                            and len(d.get("bbox", [])) == 4
                         ]
                         has_uniform = self._check_uniform_on_person([x1, y1, x2, y2], [
                             {"bbox": d["bbox"]} for d in uniform_dets
                         ])
                         if not has_uniform:
                             table_detections[table_id]["customers"].append(det)
-                            logger.debug(f"[{self.channel_id}] Table {table_id}: Classified as customer (Person without nearby uniform)")
+                            logger.debug(f"[{self.channel_id}] Table {table_id}: Classified as customer (Person without nearby uniform/hairnet)")
                         else:
-                            logger.debug(f"[{self.channel_id}] Table {table_id}: Person has uniform, excluding from customers")
-                    elif class_name in self.server_uniform_classes:
+                            logger.debug(f"[{self.channel_id}] Table {table_id}: Person has uniform/hairnet, excluding from customers")
+                    elif class_name in self.server_uniform_classes or class_name == self.server_hairnet_class:
                         table_detections[table_id]["servers"].append(det)
-                        logger.debug(f"[{self.channel_id}] Table {table_id}: Classified as server (Uniform: {class_name})")
+                        logger.debug(f"[{self.channel_id}] Table {table_id}: Classified as server (indicator: {class_name})")
                     break
         return table_detections
 
@@ -1064,6 +1078,15 @@ class ServiceDisciplineMonitor:
                             "class_name": class_name,
                             "center": [(x1 + x2) / 2, (y1 + y2) / 2]
                         })
+                    elif class_name == self.server_hairnet_class and conf >= self.hairnet_conf_threshold:
+                        # Hairnet detected — include as a staff indicator alongside uniforms.
+                        # No DeepSORT input needed (it's a small head accessory, not a person bbox).
+                        uniform_detections_list.append({
+                            "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                            "confidence": conf,
+                            "class_name": class_name,
+                            "center": [(x1 + x2) / 2, (y1 + y2) / 2]
+                        })
             
             # Update DeepSORT tracker
             if self.tracking_enabled and self.tracker and ds_inputs:
@@ -1293,8 +1316,7 @@ class ServiceDisciplineMonitor:
         h, w = frame.shape[:2]
         now_ts = current_time.timestamp()
         
-        # Map detections to tracks by position
-        track_to_detection = {}
+        # Map each confirmed DeepSORT track to its table and classify it
         for track in tracks:
             if not track.is_confirmed():
                 continue
@@ -1304,8 +1326,12 @@ class ServiceDisciplineMonitor:
             track_center = [(track_bbox[0] + track_bbox[2]) / 2, (track_bbox[1] + track_bbox[3]) / 2]
             
             # Determine which table this person is in
+            # Use bottom-center (feet position) for ROI check — consistent with _classify_detections
+            # and more accurate for standing/seated persons near table boundaries.
             table_id = None
-            point_to_check = (track_center[0] / w, track_center[1] / h)  # Normalized
+            feet_x = track_center[0] / w
+            feet_y = track_bbox[3] / h  # bottom edge of bbox
+            point_to_check = (feet_x, feet_y)
             
             for tid, roi_info in self.table_rois.items():
                 polygon = roi_info.get("polygon")
@@ -1371,6 +1397,18 @@ class ServiceDisciplineMonitor:
                         }
                     if track_id not in self.table_tracking[table_id]["customer_track_ids"]:
                         self.table_tracking[table_id]["customer_track_ids"].append(track_id)
+                elif person_type == "waiter" and table_id:
+                    # New waiter track inside a table ROI — register immediately so
+                    # _detect_interactions can find this waiter in waiter_track_ids.
+                    if table_id not in self.table_tracking:
+                        self.table_tracking[table_id] = {
+                            "customer_track_ids": [],
+                            "waiter_track_ids": [],
+                            "last_alert_time": None
+                        }
+                    if track_id not in self.table_tracking[table_id]["waiter_track_ids"]:
+                        self.table_tracking[table_id]["waiter_track_ids"].append(track_id)
+                    logger.debug(f"[{self.channel_id}] 👔 New waiter track {track_id} registered at table {table_id}")
             else:
                 # Update existing track
                 self.person_tracks[track_id]["center"] = track_center
@@ -1404,6 +1442,28 @@ class ServiceDisciplineMonitor:
                         }
                     if table_id and track_id not in self.table_tracking[table_id]["waiter_track_ids"]:
                         self.table_tracking[table_id]["waiter_track_ids"].append(track_id)
+
+                elif (not is_waiter and
+                      self.person_tracks[track_id]["type"] == "waiter" and
+                      track_id not in self._track_uniform_memory):
+                    # Uniform memory has fully expired — no longer detected as staff.
+                    # Reclassify back to customer so service discipline monitoring resumes.
+                    old_table = self.person_tracks[track_id].get("table_id")
+                    self.person_tracks[track_id]["type"] = "customer"
+                    logger.info(
+                        f"[{self.channel_id}] 👤 Track {track_id} reclassified: waiter → customer "
+                        f"(uniform memory expired at table {old_table})"
+                    )
+                    # Move from waiter_track_ids to customer_track_ids for the current table
+                    if old_table and old_table in self.table_tracking:
+                        if track_id in self.table_tracking[old_table]["waiter_track_ids"]:
+                            self.table_tracking[old_table]["waiter_track_ids"].remove(track_id)
+                        if track_id not in self.table_tracking[old_table]["customer_track_ids"]:
+                            self.table_tracking[old_table]["customer_track_ids"].append(track_id)
+                    # Set T_seated now (treat this moment as when they "sat down" for monitoring)
+                    if self.person_tracks[track_id]["T_seated"] is None and old_table:
+                        self.person_tracks[track_id]["T_seated"] = now_ts
+                        logger.info(f"[{self.channel_id}] 🪑 T_seated (re-classified): Track {track_id} at table {old_table}")
                 
                 # Update table_id if changed
                 if table_id and self.person_tracks[track_id]["table_id"] != table_id:
