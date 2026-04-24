@@ -146,6 +146,10 @@ class ServiceDisciplineMonitor:
         # }}
         self.person_tracks = {}  # Global tracking across all tables
 
+        # Persistent interaction timers — must survive across frames so the
+        # interaction_duration check can accumulate. Keyed by (customer_id, waiter_id).
+        self.ongoing_interactions = {}
+
         # Table-level tracking for quick lookups
         # {table_id: {
         #   "customer_track_ids": [track_id, ...],
@@ -1442,8 +1446,9 @@ class ServiceDisciplineMonitor:
         interaction_duration = self.settings.get("interaction_duration", 2.0)
         food_served_gap = self.settings.get("food_served_gap", 10.0)
         
-        # Track ongoing interactions
-        ongoing_interactions = {}  # {(customer_track_id, waiter_track_id): start_time}
+        # Use the persistent interaction timers (local alias for readability)
+        ongoing_interactions = self.ongoing_interactions
+        active_keys = set()  # Track which keys are still active this frame
         
         for table_id, table_info in self.table_tracking.items():
             customer_ids = table_info.get("customer_track_ids", [])
@@ -1477,10 +1482,12 @@ class ServiceDisciplineMonitor:
                     
                     if distance < interaction_distance:
                         waiter_nearby = True
+                        active_keys.add(interaction_key)
                         # Waiter is near customer
                         if interaction_key not in ongoing_interactions:
                             # Start new interaction
                             ongoing_interactions[interaction_key] = now_ts
+                            logger.debug(f"[{self.channel_id}] Interaction started: customer {customer_id} <-> waiter {waiter_id} at table {table_id}")
                         else:
                             # Interaction ongoing - check duration
                             interaction_start = ongoing_interactions[interaction_key]
@@ -1532,7 +1539,31 @@ class ServiceDisciplineMonitor:
                         # Waiter moved away - clear interaction
                         if interaction_key in ongoing_interactions:
                             del ongoing_interactions[interaction_key]
-                
+        
+        # Remove any interaction entries that weren't active this frame
+        # (covers tracks that left the ROI or were not seen)
+        stale = [k for k in list(ongoing_interactions) if k not in active_keys]
+        for k in stale:
+            del ongoing_interactions[k]
+        
+        # --- Detect T_order_end: waiter left after taking order ---
+        for table_id, table_info in self.table_tracking.items():
+            customer_ids = table_info.get("customer_track_ids", [])
+            waiter_ids = table_info.get("waiter_track_ids", [])
+            for customer_id in customer_ids:
+                if customer_id not in self.person_tracks:
+                    continue
+                customer = self.person_tracks[customer_id]
+                if customer["type"] != "customer" or customer["T_seated"] is None:
+                    continue
+                waiter_nearby = any(
+                    math.hypot(
+                        customer["center"][0] - self.person_tracks[w]["center"][0],
+                        customer["center"][1] - self.person_tracks[w]["center"][1]
+                    ) < interaction_distance
+                    for w in waiter_ids
+                    if w in self.person_tracks and self.person_tracks[w]["type"] == "waiter"
+                )
                 # Detect when waiter leaves after taking order (T_order_end)
                 if not waiter_nearby and customer["T_order_start"] is not None and customer["T_order_end"] is None:
                     # Waiter was at table (taking order) but now left
@@ -1686,6 +1717,10 @@ class ServiceDisciplineMonitor:
             
             # Clean up uniform memory for this track
             self._track_uniform_memory.pop(track_id, None)
+            
+            # Clean up persistent interaction timers for this track
+            for k in [k for k in list(self.ongoing_interactions) if track_id in k]:
+                del self.ongoing_interactions[k]
             
             del self.person_tracks[track_id]
     
