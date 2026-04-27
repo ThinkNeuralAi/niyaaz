@@ -4,7 +4,7 @@
       "channel_id": "camera_1",
       "channel_name": "Take Away Counter",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:555/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@132.154.208.136:575/cam/realmonitor?channel=1&subtype=1",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -42,17 +42,17 @@
             "counter_roi": {
               "points": [
                 {
-                  "x": 0.40791015625,
-                  "y": 0.05911183608205695
+                  "x": 0.42367187738418577,
+                  "y": 0.14555555979410809
                 },
                 {
-                  "x": 0.99984130859375,
-                  "y": 0.04975328947368421
+                  "x": 0.8611718773841858,
+                  "y": 0.12611111534966363
                 },
                 {
                   "x": 0.99359130859375,
                   "y": 0.9984375
-                },
+                }, 
                 {
                   "x": 0.54697265625,
                   "y": 0.9983223764519943
@@ -60,7 +60,7 @@
                 {
                   "x": 0.44931640625,
                   "y": 0.9956907975046259
-                }
+                }     
               ]
             },
             "settings": {
@@ -270,7 +270,8 @@
             },
             "allowed_uniforms": {
               "counter": [
-                "Uniform_grey"
+                "Uniform_grey",
+                "Uniform_black"
               ]
             },
             "settings": {
@@ -1283,7 +1284,8 @@
               "counter": [
                 "Uniform_grey",
                 "Uniform_brown",
-                "Uniform_cream"
+                "Uniform_cream",
+                "Uniform_black"
               ]
             }
           }
@@ -1427,7 +1429,8 @@
               "counter": [
                 "Uniform_grey",
                 "Uniform_brown",
-                "Uniform_cream"
+                "Uniform_cream",
+                "Uniform_black"
               ]
             }
           }
@@ -2334,7 +2337,8 @@
             "allowed_uniforms": {
               "counter": [
                 "Uniform_grey",
-                "Uniform_white"
+                "Uniform_white",
+                "Uniform_black"
               ]
             }
           }
