@@ -1096,12 +1096,20 @@ class QueueMonitor:
         max_wait = max(queue_wait_times) if queue_wait_times else 0.0
         violations = []
 
-        # V1: Queue too long
-        if self.queue_count > max_queue_without_violation:
+        # V1: Queue too long — only count people who have been in the queue for > 30 seconds
+        v1_min_wait = 30.0  # seconds
+        v1_queue_count = sum(
+            1 for t in self.person_tracking
+            if t.get("area_type") == "queue"
+            and t.get("in_roi")
+            and t.get("entered_roi_time") is not None
+            and (now_ts - t["entered_roi_time"]) > v1_min_wait
+        )
+        if v1_queue_count > max_queue_without_violation:
             violations.append(
-                f"Queue capacity exceeded: {self.queue_count} > {max_queue_without_violation} (max allowed)"
+                f"Queue capacity exceeded: {v1_queue_count} > {max_queue_without_violation} (max allowed, waiting >30s)"
             )
-            logger.debug(f"[{self.channel_id}] V1 violation detected: queue_count={self.queue_count} > threshold={max_queue_without_violation}")
+            logger.debug(f"[{self.channel_id}] V1 violation detected: v1_queue_count={v1_queue_count} (>30s) > threshold={max_queue_without_violation}")
 
         # V2: Wait time exceeded
         if self.queue_count > 0 and max_wait >= wait_threshold:
