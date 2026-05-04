@@ -842,6 +842,8 @@
                 <div class="status" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                     <input type="date" id="report-date-picker" class="btn"
                         style="font-size: 0.85em; padding: 5px 10px; color: var(--text-primary); background: #21262d; cursor: pointer;">
+                    <input type="month" id="report-month-picker" class="btn"
+                        style="font-size: 0.85em; padding: 5px 10px; color: var(--text-primary); background: #21262d; cursor: pointer;">
                     <button class="btn" onclick="viewDailyReport()" id="view-report-btn"
                         style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px;">
                         👁️ View Report
@@ -849,6 +851,14 @@
                     <button class="btn btn-primary" onclick="downloadDailyReport()" id="download-report-btn"
                         style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px;">
                         📥 Download Store Report
+                    </button>
+                    <button class="btn" onclick="downloadMonthlyReport()" id="download-monthly-report-btn"
+                        style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px; background: #0e7490; border-color: #0e7490; color: #fff;">
+                        📅 Download Store Monthly Report
+                    </button>
+                    <button class="btn" onclick="downloadAllStoresMonthlyReport()" id="download-all-monthly-report-btn"
+                        style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px; background: #0369a1; border-color: #0369a1; color: #fff;">
+                        📅 Download All Stores Monthly Report
                     </button>
                     <button class="btn" onclick="downloadAllStoresReport()" id="download-all-report-btn"
                         style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; padding: 6px 14px; background: #1a7f37; border-color: #1a7f37; color: #fff;">
@@ -2732,8 +2742,24 @@
             picker.max = new Date().toISOString().split('T')[0];
         })();
 
+        // Initialize month picker to previous month
+        (function initReportMonthPicker() {
+            const picker = document.getElementById('report-month-picker');
+            const now = new Date();
+            now.setDate(1);
+            now.setMonth(now.getMonth() - 1);
+            picker.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+            const currentMonth = new Date();
+            picker.max = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
+        })();
+
         function getSelectedReportDate() {
             return document.getElementById('report-date-picker').value;
+        }
+
+        function getSelectedReportMonth() {
+            return document.getElementById('report-month-picker').value;
         }
 
         function getSelectedStoreId() {
@@ -2816,6 +2842,88 @@
             } catch (err) {
                 console.error('Error downloading all stores report:', err);
                 alert('Failed to download report. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        async function downloadMonthlyReport() {
+            const btn = document.getElementById('download-monthly-report-btn');
+            const originalText = btn.innerHTML;
+            const month = getSelectedReportMonth();
+            const storeId = getSelectedStoreId();
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating...';
+
+            try {
+                const genRes = await fetch('/api/generate_monthly_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ month: month || undefined, store_id: storeId || undefined })
+                });
+                const genData = await genRes.json();
+
+                if (!genData.success) {
+                    alert('Monthly report generation failed: ' + (genData.error || 'Unknown error'));
+                    return;
+                }
+
+                btn.innerHTML = '📥 Downloading...';
+                const params = new URLSearchParams();
+                if (month) params.set('month', month);
+                if (storeId) params.set('store_id', storeId);
+                const queryStr = params.toString() ? '?' + params.toString() : '';
+                const link = document.createElement('a');
+                link.href = '/api/download_monthly_report' + queryStr;
+                link.download = '';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+            } catch (err) {
+                console.error('Error downloading monthly report:', err);
+                alert('Failed to download monthly report. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        async function downloadAllStoresMonthlyReport() {
+            const btn = document.getElementById('download-all-monthly-report-btn');
+            const originalText = btn.innerHTML;
+            const month = getSelectedReportMonth();
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating...';
+
+            try {
+                const genRes = await fetch('/api/generate_monthly_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ month: month || undefined })
+                });
+                const genData = await genRes.json();
+
+                if (!genData.success) {
+                    alert('Monthly report generation failed: ' + (genData.error || 'Unknown error'));
+                    return;
+                }
+
+                btn.innerHTML = '📥 Downloading...';
+                const params = new URLSearchParams();
+                if (month) params.set('month', month);
+                const queryStr = params.toString() ? '?' + params.toString() : '';
+                const link = document.createElement('a');
+                link.href = '/api/download_monthly_report' + queryStr;
+                link.download = '';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+            } catch (err) {
+                console.error('Error downloading all stores monthly report:', err);
+                alert('Failed to download all stores monthly report. Please try again.');
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalText;

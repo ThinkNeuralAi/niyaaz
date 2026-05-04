@@ -98,7 +98,7 @@
     "smtp_user": "rohini.a@tneuralai.com",
     "smtp_password": "Xta8QLH9G5fc",
     "sender": "rohini.a@tneuralai.com",
-    "recipients": ["anjana.a@tneuralai.com", "rohini.a@tneuralai.com", "manoj.m@tneuralai.com", "indu.d@tneuralai.com", "amit.niyaz@gmail.com"],
+    "recipients": ["rohini.a@tneuralai.com"],
     "use_ssl": true,
     "note": "Zoho Mail: use smtp.zoho.in (India) or smtp.zoho.com (Global), port 465 with use_ssl=true. Generate App Password from Zoho: My Account > Security > App Passwords."
   }
