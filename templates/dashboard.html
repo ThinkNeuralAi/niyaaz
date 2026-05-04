@@ -2778,11 +2778,7 @@
                 const genRes = await fetch('/api/generate_daily_report', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        date: date || undefined,
-                        store_id: storeId || undefined,
-                        send_email: false
-                    })
+                    body: JSON.stringify({ date: date || undefined, store_id: storeId || undefined, send_email: false })
                 });
                 const genData = await genRes.json();
 
@@ -2823,10 +2819,7 @@
                 const genRes = await fetch('/api/generate_daily_report', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        date: date || undefined,
-                        send_email: false
-                    })
+                    body: JSON.stringify({ date: date || undefined, send_email: false })
                 });
                 const genData = await genRes.json();
 
@@ -2867,11 +2860,7 @@
                 const genRes = await fetch('/api/generate_monthly_report', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        month: month || undefined,
-                        store_id: storeId || undefined,
-                        send_email: false
-                    })
+                    body: JSON.stringify({ month: month || undefined, store_id: storeId || undefined, send_email: false })
                 });
                 const genData = await genRes.json();
 
@@ -2912,10 +2901,7 @@
                 const genRes = await fetch('/api/generate_monthly_report', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        month: month || undefined,
-                        send_email: false
-                    })
+                    body: JSON.stringify({ month: month || undefined, send_email: false })
                 });
                 const genData = await genRes.json();
 
