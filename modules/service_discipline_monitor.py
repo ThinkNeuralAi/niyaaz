@@ -11,6 +11,7 @@ Event-based service monitoring:
 Metrics:
     Order wait time   = T_order_start - T_seated
     Service wait time = T_food_served - T_order_start
+"""
 
 import cv2
 import math
