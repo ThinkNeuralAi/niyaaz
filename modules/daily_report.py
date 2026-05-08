@@ -75,6 +75,15 @@ def _get_yesterday_range():
     return start, end
 
 
+def _daily_report_exists_for_date(report_date_str):
+    """Return True if a daily report file exists for YYYY-MM-DD."""
+    reports_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / 'data' / 'reports'
+    if not reports_dir.exists():
+        return False
+    pattern = f'Daily_Alerts_Report_{report_date_str}*.xlsx'
+    return any(reports_dir.glob(pattern))
+
+
 def _parse_month_input(target_month):
     """Parse YYYY-MM input and return (year, month)."""
     if not target_month:
@@ -767,10 +776,13 @@ def run_daily_report(app, db_manager):
                     logger.info("Daily report email sent successfully")
                 else:
                     logger.warning("Failed to send daily report email (see logs for details)")
+            return True
         else:
             logger.warning("No active stores found or report generation failed")
+            return False
     except Exception as e:
         logger.error(f"Daily report failed: {e}", exc_info=True)
+        return False
 
 
 def run_monthly_report(app, db_manager, target_month=None):
@@ -825,19 +837,41 @@ def start_daily_report_scheduler(app, db_manager):
         while True:
             try:
                 now = datetime.now(IST)
-                # Calculate next 10:30 AM IST
-                target = now.replace(hour=10, minute=30, second=0, microsecond=0)
-                if now >= target:
-                    # Already past 10:30 today, schedule for tomorrow
-                    target += timedelta(days=1)
+                target_today = now.replace(hour=10, minute=30, second=0, microsecond=0)
 
-                wait_seconds = (target - now).total_seconds()
+                # If scheduler starts/restarts after 10:30, perform a catch-up run
+                # for yesterday if that day's report file is missing.
+                if now >= target_today:
+                    report_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+                    if _daily_report_exists_for_date(report_date):
+                        logger.info(
+                            f"Daily report for {report_date} already exists; scheduling next run for tomorrow"
+                        )
+                        target = target_today + timedelta(days=1)
+                    else:
+                        logger.warning(
+                            f"Daily report for {report_date} missing after scheduled time; running catch-up now"
+                        )
+                        success = run_daily_report(app, db_manager)
+                        if success or _daily_report_exists_for_date(report_date):
+                            target = target_today + timedelta(days=1)
+                        else:
+                            # Retry in 30 minutes if generation fails after scheduled time.
+                            target = now + timedelta(minutes=30)
+                            logger.warning(
+                                "Catch-up daily report run did not produce a report file; retrying in 30 minutes"
+                            )
+                else:
+                    target = target_today
+
+                wait_seconds = max((target - now).total_seconds(), 1)
                 logger.info(f"Next daily report scheduled at {target.strftime('%Y-%m-%d %H:%M:%S')} IST "
                           f"(in {wait_seconds/3600:.1f} hours)")
                 time.sleep(wait_seconds)
 
-                # Run the report
-                run_daily_report(app, db_manager)
+                # Run only on the regular schedule wake-up.
+                if target.hour == 10 and target.minute == 30:
+                    run_daily_report(app, db_manager)
 
             except Exception as e:
                 logger.error(f"Daily report scheduler error: {e}", exc_info=True)
