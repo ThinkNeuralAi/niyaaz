@@ -416,10 +416,6 @@ class ServiceDisciplineMonitor:
                     conf = float(box.conf[0])
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     if cls_name in self.server_uniform_classes:
-                        ds_inputs.append((
-                            [int(x1), int(y1), int(x2 - x1), int(y2 - y1)],
-                            conf, "person",
-                        ))
                         uniform_detections_list.append({
                             "bbox": [int(x1), int(y1), int(x2), int(y2)],
                             "confidence": conf, "class_name": cls_name,
@@ -644,6 +640,10 @@ class ServiceDisciplineMonitor:
                         if track_id in self.table_tracking[old_table]["waiter_track_ids"]:
                             self.table_tracking[old_table]["waiter_track_ids"].remove(track_id)
                 p["table_id"] = table_id
+                self._ensure_table_tracking(table_id)
+                if p["type"] == "waiter":
+                    if track_id not in self.table_tracking[table_id]["waiter_track_ids"]:
+                        self.table_tracking[table_id]["waiter_track_ids"].append(track_id)
 
             # ---- T_seated: only after dwell-time confirmation ----
             if (p["type"] == "customer" and table_id and p["T_seated"] is None
@@ -710,8 +710,9 @@ class ServiceDisciplineMonitor:
 
                         # ---- T_order_start: first valid interaction ----
                         if cust["T_order_start"] is None:
-                            cust["T_order_start"] = now_ts
-                            cust["order_wait_time"] = now_ts - cust["T_seated"]
+                            actual_start = self.ongoing_interactions[key]["start_ts"]
+                            cust["T_order_start"] = actual_start
+                            cust["order_wait_time"] = actual_start - cust["T_seated"]
                             cust["waiter_at_table"] = True
                             cust["waiter_visit_count"] = 1
                             cust["interaction_history"].append((wid, now_ts, "order"))
