@@ -4,7 +4,7 @@
       "channel_id": "camera_1",
       "channel_name": "Take Away Counter",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:575/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:575/cam/realmonitor?Channel=1&subtype=1",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -154,7 +154,7 @@
       "channel_id": "camera_2",
       "channel_name": "Deluxe Counter",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:571/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:571/cam/realmonitor?Channel=1&subtype=1",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -315,7 +315,7 @@
       "channel_id": "camera_3",
       "channel_name": "AC3",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:557/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:557/cam/realmonitor?Channel=1&subtype=1",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -404,7 +404,7 @@
       "channel_id": "camera_4",
       "store_id": "store_1",
       "channel_name": "AC Entrance",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:558/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:558/cam/realmonitor?Channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -527,7 +527,7 @@
       "channel_id": "camera_5",
       "store_id": "store_1",
       "channel_name": "General 1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:559/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:559/cam/realmonitor?Channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -614,7 +614,7 @@
       "store_id": "store_1",
       "channel_id": "camera_6",
       "channel_name": "General 3",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:561/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:561/cam/realmonitor?Channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -709,7 +709,7 @@
       "store_id": "store_1",
       "channel_id": "camera_7",
       "channel_name": "Deluxe 1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:562/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:562/cam/realmonitor?Channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -800,7 +800,7 @@
       "store_id": "store_1",
       "channel_id": "camera_8",
       "channel_name": "Deluxe 2",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:563/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:563/cam/realmonitor?Channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -907,7 +907,7 @@
       "channel_id": "camera_9",
       "channel_name": "Kitchen",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:564/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:564/cam/realmonitor?Channel=1&subtype=1",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -970,7 +970,7 @@
       "channel_id": "camera_10",
       "channel_name": "Kitchen 2",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:565/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:565/cam/realmonitor?Channel=1&subtype=1",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -1033,7 +1033,7 @@
       "channel_id": "camera_13",
       "channel_name": "Store Area",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:573/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:573/cam/realmonitor?channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -1069,7 +1069,7 @@
       "channel_id": "camera_14",
       "channel_name": "Parking Space",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:569/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:569/cam/realmonitor?channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -1119,7 +1119,7 @@
       "channel_id": "camera_15",
       "channel_name": "Store Entrance (Weighing Area)",
       "store_id": "store_1",
-      "rtsp_url": "rtsp://admin:admin@132.154.208.136:572/cam/realmonitor?channel=1&subtype=1",
+      "rtsp_url": "rtsp://admin:admin@171.78.152.207:572/cam/realmonitor?channel=1&subtype=1",
       "enabled": true,
       "modules": [
         {
@@ -2217,20 +2217,20 @@
             "counter_roi": {
               "points": [
                 {
-                  "x": 0.1447656273841858,
-                  "y": 0.403194448682997
+                  "x": 0.1502343773841858, 
+                  "y": 0.41152776082356773
                 },
                 {
-                  "x": 0.3010156273841858,
-                  "y": 0.15180555979410806
+                  "x": 0.32210937738418577, 
+                  "y": 0.29347220526801215
                 },
                 {
-                  "x": 0.8322656273841857,
-                  "y": 0.8295833375718858
+                  "x": 0.5447656273841858, 
+                  "y": 0.4990277608235677
                 },
                 {
-                  "x": 0.4916406273841858,
-                  "y": 0.9934722264607747
+                  "x": 0.2533593773841858, 
+                  "y": 0.73374998304579
                 }
               ]
             },
