@@ -363,7 +363,7 @@ class TableServiceMonitor:
             except Exception as e:
                 logger.error(f"Failed to save table ROI to database: {e}")
 
-        logger.info(f"[{self.channel_id}] Set ROI for table {table_id}")
+        logger.info(f"[{self.channel_id}] Set ROI for table {table_id} | coords: {polygon_points}")
 
     def _annotate_frame_for_gif(self, frame):
         """Annotate a frame with the alert table ROI and table number for GIF recording.

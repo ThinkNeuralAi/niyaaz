@@ -373,7 +373,7 @@ class ServiceDisciplineMonitor:
             ),
         }
         self._ensure_table_tracking(table_id)
-        logger.info(f"[{self.channel_id}] Set ROI for table {table_id}")
+        logger.info(f"[{self.channel_id}] Set ROI for table {table_id} | coords: {normalized}")
 
     # ==================================================================
     # MAIN PROCESSING PIPELINE

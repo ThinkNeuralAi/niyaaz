@@ -5412,7 +5412,7 @@ def set_service_discipline_table_roi():
                 except Exception as e:
                     logger.warning(f"Could not reload configuration: {e}")
             
-            logger.info(f"✓ Table ROI set for {table_id} on channel {channel_id} (total tables: {len(module.table_rois)})")
+            logger.info(f"✓ Table ROI set for {table_id} on channel {channel_id} (total tables: {len(module.table_rois)}) | coords: {normalized_points}")
             return jsonify({'success': True, 'message': f'Table ROI set successfully for table {table_id}'})
         
         # If module not found, provide detailed error
