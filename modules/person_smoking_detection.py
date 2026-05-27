@@ -247,7 +247,7 @@ class PersonSmokingDetection:
                             self.db_manager.save_alert_gif(
                                 self.channel_id,
                                 'person_smoking_alert',
-                                {'filename': gif_filename, 'path': gif_path},
+                                {'gif_filename': gif_filename, 'gif_path': gif_path},
                                 alert_message=self._last_alert_message,
                                 alert_data=self._last_alert_data
                             )
@@ -255,7 +255,7 @@ class PersonSmokingDetection:
                         self.db_manager.save_alert_gif(
                             self.channel_id,
                             'person_smoking_alert',
-                            {'filename': gif_filename, 'path': gif_path},
+                            {'gif_filename': gif_filename, 'gif_path': gif_path},
                             alert_message=self._last_alert_message,
                             alert_data=self._last_alert_data
                         )

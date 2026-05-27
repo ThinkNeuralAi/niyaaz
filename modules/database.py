@@ -1913,8 +1913,11 @@ class DatabaseManager:
                     # Try to resolve full path for GIF
                     full_gif_path = gif_path
                     if gif_path and not os.path.isabs(gif_path):
-                        # Try relative to static directory
-                        static_path = os.path.join("static", gif_path)
+                        # Only prepend "static/" if the path doesn't already start with it
+                        if not gif_path.startswith('static/') and not gif_path.startswith('static\\'):
+                            static_path = os.path.join("static", gif_path)
+                        else:
+                            static_path = gif_path
                         if os.path.exists(static_path):
                             full_gif_path = static_path
                         elif os.path.exists(gif_path):
@@ -4694,10 +4697,22 @@ class DatabaseManager:
             
             self.db.session.add(snapshot)
             self.db.session.commit()
-            
+
             logger.info(f"Restricted area snapshot saved: {snapshot_filename} (ID: {snapshot.id})")
+
+            # Send Telegram notification
+            store_name = self.get_store_name_for_channel(channel_id)
+            _send_telegram_alert(
+                channel_id=channel_id,
+                alert_type='restricted_area_alert',
+                alert_message=alert_message or f"Restricted area violation: {violation_count} instance(s)",
+                snapshot_path=snapshot_path,
+                alert_data=alert_data,
+                store_name=store_name
+            )
+
             return snapshot.id
-            
+
         except Exception as e:
             logger.error(f"Error saving restricted area snapshot: {e}")
             self.db.session.rollback()

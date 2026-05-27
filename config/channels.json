@@ -271,7 +271,8 @@
             "allowed_uniforms": {
               "counter": [
                 "Uniform_grey",
-                "Uniform_black"
+                "Uniform_black",
+                "Uniform_cream"
               ]
             },
             "settings": {
@@ -2185,7 +2186,7 @@
       "channel_id": "camera_28",
       "channel_name": "Takeaway Counter2",
       "store_id": "store_3",
-      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=2&stream=0.sdp?",
+      "rtsp_url": "rtsp://122.166.79.247:562/user=admin&password=admin123&channel=0&stream=0.sdp?",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -2316,7 +2317,7 @@
       "channel_id": "camera_29",
       "channel_name": "Dining1",
       "store_id": "store_3",
-      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=5&stream=0.sdp?",
+      "rtsp_url": "rtsp://122.166.79.247:559/user=admin&password=admin123&channel=0&stream=0.sdp?",
       "enabled": true,
       "modules": [
         {
@@ -2361,25 +2362,23 @@
               "table_14": {
                 "points": [
                   {
-                    "x": 0.0016276001930236816,
-                    "y": 0.6730324003431533
+                      "x": 0.006484377384185791,
+                      "y": 0.49347222646077477
                   },
                   {
-                    "x": 0.2227213501930237,
-                    "y": 0.4285879558987088
+                      "x": 0.15882812738418578,
+                      "y": 0.3587500042385525
                   },
                   {
-                    "x": 0.4570963501930237,
-                    "y": 0.8021990670098199
+                      "x": 0.2385156273841858,
+                      "y": 0.5490277820163303
                   },
                   {
-                    "x": 0.19069010019302368,
-                    "y": 0.9966435114542643
-                  },
-                  {
-                    "x": 0.19069010019302368,
-                    "y": 0.9966435114542643
+                      "x": 0.04320312738418579,
+                      "y": 0.6948611153496637
                   }
+
+
                 ]
               }
             },
@@ -2407,7 +2406,7 @@
       "channel_id": "camera_30",
       "channel_name": "Dining2",
       "store_id": "store_3",
-      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=6&stream=0.sdp?",
+      "rtsp_url": "rtsp://122.166.79.247:564/user=admin&password=admin123&channel=0&stream=0.sdp?",
       "enabled": true,
       "modules": [
         {
@@ -2452,57 +2451,48 @@
               "table_15": {
                 "points": [
                   {
-                    "x": 0.28365885019302367,
-                    "y": 0.06469906700981988
+                  "x": 0.4791406273841858,
+                  "y": 0.27472222646077477
                   },
                   {
-                    "x": 0.6156901001930237,
-                    "y": 0.05775462256537543
+                  "x": 0.5728906273841858,
+                  "y": 0.34555555979410807
                   },
                   {
-                    "x": 0.6774088501930237,
-                    "y": 0.48136573367648655
-                  },
+                  "x": 0.47445312738418577,
+                  "y": 0.446944448682997},
                   {
-                    "x": 0.31490885019302367,
-                    "y": 0.5771990670098199
-                  },
-                  {
-                    "x": 0.6774088501930237,
-                    "y": 0.48136573367648655
-                  },
-                  {
-                    "x": 0.31490885019302367,
-                    "y": 0.5771990670098199
+                  "x": 0.3799218773841858,
+                  "y": 0.3941666709052192
                   }
                 ]
               },
               "table_16": {
                 "points": [
-                  {
-                    "x": 0.6266276001930237,
-                    "y": 0.04664349026150173
-                  },
-                  {
-                    "x": 0.8414713501930237,
-                    "y": 0.07303237915039062
-                  },
-                  {
-                    "x": 0.9406901001930237,
-                    "y": 0.47442126803927953
-                  },
-                  {
-                    "x": 0.6930338501930237,
-                    "y": 0.4910879347059462
-                  },
-                  {
-                    "x": 0.9406901001930237,
-                    "y": 0.47442126803927953
-                  },
-                  {
-                    "x": 0.6930338501930237,
-                    "y": 0.4910879347059462
-                  }
+                 {
+                  "x": 0.004140627384185791,
+                  "y": 0.8365277820163303
+                },
+                {"x": 0.1283593773841858,
+                  "y": 0.6184722264607747
+                },
+                {
+                  "x": 0.2525781273841858,
+                  "y": 0.8129166709052191
+                },
+                {
+                  "x": 0.0799218773841858,
+                  "y": 0.9934722264607747
+                },
+                {
+                  "x": 0.004140627384185791,
+                  "y": 0.8365277820163303
+                },
+                {
+                  "x": 0.1283593773841858,
+                  "y": 0.6184722264607747
+                }
+                  
                 ]
               }
             },
@@ -2530,7 +2520,7 @@
       "channel_id": "camera_31",
       "channel_name": "Dining3",
       "store_id": "store_3",
-      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=7&stream=0.sdp?",
+      "rtsp_url": "rtsp://122.166.79.247:567/user=admin&password=admin123&channel=7&stream=0.sdp?",
       "enabled": true,
       "modules": [
         {
@@ -2574,7 +2564,38 @@
             "table_rois": {
               "table_17": {
                 "points": [
-                  
+                  {
+                  "x": 0.38070312738418577,
+                  "y": 0.10180555979410807
+                  },
+                  {
+                  "x": 0.5877343773841858,
+                  "y": 0.0865277820163303
+                  },
+                  {
+                  "x": 0.6416406273841858,
+                  "y": 0.2573611153496636
+                  },
+                  {
+                  "x": 0.40414062738418577,
+                  "y": 0.27958333757188586
+                  },
+                  {
+                  "x": 0.38070312738418577,
+                  "y": 0.10180555979410807
+                  },
+                  {
+                  "x": 0.5877343773841858,
+                  "y": 0.0865277820163303
+                  },
+                  {
+                  "x": 0.6416406273841858,
+                  "y": 0.2573611153496636
+                  },
+                  {
+                  "x": 0.40414062738418577,
+                  "y": 0.27958333757188586
+                  }
                 ]
               }
             },
@@ -2602,7 +2623,7 @@
       "channel_id": "camera_32",
       "channel_name": "kitchen2",
       "store_id": "store_3",
-      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=10&stream=0.sdp?",
+      "rtsp_url": "rtsp://122.166.79.247:568/user=admin&password=admin123&channel=0&stream=0.sdp?",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -2665,7 +2686,7 @@
       "channel_id": "camera_33",
       "channel_name": "kitchen1",
       "store_id": "store_3",
-      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=11&stream=0.sdp?",
+      "rtsp_url": "rtsp://122.166.79.247:569/user=admin&password=admin123&channel=0&stream=0.sdp?",
       "video_file": "",
       "enabled": true,
       "modules": [
@@ -2728,7 +2749,7 @@
       "channel_id": "camera_34",
       "channel_name": "Store Room",
       "store_id": "store_3",
-      "rtsp_url": "rtsp://122.166.79.247:557/user=admin&password=admin123&channel=12&stream=0.sdp?",
+      "rtsp_url": "rtsp://122.166.79.247:560/user=admin&password=admin123&channel=0&stream=0.sdp?",
       "enabled": true,
       "modules": [
         {

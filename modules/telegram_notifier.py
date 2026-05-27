@@ -458,11 +458,16 @@ class TelegramNotifier:
             return image_path
         
         # Try different path variations
+        # Only prepend "static/" if the path doesn't already start with it
+        if image_path.startswith('static/') or image_path.startswith('static\\'):
+            static_prefixed = image_path
+        else:
+            static_prefixed = os.path.join("static", image_path)
         possible_paths = [
             image_path,  # Original path
-            os.path.join("static", image_path),  # Relative to static
+            static_prefixed,  # Relative to static (without double-prefix)
             os.path.abspath(image_path),  # Absolute from current dir
-            os.path.abspath(os.path.join("static", image_path)),  # Absolute static path
+            os.path.abspath(static_prefixed),  # Absolute static path
         ]
         
         # Also try with just the filename in common directories
