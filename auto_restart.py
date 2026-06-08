@@ -50,12 +50,24 @@ class AppRestarter:
         
     def _find_python(self):
         """Find the Python executable to use"""
-        # Check for virtual environment
-        venv_python = Path('venv') / 'Scripts' / 'python.exe'  # Windows
-        if not venv_python.exists():
-            venv_python = Path('venv') / 'bin' / 'python'  # Linux/Mac
-        if venv_python.exists():
-            return str(venv_python)
+        # If this script is itself running inside a virtual environment
+        # (e.g. launched with the venv activated), reuse that interpreter.
+        # It is an absolute, known-good, executable path — which avoids the
+        # "Permission denied: 'venv/bin/python'" failure that happens when a
+        # copied venv has lost the executable bit on its relative path.
+        if sys.prefix != sys.base_prefix:
+            return sys.executable
+
+        # Otherwise look for a venv in the project directory, but only accept
+        # it if the interpreter is actually executable.
+        for candidate in (
+            Path('venv') / 'Scripts' / 'python.exe',  # Windows
+            Path('venv') / 'bin' / 'python',           # Linux/Mac
+        ):
+            if candidate.exists() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve())
+
+        # Fall back to the interpreter running this script.
         return sys.executable
     
     def start_app(self):
