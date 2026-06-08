@@ -23,20 +23,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class AppRestarter:
-    def __init__(self, watch_files=False, restart_delay=5):
+    def __init__(self, watch_files=False, restart_delay=5, restart_interval_hours=0):
         """
         Initialize the app restarter
-        
+
         Args:
             watch_files: If True, restart on file changes (development mode)
             restart_delay: Seconds to wait before restarting after crash
+            restart_interval_hours: If > 0, restart the app (and therefore all
+                cameras, which are loaded by app.py at startup) on this fixed
+                schedule regardless of crashes. 0 disables periodic restart.
         """
         self.watch_files = watch_files
         self.restart_delay = restart_delay
+        self.restart_interval_seconds = restart_interval_hours * 3600
         self.process = None
         self.running = True
         self.venv_python = self._find_python()
-        
+        # Wall-clock time the current app process was started; used to decide
+        # when a scheduled periodic restart is due.
+        self.app_start_time = None
+
         # Files to watch (if watch_files is True)
         self.watch_extensions = {'.py', '.json', '.yaml', '.yml'}
         self.last_modified = {}
@@ -66,7 +73,11 @@ class AppRestarter:
                 bufsize=1
             )
             
+            self.app_start_time = time.time()
             logger.info(f"✅ Application started with PID: {self.process.pid}")
+            if self.restart_interval_seconds > 0:
+                hours = self.restart_interval_seconds / 3600
+                logger.info(f"⏰ Next scheduled restart in {hours:g} hour(s)")
             return True
         except Exception as e:
             logger.error(f"❌ Failed to start application: {e}")
@@ -163,6 +174,19 @@ class AppRestarter:
                     logger.info("✅ Application exited normally")
                     break
             
+            # Scheduled periodic restart (e.g. every hour). Restarting app.py
+            # reloads every camera/channel from configuration, so this bounces
+            # the cameras and the application together.
+            if (self.restart_interval_seconds > 0
+                    and self.app_start_time is not None
+                    and (time.time() - self.app_start_time) >= self.restart_interval_seconds):
+                uptime_hours = (time.time() - self.app_start_time) / 3600
+                logger.info(f"⏰ Scheduled restart due (uptime {uptime_hours:.2f}h). "
+                            "Restarting application and cameras...")
+                self.stop_app()
+                time.sleep(self.restart_delay)
+                continue
+
             # Check for file changes (if watching)
             if self.watch_files and self.check_file_changes():
                 logger.info("🔄 File changes detected, restarting application...")
@@ -193,6 +217,10 @@ class AppRestarter:
             logger.info("=" * 60)
             logger.info(f"Watch files: {self.watch_files}")
             logger.info(f"Restart delay: {self.restart_delay}s")
+            if self.restart_interval_seconds > 0:
+                logger.info(f"Scheduled restart: every {self.restart_interval_seconds / 3600:g}h")
+            else:
+                logger.info("Scheduled restart: disabled")
             logger.info("Press Ctrl+C to stop")
             logger.info("=" * 60)
             logger.info("")
@@ -218,10 +246,18 @@ def main():
                        help='Watch for file changes and auto-restart (development mode)')
     parser.add_argument('--delay', type=int, default=5,
                        help='Seconds to wait before restarting after crash (default: 5)')
-    
+    parser.add_argument('--restart-interval', type=float, default=0,
+                       help='Restart the app (and all cameras) on a fixed schedule, '
+                            'in hours. E.g. --restart-interval 1 restarts every hour. '
+                            '0 disables periodic restart (default: 0)')
+
     args = parser.parse_args()
-    
-    restarter = AppRestarter(watch_files=args.watch, restart_delay=args.delay)
+
+    restarter = AppRestarter(
+        watch_files=args.watch,
+        restart_delay=args.delay,
+        restart_interval_hours=args.restart_interval,
+    )
     restarter.run()
 
 if __name__ == '__main__':
