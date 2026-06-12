@@ -1905,8 +1905,8 @@ class DatabaseManager:
             self.db.session.add(alert_gif)
             self.db.session.commit()
             
-            # Send Telegram notification - DISABLED FOR CASH DETECTION ALERTS
-            if alert_type != 'cash_detection_alert':
+            # Send Telegram notification - DISABLED FOR CASH DETECTION AND QUEUE ALERTS
+            if alert_type not in ('cash_detection_alert', 'queue_alert'):
                 try:
                     from modules.telegram_notifier import get_telegram_notifier
                     notifier = get_telegram_notifier()
@@ -1941,7 +1941,7 @@ class DatabaseManager:
                 except Exception as tg_error:
                     logger.warning(f"Failed to send Telegram notification: {tg_error}")
             else:
-                logger.info(f"Telegram notification skipped for cash_detection_alert (disabled)")
+                logger.info(f"Telegram notification skipped for {alert_type} (disabled)")
             
             return alert_gif.id
             
