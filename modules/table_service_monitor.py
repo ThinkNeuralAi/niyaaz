@@ -174,18 +174,20 @@ class TableServiceMonitor:
         return str(table_id)
 
     def load_configuration(self):
-        """Load table ROIs and settings from channels.json and database"""
+        """Load table ROIs and settings from channels.json and database.
+        Priority: channels.json settings > DB settings > __init__ defaults.
+        """
         try:
-            # First try loading from channels.json
-            self._load_table_rois_from_config()
-
-            # Also try loading from database as fallback
-            if not self.table_rois and self.db_manager:
+            # Load DB first as base (ROIs + settings)
+            if self.db_manager:
                 if self.app:
                     with self.app.app_context():
                         self._load_configuration_from_db()
                 else:
                     self._load_configuration_from_db()
+
+            # Load channels.json second — its settings override DB values
+            self._load_table_rois_from_config()
 
             # If still no ROIs, try loading from ServiceDisciplineMonitor config as fallback
             if not self.table_rois:
@@ -230,6 +232,13 @@ class TableServiceMonitor:
                         continue
 
                     module_config = module.get('config', {})
+
+                    # Load settings from channels.json — takes priority over DB and __init__ defaults
+                    settings_config = module_config.get('settings', {})
+                    if settings_config:
+                        self.settings.update(settings_config)
+                        logger.info(f"[{self.channel_id}] Loaded settings from channels.json: {settings_config}")
+
                     table_rois_config = module_config.get('table_rois', {})
 
                     if table_rois_config:
