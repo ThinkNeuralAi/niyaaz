@@ -104,8 +104,8 @@ class TableServiceMonitor:
         # Settings
         self.settings = {
             "unclean_alert_cooldown": 180.0,  # 3 minutes between unclean table alerts
-            "unclean_duration_threshold": 300.0,  # Table must remain unclean for >5 minutes before alerting
-            # Note: cooldown prevents repeated alerts for the same persistently-unclean table
+            "unclean_duration_threshold": 0.0,  # Changed to 0.0 to match provided code (immediate alert)
+            # Note: Provided code alerts immediately, but we keep cooldown to prevent spam
         }
         
         # Status update tracking
@@ -174,20 +174,18 @@ class TableServiceMonitor:
         return str(table_id)
 
     def load_configuration(self):
-        """Load table ROIs and settings from channels.json and database.
-        Priority: channels.json settings > DB settings > __init__ defaults.
-        """
+        """Load table ROIs and settings from channels.json and database"""
         try:
-            # Load DB first as base (ROIs + settings)
-            if self.db_manager:
+            # First try loading from channels.json
+            self._load_table_rois_from_config()
+
+            # Also try loading from database as fallback
+            if not self.table_rois and self.db_manager:
                 if self.app:
                     with self.app.app_context():
                         self._load_configuration_from_db()
                 else:
                     self._load_configuration_from_db()
-
-            # Load channels.json second — its settings override DB values
-            self._load_table_rois_from_config()
 
             # If still no ROIs, try loading from ServiceDisciplineMonitor config as fallback
             if not self.table_rois:
@@ -232,13 +230,6 @@ class TableServiceMonitor:
                         continue
 
                     module_config = module.get('config', {})
-
-                    # Load settings from channels.json — takes priority over DB and __init__ defaults
-                    settings_config = module_config.get('settings', {})
-                    if settings_config:
-                        self.settings.update(settings_config)
-                        logger.info(f"[{self.channel_id}] Loaded settings from channels.json: {settings_config}")
-
                     table_rois_config = module_config.get('table_rois', {})
 
                     if table_rois_config:
@@ -1629,27 +1620,31 @@ class TableServiceMonitor:
         # Draw table ROIs if configured
         if self.table_rois:
             for table_id, roi_info in self.table_rois.items():
-                # Get cleanliness status
-                cleanliness = table_detections.get(table_id, {}).get("cleanliness")
-                bbox = table_detections.get(table_id, {}).get("bbox")
-                confidence = table_detections.get(table_id, {}).get("confidence", 0.0)
-
-                # Only visualize unclean tables - skip clean and unknown tables
-                if cleanliness != "unclean":
-                    continue
-
                 polygon = roi_info["polygon"]
                 # Convert normalized coordinates to pixel coordinates
                 polygon_pixels = [(int(p[0] * w), int(p[1] * h)) for p in polygon]
 
-                roi_color = (0, 0, 255)  # Red for unclean
-                status_text = "UNCLEAN"
-
+                # Get cleanliness status
+                cleanliness = table_detections.get(table_id, {}).get("cleanliness")
+                bbox = table_detections.get(table_id, {}).get("bbox")
+                confidence = table_detections.get(table_id, {}).get("confidence", 0.0)
+                
+                # Determine color and status text
+                if cleanliness == "unclean":
+                    roi_color = (0, 0, 255)  # Red for unclean
+                    status_text = "UNCLEAN"
+                elif cleanliness == "clean":
+                    roi_color = (0, 255, 0)  # Green for clean
+                    status_text = "CLEAN"
+                else:
+                    roi_color = (0, 255, 255)  # Yellow for unknown
+                    status_text = "UNKNOWN"
+                
                 # Draw table ROI polygon
                 table_name = self._get_table_display_name(table_id)
                 cv2.polylines(annotated, [np.array(polygon_pixels, np.int32)], True, roi_color, 2)
-                cv2.putText(annotated, f"{table_name} - {status_text}",
-                           (polygon_pixels[0][0], polygon_pixels[0][1] - 10),
+                cv2.putText(annotated, f"{table_name} - {status_text}", 
+                           (polygon_pixels[0][0], polygon_pixels[0][1] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, roi_color, 2)
 
                 # Draw detected table bounding box if available
@@ -1665,22 +1660,26 @@ class TableServiceMonitor:
                     cv2.putText(annotated, label, (int(x1), int(y1) - 5),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         else:
-            # No ROIs configured - draw only unclean detected tables with bounding boxes
+            # No ROIs configured - draw all detected tables with bounding boxes
             for table_id, detection_data in table_detections.items():
                 cleanliness = detection_data.get("cleanliness")
                 bbox = detection_data.get("bbox")
                 confidence = detection_data.get("confidence", 0.0)
-
-                # Only visualize unclean tables - skip clean and unknown tables
-                if cleanliness != "unclean":
-                    continue
-
+                
                 if bbox is None or len(bbox) != 4:
                     continue
-
-                bbox_color = (0, 0, 255)  # Red for unclean
-                status_text = "UNCLEAN"
-
+                
+                # Determine color and status text
+                if cleanliness == "unclean":
+                    bbox_color = (0, 0, 255)  # Red for unclean
+                    status_text = "UNCLEAN"
+                elif cleanliness == "clean":
+                    bbox_color = (0, 255, 0)  # Green for clean
+                    status_text = "CLEAN"
+                else:
+                    bbox_color = (0, 255, 255)  # Yellow for unknown
+                    status_text = "UNKNOWN"
+                
                 x1, y1, x2, y2 = bbox
                 # Draw bounding box
                 cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), bbox_color, 3)
