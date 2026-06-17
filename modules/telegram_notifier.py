@@ -349,10 +349,19 @@ class TelegramNotifier:
                     if 'table_id' in alert_data:
                         table_display = alert_data.get('table_name') or alert_data['table_id']
                         table_num = alert_data.get('table_number', '')
-                        if table_num:
+                        # Avoid a redundant "(#X)" when the number is identical to the display value
+                        if table_num and str(table_num) != str(table_display):
                             message_parts.append(f"🪑 <b>Table:</b> {table_display} (#{table_num})")
                         else:
                             message_parts.append(f"🪑 <b>Table:</b> {table_display}")
+                        # Include the table's ROI so reviewers can locate the table in the frame
+                        roi_bbox = alert_data.get('roi_bbox')
+                        if isinstance(roi_bbox, (list, tuple)) and len(roi_bbox) == 4:
+                            x1, y1, x2, y2 = roi_bbox
+                            message_parts.append(
+                                f"📐 <b>Table ROI:</b> x: {float(x1):.2f}–{float(x2):.2f}, "
+                                f"y: {float(y1):.2f}–{float(y2):.2f} (normalized)"
+                            )
                     if 'violation_type' in alert_data:
                         violation_type = alert_data['violation_type']
                         if violation_type == 'order_wait':

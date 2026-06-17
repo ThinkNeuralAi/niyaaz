@@ -104,8 +104,8 @@ class TableServiceMonitor:
         # Settings
         self.settings = {
             "unclean_alert_cooldown": 180.0,  # 3 minutes between unclean table alerts
-            "unclean_duration_threshold": 0.0,  # Changed to 0.0 to match provided code (immediate alert)
-            # Note: Provided code alerts immediately, but we keep cooldown to prevent spam
+            "unclean_duration_threshold": 300.0,  # Only alert if table stays unclean (no person) for > 5 minutes
+            # Note: cooldown is enforced on top of the threshold to prevent repeat-alert spam
         }
         
         # Status update tracking
@@ -144,52 +144,23 @@ class TableServiceMonitor:
         self._current_wrong_uniforms = []
         self._current_unclean_tables = []
 
-        # Table display names mapping {table_id: display_name}
-        self.table_display_names = {}
-
         # Load configuration from database
         self.load_configuration()
 
-    def _get_table_display_name(self, table_id):
-        """Get a human-readable display name for a table.
-        Uses custom label from config if available, otherwise extracts
-        number from table_id (e.g. 'table_1' -> 'Table 1').
-        """
-        if table_id in self.table_display_names:
-            return self.table_display_names[table_id]
-        import re
-        match = re.search(r'(\d+)', str(table_id))
-        if match:
-            return f"Table {match.group(1)}"
-        return str(table_id)
-
-    def _get_table_number(self, table_id):
-        """Extract just the table number/identifier for compact display."""
-        import re
-        if table_id in self.table_display_names:
-            return self.table_display_names[table_id]
-        match = re.search(r'(\d+)', str(table_id))
-        if match:
-            return match.group(1)
-        return str(table_id)
-
     def load_configuration(self):
-        """Load table ROIs and settings from channels.json and database"""
+        """Load table ROIs and settings from database"""
         try:
-            # First try loading from channels.json
-            self._load_table_rois_from_config()
-
-            # Also try loading from database as fallback
-            if not self.table_rois and self.db_manager:
-                if self.app:
-                    with self.app.app_context():
-                        self._load_configuration_from_db()
-                else:
+            if not self.db_manager:
+                return
+            
+            # Ensure we have an application context for DB access
+            # Otherwise Flask-SQLAlchemy will raise "Working outside of application context"
+            if self.app:
+                with self.app.app_context():
                     self._load_configuration_from_db()
-
-            # If still no ROIs, try loading from ServiceDisciplineMonitor config as fallback
-            if not self.table_rois:
-                self._load_table_rois_from_service_discipline_config()
+            else:
+                # No app provided; best effort without context (may still work in some setups)
+                self._load_configuration_from_db()
 
             logger.info(f"[{self.channel_id}] Loaded table service configuration: {len(self.table_rois)} tables")
         except Exception as e:
@@ -210,115 +181,6 @@ class TableServiceMonitor:
         )
         if settings:
             self.settings.update(settings)
-
-    def _load_table_rois_from_config(self):
-        """Load table ROIs from channels.json for TableServiceMonitor"""
-        try:
-            config_path = Path("config/channels.json")
-            if not config_path.exists():
-                return
-
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-
-            for channel in config.get('channels', []):
-                if channel.get('channel_id') != self.channel_id:
-                    continue
-
-                for module in channel.get('modules', []):
-                    if module.get('type') != 'TableServiceMonitor':
-                        continue
-
-                    module_config = module.get('config', {})
-                    table_rois_config = module_config.get('table_rois', {})
-
-                    if table_rois_config:
-                        self.table_rois = {}
-                        for table_id, roi_data in table_rois_config.items():
-                            if isinstance(roi_data, dict) and 'points' in roi_data:
-                                points = roi_data['points']
-                                polygon = []
-                                for p in points:
-                                    if isinstance(p, dict) and 'x' in p and 'y' in p:
-                                        polygon.append((float(p['x']), float(p['y'])))
-                                    elif isinstance(p, (list, tuple)) and len(p) >= 2:
-                                        polygon.append((float(p[0]), float(p[1])))
-
-                                if len(polygon) >= 3:
-                                    min_x = min(pt[0] for pt in polygon)
-                                    min_y = min(pt[1] for pt in polygon)
-                                    max_x = max(pt[0] for pt in polygon)
-                                    max_y = max(pt[1] for pt in polygon)
-                                    self.table_rois[table_id] = {
-                                        "polygon": polygon,
-                                        "bbox": (min_x, min_y, max_x, max_y)
-                                    }
-                                    # Load optional label for display name
-                                    if roi_data.get('label'):
-                                        self.table_display_names[table_id] = roi_data['label']
-                                    logger.info(
-                                        f"[{self.channel_id}] Loaded table '{table_id}' "
-                                        f"(display: '{self._get_table_display_name(table_id)}') "
-                                        f"from channels.json"
-                                    )
-
-                        logger.info(f"[{self.channel_id}] Loaded {len(self.table_rois)} table ROIs from channels.json")
-                    return
-        except Exception as e:
-            logger.error(f"[{self.channel_id}] Failed to load table ROIs from channels.json: {e}", exc_info=True)
-
-    def _load_table_rois_from_service_discipline_config(self):
-        """Fallback: Load table ROIs from ServiceDisciplineMonitor config in channels.json"""
-        try:
-            config_path = Path("config/channels.json")
-            if not config_path.exists():
-                return
-
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-
-            for channel in config.get('channels', []):
-                if channel.get('channel_id') != self.channel_id:
-                    continue
-
-                for module in channel.get('modules', []):
-                    if module.get('type') != 'ServiceDisciplineMonitor':
-                        continue
-
-                    module_config = module.get('config', {})
-                    table_rois_config = module_config.get('table_rois', {})
-
-                    if table_rois_config:
-                        self.table_rois = {}
-                        for table_id, roi_data in table_rois_config.items():
-                            if isinstance(roi_data, dict) and 'points' in roi_data:
-                                points = roi_data['points']
-                                polygon = []
-                                for p in points:
-                                    if isinstance(p, dict) and 'x' in p and 'y' in p:
-                                        polygon.append((float(p['x']), float(p['y'])))
-                                    elif isinstance(p, (list, tuple)) and len(p) >= 2:
-                                        polygon.append((float(p[0]), float(p[1])))
-
-                                if len(polygon) >= 3:
-                                    min_x = min(pt[0] for pt in polygon)
-                                    min_y = min(pt[1] for pt in polygon)
-                                    max_x = max(pt[0] for pt in polygon)
-                                    max_y = max(pt[1] for pt in polygon)
-                                    self.table_rois[table_id] = {
-                                        "polygon": polygon,
-                                        "bbox": (min_x, min_y, max_x, max_y)
-                                    }
-                                    if roi_data.get('label'):
-                                        self.table_display_names[table_id] = roi_data['label']
-
-                        logger.info(
-                            f"[{self.channel_id}] Loaded {len(self.table_rois)} table ROIs "
-                            f"from ServiceDisciplineMonitor config (fallback)"
-                        )
-                    return
-        except Exception as e:
-            logger.error(f"[{self.channel_id}] Failed to load table ROIs from ServiceDisciplineMonitor config: {e}", exc_info=True)
 
     def set_table_roi(self, table_id, polygon_points):
         """
@@ -363,94 +225,7 @@ class TableServiceMonitor:
             except Exception as e:
                 logger.error(f"Failed to save table ROI to database: {e}")
 
-        logger.info(f"[{self.channel_id}] Set ROI for table {table_id} | coords: {polygon_points}")
-
-    def _annotate_frame_for_gif(self, frame):
-        """Annotate a frame with the alert table ROI and table number for GIF recording.
-        Draws the table polygon highlighted and a prominent table label so reviewers
-        can immediately identify which table triggered the alert.
-        """
-        if not self._last_alert_data:
-            return frame
-
-        table_id = self._last_alert_data.get('table_id')
-        if not table_id or table_id == 'N/A' or table_id not in self.table_rois:
-            return frame
-
-        annotated = frame.copy()
-        h, w = annotated.shape[:2]
-        roi_info = self.table_rois[table_id]
-        polygon = roi_info.get("polygon", [])
-
-        if not polygon or len(polygon) < 3:
-            return annotated
-
-        # Convert normalized polygon to pixel coordinates
-        polygon_pixels = []
-        for p in polygon:
-            if isinstance(p, (list, tuple)) and len(p) >= 2:
-                px, py = int(float(p[0]) * w), int(float(p[1]) * h)
-            elif isinstance(p, dict) and 'x' in p and 'y' in p:
-                px, py = int(float(p['x']) * w), int(float(p['y']) * h)
-            else:
-                continue
-            polygon_pixels.append((px, py))
-
-        if len(polygon_pixels) < 3:
-            return annotated
-
-        pts = np.array(polygon_pixels, np.int32)
-
-        # Draw semi-transparent red overlay on the table area
-        overlay = annotated.copy()
-        cv2.fillPoly(overlay, [pts], (0, 0, 180))
-        cv2.addWeighted(overlay, 0.25, annotated, 0.75, 0, annotated)
-
-        # Draw bright red border around the table
-        cv2.polylines(annotated, [pts], True, (0, 0, 255), 3)
-
-        # Calculate center of polygon for label placement
-        cx = int(np.mean([p[0] for p in polygon_pixels]))
-        cy = int(np.mean([p[1] for p in polygon_pixels]))
-
-        table_name = self._get_table_display_name(table_id)
-        violation_type = self._last_alert_data.get('violation_type', '')
-
-        # Draw table label with background
-        label = f"{table_name}"
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.9
-        thickness = 2
-        (tw, th), baseline = cv2.getTextSize(label, font, font_scale, thickness)
-
-        # Position label above the polygon center
-        lx = cx - tw // 2
-        ly = cy - 10
-
-        # Draw background rectangle for readability
-        cv2.rectangle(annotated, (lx - 5, ly - th - 5), (lx + tw + 5, ly + baseline + 5), (0, 0, 180), -1)
-        cv2.putText(annotated, label, (lx, ly), font, font_scale, (255, 255, 255), thickness)
-
-        # Draw violation info below the table label
-        if violation_type:
-            if violation_type == 'unclean_table':
-                vtype_label = "Unclean Table"
-                duration = self._last_alert_data.get('unclean_duration', 0)
-                info_label = f"{vtype_label}: {duration:.0f}s"
-            elif violation_type == 'slow_reset':
-                vtype_label = "Slow Reset"
-                duration = self._last_alert_data.get('reset_duration', 0)
-                info_label = f"{vtype_label}: {duration:.0f}s"
-            else:
-                info_label = violation_type
-
-            (iw, ih), _ = cv2.getTextSize(info_label, font, 0.6, 2)
-            ix = cx - iw // 2
-            iy = ly + baseline + 25
-            cv2.rectangle(annotated, (ix - 4, iy - ih - 4), (ix + iw + 4, iy + 4), (0, 0, 0), -1)
-            cv2.putText(annotated, info_label, (ix, iy), font, 0.6, (0, 255, 255), 2)
-
-        return annotated
+        logger.info(f"[{self.channel_id}] Set ROI for table {table_id}")
 
     def _point_in_polygon(self, point, polygon, bbox):
         """
@@ -840,7 +615,11 @@ class TableServiceMonitor:
                         # Already unclean - check if unclean for long enough to trigger alert
                         if tracking["unclean_start_time"] is not None:
                             unclean_duration = now_ts - tracking["unclean_start_time"]
-                            threshold = self.settings.get("unclean_duration_threshold", 0.0)
+                            # Business rule: only alert if the table has stayed unclean
+                            # (with no person present) for more than 5 minutes. Enforce a
+                            # 300s floor so a stale/smaller DB-configured threshold can't
+                            # trigger early alerts; a larger configured value is respected.
+                            threshold = max(self.settings.get("unclean_duration_threshold", 300.0), 300.0)
                             if unclean_duration >= threshold:
                                 self._check_unclean_violation(table_id, tracking, unclean_duration, current_time, frame)
                 else:
@@ -929,26 +708,28 @@ class TableServiceMonitor:
             return  # Still in cooldown
 
         # Table is unclean - trigger violation
-        table_name = self._get_table_display_name(table_id)
-        table_number = self._get_table_number(table_id)
         logger.warning(
-            f"[{self.channel_id}] {table_name} ({table_id}) unclean violation: "
+            f"[{self.channel_id}] Table {table_id} unclean violation: "
             f"Table has been unclean for {unclean_duration:.1f}s"
         )
 
+        # Table ROI (normalized) so the Telegram alert can pinpoint the unclean table
+        roi_info = self.table_rois.get(table_id) if self.table_rois else None
+        roi_bbox = list(roi_info["bbox"]) if roi_info and roi_info.get("bbox") else None
+
         # Prepare alert info for GIF recording
-        alert_message = f"Unclean {table_name} detected (unclean for {unclean_duration:.1f}s)"
+        alert_message = f"Unclean table {table_id} detected (unclean for {unclean_duration:.1f}s)"
         alert_info = {
             "type": "table_cleanliness_alert",
             "table_id": table_id,
-            "table_name": table_name,
-            "table_number": table_number,
             "violation_type": "unclean_table",
             "unclean_duration": unclean_duration,
             "channel_id": self.channel_id,
             "timestamp": current_time.isoformat(),
             "message": alert_message
         }
+        if roi_bbox is not None:
+            alert_info["roi_bbox"] = roi_bbox
         
         # Start GIF recording (only update tracking data if recording actually starts)
         logger.info(f"[{self.channel_id}] 🎬 Starting GIF recording for unclean table {table_id}")
@@ -973,8 +754,6 @@ class TableServiceMonitor:
             self.socketio.emit("table_unclean_alert", {
                 "channel_id": self.channel_id,
                 "table_id": table_id,
-                "table_name": table_name,
-                "table_number": table_number,
                 "unclean_duration": round(unclean_duration, 1),
                 "timestamp": current_time.isoformat(),
                 "snapshot_path": snapshot_path,
@@ -986,8 +765,6 @@ class TableServiceMonitor:
             try:
                 payload = {
                     "violation_type": "unclean_table",
-                    "table_name": table_name,
-                    "table_number": table_number,
                     "unclean_duration": unclean_duration,
                     "message": alert_message,
                 }
@@ -1011,8 +788,6 @@ class TableServiceMonitor:
                             alert_data={
                                 "violation_type": "unclean_table",
                                 "table_id": table_id,
-                                "table_name": table_name,
-                                "table_number": table_number,
                                 "unclean_duration": unclean_duration,
                             },
                         )
@@ -1034,13 +809,11 @@ class TableServiceMonitor:
                         alert_data={
                             "violation_type": "unclean_table",
                             "table_id": table_id,
-                            "table_name": table_name,
-                            "table_number": table_number,
                             "unclean_duration": unclean_duration,
                         },
                     )
 
-                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: unclean_table for {table_name} ({table_id}) (GIF recording in progress)")
+                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: unclean_table for {table_id} (GIF recording in progress)")
             except Exception as e:
                 logger.error(f"Failed to save table cleanliness (unclean_table): {e}", exc_info=True)
 
@@ -1071,7 +844,6 @@ class TableServiceMonitor:
             # Save frame if provided
             if frame is not None:
                 annotated = frame.copy()
-                table_name = self._get_table_display_name(table_id)
                 
                 # Draw bounding box if available
                 tracking = self.table_tracking.get(table_id, {})
@@ -1079,11 +851,11 @@ class TableServiceMonitor:
                 if bbox is not None and len(bbox) == 4:
                     x1, y1, x2, y2 = bbox
                     cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 3)
-                    cv2.putText(annotated, f"UNCLEAN {table_name.upper()}", (int(x1), int(y1) - 10),
+                    cv2.putText(annotated, "UNCLEAN TABLE", (int(x1), int(y1) - 10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                 
                 # Draw text annotation
-                cv2.putText(annotated, f"{table_name}: UNCLEAN ({unclean_duration:.1f}s)",
+                cv2.putText(annotated, f"Table {table_id}: UNCLEAN ({unclean_duration:.1f}s)",
                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
                 cv2.putText(annotated, "VIOLATION: Unclean table detected",
                            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
@@ -1127,20 +899,16 @@ class TableServiceMonitor:
             return
 
         # Slow reset violation: table still unclean after threshold time
-        table_name = self._get_table_display_name(table_id)
-        table_number = self._get_table_number(table_id)
         logger.warning(
-            f"[{self.channel_id}] {table_name} ({table_id}) slow reset violation: "
+            f"[{self.channel_id}] Table {table_id} slow reset violation: "
             f"Table not cleaned within {reset_duration:.1f}s after customers left"
         )
 
         # Prepare alert info for GIF recording
-        alert_message = f"Slow reset: {table_name} not cleaned within {reset_duration:.1f}s after customers left"
+        alert_message = f"Slow reset: Table {table_id} not cleaned within {reset_duration:.1f}s after customers left"
         alert_info = {
             "type": "table_cleanliness_alert",
             "table_id": table_id,
-            "table_name": table_name,
-            "table_number": table_number,
             "violation_type": "slow_reset",
             "reset_duration": reset_duration,
             "channel_id": self.channel_id,
@@ -1171,8 +939,6 @@ class TableServiceMonitor:
             self.socketio.emit("table_slow_reset_alert", {
                 "channel_id": self.channel_id,
                 "table_id": table_id,
-                "table_name": table_name,
-                "table_number": table_number,
                 "reset_duration": round(reset_duration, 1),
                 "timestamp": current_time.isoformat(),
                 "snapshot_path": snapshot_path,
@@ -1184,8 +950,6 @@ class TableServiceMonitor:
             try:
                 payload = {
                     "violation_type": "slow_reset",
-                    "table_name": table_name,
-                    "table_number": table_number,
                     "reset_duration": reset_duration,
                     "message": alert_message,
                 }
@@ -1208,8 +972,6 @@ class TableServiceMonitor:
                             alert_data={
                                 "violation_type": "slow_reset",
                                 "table_id": table_id,
-                                "table_name": table_name,
-                                "table_number": table_number,
                                 "reset_duration": reset_duration,
                             },
                         )
@@ -1231,12 +993,10 @@ class TableServiceMonitor:
                         alert_data={
                             "violation_type": "slow_reset",
                             "table_id": table_id,
-                            "table_name": table_name,
-                            "table_number": table_number,
                             "reset_duration": reset_duration,
                         },
                     )
-                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: slow_reset for {table_name} ({table_id}) (GIF recording in progress)")
+                logger.info(f"[{self.channel_id}] ✅ Table cleanliness saved: slow_reset for {table_id} (GIF recording in progress)")
             except Exception as e:
                 logger.error(f"Failed to save table cleanliness (slow_reset): {e}", exc_info=True)
 
@@ -1266,9 +1026,8 @@ class TableServiceMonitor:
             # Save frame if provided
             if frame is not None:
                 annotated = frame.copy()
-                table_name = self._get_table_display_name(table_id)
                 # Draw text annotation
-                cv2.putText(annotated, f"{table_name}: SLOW RESET ({reset_duration:.1f}s)",
+                cv2.putText(annotated, f"Table {table_id}: SLOW RESET ({reset_duration:.1f}s)",
                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 3)
                 cv2.putText(annotated, "VIOLATION: Table not cleaned after customers left",
                            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
@@ -1381,8 +1140,9 @@ class TableServiceMonitor:
         if frame is None or frame.size == 0:
             return frame
 
-        # Add frame to GIF recorder buffer (always running)
-        self.gif_recorder.add_frame(frame)
+        # Note: the GIF recorder buffer is fed with the *annotated* frame later in
+        # this method (see below) so that the GIF/snapshot sent to Telegram shows the
+        # bounding box around the unclean table for easy review.
 
         h, w = frame.shape[:2]
 
@@ -1479,13 +1239,22 @@ class TableServiceMonitor:
             if data.get("cleanliness") == "unclean"
         ]
 
+        # Draw annotations (red bounding box + "UNCLEAN" label around the unclean
+        # table) BEFORE feeding the GIF recorder, so the GIF/snapshot sent to Telegram
+        # clearly highlights which table is unclean for easy review.
+        annotated_frame = self._draw_annotations(frame, table_detections, current_time)
+
+        # Feed the annotated frame to the circular buffer (pre-alert context) so the
+        # frames captured just before an alert also show the bounding boxes.
+        self.gif_recorder.add_frame(annotated_frame)
+
         # Handle GIF recording state (same pattern as service_discipline_monitor)
         was_recording = self.gif_recorder.is_recording_alert
-        
+
         if was_recording:
-            # Annotate frame with table identification before adding to GIF
-            annotated_gif_frame = self._annotate_frame_for_gif(frame)
-            self.gif_recorder.add_alert_frame(annotated_gif_frame)
+            # Add annotated frame during alert recording so the resulting GIF shows
+            # the bounding box around the unclean table.
+            self.gif_recorder.add_alert_frame(annotated_frame)
             # stop_alert_recording() is called automatically by add_alert_frame when duration is reached
         
         # Check if recording just finished (was recording, now stopped)
@@ -1539,33 +1308,30 @@ class TableServiceMonitor:
                             else:
                                 logger.warning(f"[{self.channel_id}] ⚠️ Violation {self._pending_violation_id} not found for update")
                     
-                    # Also save to alert_gifs table (skip wrong_uniform - only service discipline violations should be saved)
-                    if violation_type == 'wrong_uniform':
-                        logger.info(f"[{self.channel_id}] ℹ️ Skipping alert_gifs save for wrong_uniform - only service discipline violations are saved")
-                    else:
-                        gif_payload = {
-                            'gif_filename': gif_filename,
-                            'gif_path': gif_path,
-                            'frame_count': gif_info.get('frame_count', 0),
-                            'duration': gif_info.get('duration', 0.0)
-                        }
-                        
-                        alert_message = self._last_alert_message or f"Table service violation: {violation_type}"
-                        
-                        if self.app:
-                            with self.app.app_context():
-                                self.db_manager.save_alert_gif(
-                                    self.channel_id,
-                                    'table_cleanliness_alert' if violation_type in ['unclean_table', 'slow_reset'] else 'table_service_alert',
-                                    gif_payload,
-                                    alert_message=alert_message,
-                                    alert_data=alert_data
-                                )
-                                
-                                # Telegram alert is sent by database method when GIF is saved
-                                logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved - Telegram will be sent by database")
-                        
-                        logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved to database: {gif_filename}")
+                    # Also save to alert_gifs table
+                    gif_payload = {
+                        'gif_filename': gif_filename,
+                        'gif_path': gif_path,
+                        'frame_count': gif_info.get('frame_count', 0),
+                        'duration': gif_info.get('duration', 0.0)
+                    }
+                    
+                    alert_message = self._last_alert_message or f"Table service violation: {violation_type}"
+                    
+                    if self.app:
+                        with self.app.app_context():
+                            self.db_manager.save_alert_gif(
+                                self.channel_id,
+                                'table_cleanliness_alert' if violation_type in ['unclean_table', 'slow_reset'] else 'table_service_alert',
+                                gif_payload,
+                                alert_message=alert_message,
+                                alert_data=alert_data
+                            )
+                            
+                            # Telegram alert is sent by database method when GIF is saved
+                            logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved - Telegram will be sent by database")
+                    
+                    logger.info(f"[{self.channel_id}] ✅ Table service alert GIF saved to database: {gif_filename}")
                     # Clear stored alert info
                     self._last_alert_data = None
                     self._last_alert_message = None
@@ -1576,9 +1342,7 @@ class TableServiceMonitor:
         # Track recording state for next frame (use CURRENT state, not captured-at-start)
         self._was_recording_alert = self.gif_recorder.is_recording_alert
 
-        # Draw annotations (always draw for smooth visualization)
-        annotated_frame = self._draw_annotations(frame, table_detections, current_time)
-
+        # annotated_frame was already produced above (before feeding the GIF recorder)
         return annotated_frame
 
     def _draw_annotations(self, frame, table_detections, current_time):
@@ -1609,10 +1373,9 @@ class TableServiceMonitor:
                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
             y_offset += 50
         
-        # 2. Table unclean alert (matching script) - include table identification
+        # 2. Table unclean alert (matching script)
         if self._current_unclean_tables:
-            unclean_names = [self._get_table_display_name(tid) for tid in self._current_unclean_tables]
-            alert_text = f"TABLE UNCLEAN! ({', '.join(unclean_names)})"
+            alert_text = "⚠ TABLE UNCLEAN!"
             cv2.putText(annotated, alert_text, (20, 40 + y_offset),
                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
             y_offset += 50
@@ -1641,9 +1404,8 @@ class TableServiceMonitor:
                     status_text = "UNKNOWN"
                 
                 # Draw table ROI polygon
-                table_name = self._get_table_display_name(table_id)
                 cv2.polylines(annotated, [np.array(polygon_pixels, np.int32)], True, roi_color, 2)
-                cv2.putText(annotated, f"{table_name} - {status_text}", 
+                cv2.putText(annotated, f"Table {table_id} - {status_text}", 
                            (polygon_pixels[0][0], polygon_pixels[0][1] - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, roi_color, 2)
 
@@ -1685,8 +1447,7 @@ class TableServiceMonitor:
                 cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), bbox_color, 3)
                 
                 # Draw label with table ID, status, and confidence
-                table_name = self._get_table_display_name(table_id)
-                label = f"{table_name} - {status_text} ({confidence:.2f})"
+                label = f"Table {table_id} - {status_text} ({confidence:.2f})"
                 label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
                 cv2.rectangle(annotated, (int(x1), int(y1) - label_size[1] - 10), 
                              (int(x1) + label_size[0], int(y1)), bbox_color, -1)
@@ -1795,9 +1556,17 @@ class TableServiceMonitor:
             "message": alert_message
         }
         
-        # Skip GIF recording for wrong uniform - not saving to DB/Telegram
-        logger.info(f"[{self.channel_id}] ℹ️ Skipping GIF recording for wrong uniform violation (not saved to DB/Telegram)")
+        # Start GIF recording (only update tracking data if recording actually starts)
+        logger.info(f"[{self.channel_id}] 🎬 Starting GIF recording for wrong uniform violation")
         gif_recording_started = False
+        if not self.gif_recorder.is_recording_alert:
+            self.gif_recorder.start_alert_recording(alert_info)
+            self._last_alert_message = alert_message
+            self._last_alert_data = alert_info
+            self._pending_violation_id = None  # Will be set when violation is saved
+            gif_recording_started = True
+        else:
+            logger.warning(f"[{self.channel_id}] ⚠️ GIF recording already in progress - skipping GIF for this violation")
         
         # Save JPG snapshot immediately to alerts folder
         snapshot_rel_path = self._save_uniform_violation_snapshot(wrong_uniforms, current_time, frame)
@@ -1819,10 +1588,64 @@ class TableServiceMonitor:
                 "message": alert_message
             })
         
-        # Skip saving wrong uniform alerts to database and Telegram
-        # Only service_discipline_alert violations should be saved
+        # Save to database
         if self.db_manager:
-            logger.info(f"[{self.channel_id}] ℹ️ Wrong uniform detected ({uniform_names}) - skipping DB/Telegram save (only service discipline violations are saved)")
+            try:
+                if self.app:
+                    with self.app.app_context():
+                        result = self.db_manager.add_table_service_violation(
+                            channel_id=self.channel_id,
+                            table_id="N/A",  # Uniform violation is not table-specific
+                            waiting_time=0.0,  # Uniform violation doesn't have waiting time
+                            snapshot_path=snapshot_path,  # Placeholder - will be updated when GIF completes
+                            timestamp=current_time,
+                            alert_data={
+                                "violation_type": "wrong_uniform",
+                                "wrong_uniforms": wrong_uniforms,
+                                "message": alert_message
+                            }
+                        )
+                        if result and gif_recording_started:
+                            self._pending_violation_id = result
+                        # Also log to general alerts table
+                        self.db_manager.log_alert(
+                            self.channel_id,
+                            'table_service_alert',
+                            alert_message,
+                            alert_data={
+                                "violation_type": "wrong_uniform",
+                                "wrong_uniforms": wrong_uniforms
+                            }
+                        )
+                        logger.info(f"[{self.channel_id}] ✅ Uniform violation alert saved to database: {uniform_names} (GIF recording in progress)")
+                else:
+                    result = self.db_manager.add_table_service_violation(
+                        channel_id=self.channel_id,
+                        table_id="N/A",  # Uniform violation is not table-specific
+                        waiting_time=0.0,  # Uniform violation doesn't have waiting time
+                        snapshot_path=snapshot_path,  # Placeholder - will be updated when GIF completes
+                        timestamp=current_time,
+                        alert_data={
+                            "violation_type": "wrong_uniform",
+                            "wrong_uniforms": wrong_uniforms,
+                            "message": alert_message
+                        }
+                    )
+                    if result and gif_recording_started:
+                        self._pending_violation_id = result
+                    # Also log to general alerts table
+                    self.db_manager.log_alert(
+                        self.channel_id,
+                        'table_service_alert',
+                        alert_message,
+                        alert_data={
+                            "violation_type": "wrong_uniform",
+                            "wrong_uniforms": wrong_uniforms
+                        }
+                    )
+                    logger.info(f"[{self.channel_id}] ✅ Uniform violation alert saved to database: {uniform_names} (GIF recording in progress)")
+            except Exception as e:
+                logger.error(f"Failed to save uniform violation to database: {e}", exc_info=True)
         
         self.total_alerts += 1
     
