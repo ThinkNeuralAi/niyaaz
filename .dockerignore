@@ -1,0 +1,52 @@
+# ============================================================================
+# .dockerignore — paths excluded from the Docker build context
+# ============================================================================
+
+# Version control
+.git/
+.gitignore
+
+# Python virtual environment (recreated inside the image via requirements.txt)
+.venv/
+venv/
+env/
+
+# Compiled Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artefacts
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Secrets — never baked into the image; pass via docker-compose environment
+.env
+
+# Runtime data — mounted as volumes at container startup
+data/
+logs/
+
+# Large binary model files — mounted as a read-only volume at runtime
+# so they are not duplicated inside the image.
+models/
+
+# TensorRT engine files are GPU-architecture specific;
+# rebuild them inside the container if needed.
+*.engine
+
+# Development / testing scripts not needed in production
+appv1.py
+debug_report.py
+test_report.py
+
+# Documentation
+README.md
+
+# Docker files themselves (avoid recursive confusion)
+Dockerfile
+docker-compose.yml
+.dockerignore
