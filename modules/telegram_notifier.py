@@ -354,14 +354,29 @@ class TelegramNotifier:
                             message_parts.append(f"🪑 <b>Table:</b> {table_display} (#{table_num})")
                         else:
                             message_parts.append(f"🪑 <b>Table:</b> {table_display}")
-                        # Include the table's ROI so reviewers can locate the table in the frame
-                        roi_bbox = alert_data.get('roi_bbox')
-                        if isinstance(roi_bbox, (list, tuple)) and len(roi_bbox) == 4:
-                            x1, y1, x2, y2 = roi_bbox
+                        # Include the table's ROI so reviewers can locate the table in the frame.
+                        # Prefer the actual polygon vertices; fall back to the bounding box.
+                        roi_polygon = alert_data.get('roi_polygon')
+                        roi_points = []
+                        if isinstance(roi_polygon, (list, tuple)):
+                            for p in roi_polygon:
+                                if isinstance(p, dict) and 'x' in p and 'y' in p:
+                                    roi_points.append((float(p['x']), float(p['y'])))
+                                elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                                    roi_points.append((float(p[0]), float(p[1])))
+                        if roi_points:
+                            points_str = ", ".join(f"({x:.2f}, {y:.2f})" for x, y in roi_points)
                             message_parts.append(
-                                f"📐 <b>Table ROI:</b> x: {float(x1):.2f}–{float(x2):.2f}, "
-                                f"y: {float(y1):.2f}–{float(y2):.2f} (normalized)"
+                                f"📐 <b>Table ROI:</b> {points_str} (normalized)"
                             )
+                        else:
+                            roi_bbox = alert_data.get('roi_bbox')
+                            if isinstance(roi_bbox, (list, tuple)) and len(roi_bbox) == 4:
+                                x1, y1, x2, y2 = roi_bbox
+                                message_parts.append(
+                                    f"📐 <b>Table ROI:</b> x: {float(x1):.2f}–{float(x2):.2f}, "
+                                    f"y: {float(y1):.2f}–{float(y2):.2f} (normalized)"
+                                )
                     if 'violation_type' in alert_data:
                         violation_type = alert_data['violation_type']
                         if violation_type == 'order_wait':

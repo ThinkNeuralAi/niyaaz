@@ -79,6 +79,12 @@ class TableServiceMonitor:
         self.table_clean_class = "table_clean"      # Class 15
         self.table_unclean_class = "table_unclean"  # Class 16
 
+        # Staff identification classes (best.pt). A person is considered STAFF
+        # only if they wear an allowed uniform AND a hairnet. Staff present at a
+        # table must NOT suppress the unclean-table alert; only non-staff
+        # persons (customers) suppress it.
+        self.hairnet_class = "hairnet"  # Class 4
+
         # Person class ID (best.pt person is class 0)
         self.person_class_id = 0
 
@@ -104,7 +110,7 @@ class TableServiceMonitor:
         # Settings
         self.settings = {
             "unclean_alert_cooldown": 180.0,  # 3 minutes between unclean table alerts
-            "unclean_duration_threshold": 300.0,  # Only alert if table stays unclean (no person) for > 5 minutes
+            "unclean_duration_threshold": 10.0,  # Only alert if table stays unclean (no person) for > 10 seconds
             # Note: cooldown is enforced on top of the threshold to prevent repeat-alert spam
         }
         
@@ -469,7 +475,87 @@ class TableServiceMonitor:
     def _distance(self, p1, p2):
         """Calculate Euclidean distance between two points"""
         return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
-    
+
+    def _is_center_in_bbox(self, center, bbox, expand_ratio=0.0):
+        """
+        Check whether a point lies inside a bounding box (optionally expanded).
+
+        Args:
+            center: (x, y) point in pixel coordinates
+            bbox: [x1, y1, x2, y2] in pixel coordinates
+            expand_ratio: Fraction to expand the bbox by on each side (0.1 = 10%)
+
+        Returns:
+            bool: True if the point is inside the (expanded) bbox
+        """
+        if center is None or bbox is None or len(bbox) != 4:
+            return False
+        cx, cy = center
+        x1, y1, x2, y2 = bbox
+        if expand_ratio > 0:
+            bw = (x2 - x1) * expand_ratio
+            bh = (y2 - y1) * expand_ratio
+            x1, y1, x2, y2 = x1 - bw, y1 - bh, x2 + bw, y2 + bh
+        return x1 <= cx <= x2 and y1 <= cy <= y2
+
+    def _get_non_staff_person_centers(self, detections, person_detections):
+        """
+        Classify each detected person as staff vs non-staff and return only the
+        centers of NON-staff persons (customers).
+
+        Staff definition (per business rule): a person wearing an ALLOWED
+        uniform AND a hairnet. A uniform/hairnet detection (from the table model
+        best.pt) is associated with a person when its center falls inside that
+        person's slightly-expanded bounding box.
+
+        Only non-staff persons should suppress the unclean-table alert — staff
+        standing near a table must NOT prevent the alert from firing.
+
+        Args:
+            detections: List of detection dicts from the table model (best.pt),
+                including Uniform_* and Hairnet detections.
+            person_detections: List of person detection dicts (from the person
+                detector) each with 'bbox' and 'center'.
+
+        Returns:
+            list: Centers (x, y) of persons classified as non-staff.
+        """
+        # Collect uniform / hairnet detection centers from best.pt
+        allowed_uniform_centers = []
+        hairnet_centers = []
+        for det in detections:
+            class_clean = det.get("class_name", "").lower().replace(" ", "_")
+            bbox = det.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+            center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+            if class_clean in self.allowed_uniforms:
+                allowed_uniform_centers.append(center)
+            elif class_clean == self.hairnet_class:
+                hairnet_centers.append(center)
+
+        non_staff_centers = []
+        for person in person_detections:
+            pbbox = person.get("bbox")
+            center = person.get("center")
+            if pbbox is None or center is None:
+                continue
+
+            has_uniform = any(self._is_center_in_bbox(c, pbbox, 0.1) for c in allowed_uniform_centers)
+            has_hairnet = any(self._is_center_in_bbox(c, pbbox, 0.1) for c in hairnet_centers)
+            is_staff = has_uniform and has_hairnet
+
+            if is_staff:
+                logger.debug(
+                    f"[{self.channel_id}] Person at {center} classified as STAFF "
+                    f"(allowed uniform + hairnet) - excluded from alert suppression"
+                )
+            else:
+                non_staff_centers.append(center)
+
+        return non_staff_centers
+
+
     def _check_person_near_table(self, table_center, persons, table_roi=None):
         """
         Check if any person is near the table or within the table ROI
@@ -615,11 +701,9 @@ class TableServiceMonitor:
                         # Already unclean - check if unclean for long enough to trigger alert
                         if tracking["unclean_start_time"] is not None:
                             unclean_duration = now_ts - tracking["unclean_start_time"]
-                            # Business rule: only alert if the table has stayed unclean
-                            # (with no person present) for more than 5 minutes. Enforce a
-                            # 300s floor so a stale/smaller DB-configured threshold can't
-                            # trigger early alerts; a larger configured value is respected.
-                            threshold = max(self.settings.get("unclean_duration_threshold", 300.0), 300.0)
+                            # Business rule: alert if the table has stayed unclean
+                            # (with no person present) for more than 10 seconds.
+                            threshold = self.settings.get("unclean_duration_threshold", 10.0)
                             if unclean_duration >= threshold:
                                 self._check_unclean_violation(table_id, tracking, unclean_duration, current_time, frame)
                 else:
@@ -1191,7 +1275,9 @@ class TableServiceMonitor:
                 # Run person detection for proximity checks
                 try:
                     person_detections = self.person_detector.detect_persons(frame)
-                    persons_centers = [d['center'] for d in person_detections]
+                    # Exclude staff (allowed uniform + hairnet) so that only
+                    # non-staff persons (customers) suppress the unclean-table alert.
+                    persons_centers = self._get_non_staff_person_centers(detections, person_detections)
                     self.last_persons = persons_centers
                 except Exception as e:
                     logger.error(f"Error in person detection: {e}")

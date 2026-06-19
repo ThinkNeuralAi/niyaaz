@@ -7594,6 +7594,17 @@
                         if (!alert.gif_path && !alert.gif_filename) {
                             return false;
                         }
+                        // Only show genuine service discipline alerts here.
+                        // Exclude table service uniform / slow reset / unclean alerts which
+                        // belong to the Table Service reports, not Service Discipline.
+                        let alertData = alert.alert_data || {};
+                        if (typeof alertData === 'string') {
+                            try { alertData = JSON.parse(alertData); } catch (e) { alertData = {}; }
+                        }
+                        const vtype = alertData.violation_type;
+                        if (vtype === 'wrong_uniform' || vtype === 'slow_reset' || vtype === 'unclean_table') {
+                            return false;
+                        }
                         return true;
                     });
 

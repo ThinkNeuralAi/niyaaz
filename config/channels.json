@@ -350,7 +350,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -382,7 +382,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -437,8 +437,8 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
-              "unclean_alert_cooldown": 400.0
+              "unclean_duration_threshold": 10.0,
+              "unclean_alert_cooldown": 180.0
             }
           }
         },
@@ -505,7 +505,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -560,7 +560,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -592,7 +592,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -647,8 +647,8 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
-              "unclean_alert_cooldown": 300.0
+              "unclean_duration_threshold": 10.0,
+              "unclean_alert_cooldown": 180.0
             }
           }
         },
@@ -687,7 +687,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -742,7 +742,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -774,7 +774,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -829,8 +829,8 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
-              "unclean_alert_cooldown": 300.0
+              "unclean_duration_threshold": 10.0,
+              "unclean_alert_cooldown": 180.0
             }
           }
         },
@@ -881,7 +881,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -1485,7 +1485,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -1520,7 +1520,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -1558,7 +1558,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -1609,7 +1609,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -1820,7 +1820,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -1860,7 +1860,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -1898,7 +1898,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -1930,7 +1930,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -2346,7 +2346,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -2378,7 +2378,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -2433,7 +2433,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -2493,7 +2493,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },
@@ -2548,7 +2548,7 @@
           "config": {
             "table_rois": {},
             "settings": {
-              "unclean_duration_threshold": 300.0,
+              "unclean_duration_threshold": 10.0,
               "unclean_alert_cooldown": 180.0
             }
           }
@@ -2596,7 +2596,7 @@
             },
             "settings": {
               "wait_time_threshold": 120.0,
-              "alert_cooldown": 1800.0
+              "alert_cooldown": 180.0
             }
           }
         },

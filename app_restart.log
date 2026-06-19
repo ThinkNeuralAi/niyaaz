@@ -1,0 +1,32 @@
+2026-06-09 09:54:47,653 - INFO - ============================================================
+2026-06-09 09:54:47,654 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-06-09 09:54:47,654 - INFO - ============================================================
+2026-06-09 09:54:47,654 - INFO - Watch files: False
+2026-06-09 09:54:47,654 - INFO - Restart delay: 5s
+2026-06-09 09:54:47,654 - INFO - Scheduled restart: disabled
+2026-06-09 09:54:47,654 - INFO - Press Ctrl+C to stop
+2026-06-09 09:54:47,654 - INFO - ============================================================
+2026-06-09 09:54:47,654 - INFO - 
+2026-06-09 09:54:47,654 - INFO - 🚀 Starting Sakshi.AI application...
+2026-06-09 09:54:47,654 - INFO - Using Python: /usr/bin/python3
+2026-06-09 09:54:47,654 - INFO - ✅ Application started with PID: 4657
+2026-06-09 09:56:42,908 - INFO - Received signal 2, shutting down...
+2026-06-09 09:56:43,008 - INFO - 🛑 Stopping application (PID: 4657)...
+2026-06-09 09:56:43,223 - INFO - ✅ Application stopped gracefully
+2026-06-09 09:56:43,223 - INFO - ✅ Restarter stopped
+2026-06-12 17:42:09,492 - INFO - ============================================================
+2026-06-12 17:42:09,492 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-06-12 17:42:09,492 - INFO - ============================================================
+2026-06-12 17:42:09,492 - INFO - Watch files: False
+2026-06-12 17:42:09,492 - INFO - Restart delay: 5s
+2026-06-12 17:42:09,492 - INFO - Scheduled restart: disabled
+2026-06-12 17:42:09,492 - INFO - Press Ctrl+C to stop
+2026-06-12 17:42:09,492 - INFO - ============================================================
+2026-06-12 17:42:09,492 - INFO - 
+2026-06-12 17:42:09,492 - INFO - 🚀 Starting Sakshi.AI application...
+2026-06-12 17:42:09,492 - INFO - Using Python: /usr/bin/python3
+2026-06-12 17:42:09,493 - INFO - ✅ Application started with PID: 210522
+2026-06-12 17:44:54,498 - INFO - Received signal 2, shutting down...
+2026-06-12 17:44:54,596 - INFO - 🛑 Stopping application (PID: 210522)...
+2026-06-12 17:44:54,911 - INFO - ✅ Application stopped gracefully
+2026-06-12 17:44:54,912 - INFO - ✅ Restarter stopped

@@ -2567,7 +2567,29 @@ def get_module_analytics(module_name):
             for channel_id, modules_dict in channel_modules.items():
                 if 'ServiceDisciplineMonitor' in modules_dict and channel_id not in active_channels:
                     active_channels.append(channel_id)
-            
+
+            # Also count channels configured in channels.json. This keeps the
+            # "active channels" tally correct even if the SDM module instance
+            # failed to register in channel_modules at startup (e.g. model load
+            # error) - it does not change any detection logic.
+            try:
+                import json as _json
+                config_path = Path('config/channels.json')
+                if config_path.exists():
+                    with open(config_path, 'r') as f:
+                        _cfg = _json.load(f)
+                    for ch in _cfg.get('channels', []):
+                        if not ch.get('enabled', True):
+                            continue
+                        ch_id = ch.get('channel_id')
+                        if not ch_id or ch_id in active_channels:
+                            continue
+                        module_types = [m.get('type') for m in ch.get('modules', []) if isinstance(m, dict)]
+                        if 'ServiceDisciplineMonitor' in module_types:
+                            active_channels.append(ch_id)
+            except Exception as cfg_err:
+                logger.warning(f"Could not read channels.json for SDM active channels: {cfg_err}")
+
             # Get violations from database
             try:
                 with app.app_context():

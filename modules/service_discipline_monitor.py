@@ -59,8 +59,16 @@ class ServiceDisciplineMonitor:
         self.server_uniform_classes = {
             "Uniform_black",
             "Uniform_grey",
-            "Uniform_cream"
+            "Uniform_cream",
+            "Uniform_blue",
+-           "Uniform_white",
+-           "Uniform_brown"
         }
+
+        # Hairnet class (from best.pt). A person wearing an allowed uniform AND a
+        # hairnet is treated as staff. When such staff are at/near a table (e.g.
+        # arranging it), service-discipline alerts for that table are suppressed.
+        self.hairnet_class = "hairnet"  # compared case-insensitively
 
         # Person class IDs
         self.person_class_id_yolo11n = 0  # Person class in YOLOv11n.pt
@@ -105,12 +113,15 @@ class ServiceDisciplineMonitor:
         # Settings
         self.settings = {
             "order_wait_threshold": 300.0,   # seconds - alert if order wait > threshold (default: 5 minutes)
-            "service_wait_threshold": 180.0, # seconds - alert if service wait > threshold (default: 3 minutes)
-            "alert_cooldown": 300.0,         # seconds between repeated alerts
+            "service_wait_threshold": 300.0, # seconds - alert if service wait > threshold (default: 5 minutes)
+            "alert_cooldown": 180.0,         # seconds between repeated alerts
             "track_timeout": 15.0,           # seconds before removing stale tracks
             "interaction_distance": 200.0,   # pixels - waiter near customer for interaction
             "interaction_duration": 2.0,     # seconds - waiter must stay near customer this long
             "food_served_gap": 10.0,         # seconds - min gap between T_order_start and T_food_served
+            # Suppress alerts while staff (uniform + hairnet) is at/near the table
+            "suppress_alert_when_staff_present": True,
+            "staff_presence_timeout": 5.0,   # seconds - how long staff presence keeps suppressing after last seen
             # Legacy setting for backward compatibility
             "wait_time_threshold": 300.0     # Alias for order_wait_threshold (5 minutes)
         }
@@ -142,6 +153,10 @@ class ServiceDisciplineMonitor:
         # Food/plate detection tracking
         # Track food objects near customers
         self.food_detections = []  # List of {bbox, center, timestamp}
+
+        # Staff (uniform + hairnet) presence per table for alert suppression
+        # {table_id: last_seen_timestamp}
+        self.table_staff_present = {}
 
         self.frame_count = 0
         self.total_alerts = 0
@@ -298,7 +313,53 @@ class ServiceDisciplineMonitor:
                 logger.info(f"[{self.channel_id}] ℹ️ No table ROIs configured in channels.json")
         except Exception as e:
             logger.error(f"[{self.channel_id}] ❌ Failed to load table ROIs from channels.json: {e}", exc_info=True)
-    
+
+    def _get_table_roi_from_config(self, table_id):
+        """Read a single table's ROI directly from channels.json.
+
+        Returns (polygon, bbox) where polygon is a list of (x, y) tuples and
+        bbox is (min_x, min_y, max_x, max_y), or (None, None) if not found.
+        Used as a fallback when building alerts so the configured ROI is always
+        attached even if it wasn't loaded into self.table_rois.
+        """
+        try:
+            config_path = Path("config/channels.json")
+            if not config_path.exists():
+                return None, None
+
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            for channel in config.get('channels', []):
+                if channel.get('channel_id') != self.channel_id:
+                    continue
+                for module in channel.get('modules', []):
+                    if module.get('type') != 'ServiceDisciplineMonitor':
+                        continue
+                    roi_data = module.get('config', {}).get('table_rois', {}).get(table_id)
+                    if not isinstance(roi_data, dict):
+                        return None, None
+                    points = roi_data.get('points', [])
+                    polygon = []
+                    for p in points:
+                        if isinstance(p, dict) and 'x' in p and 'y' in p:
+                            polygon.append((float(p['x']), float(p['y'])))
+                        elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                            polygon.append((float(p[0]), float(p[1])))
+                    if len(polygon) >= 3:
+                        bbox = (
+                            min(pt[0] for pt in polygon),
+                            min(pt[1] for pt in polygon),
+                            max(pt[0] for pt in polygon),
+                            max(pt[1] for pt in polygon),
+                        )
+                        return polygon, bbox
+                    return None, None
+            return None, None
+        except Exception as e:
+            logger.error(f"[{self.channel_id}] Failed to read table ROI from channels.json for '{table_id}': {e}")
+            return None, None
+
     def _load_settings_from_config(self):
         """Load settings from channels.json"""
         try:
@@ -500,6 +561,77 @@ class ServiceDisciplineMonitor:
                             inside = not inside
             p1x, p1y = p2x, p2y
         return inside
+
+    def _is_center_in_bbox(self, center, bbox, expand_ratio=0.0):
+        """Check whether a point lies inside a (optionally expanded) bbox.
+
+        center: (x, y) pixel point; bbox: [x1, y1, x2, y2] pixels.
+        expand_ratio expands the bbox by this fraction on each side (0.1 = 10%).
+        """
+        if center is None or bbox is None or len(bbox) != 4:
+            return False
+        cx, cy = center
+        x1, y1, x2, y2 = bbox
+        if expand_ratio > 0:
+            bw = (x2 - x1) * expand_ratio
+            bh = (y2 - y1) * expand_ratio
+            x1, y1, x2, y2 = x1 - bw, y1 - bh, x2 + bw, y2 + bh
+        return x1 <= cx <= x2 and y1 <= cy <= y2
+
+    # --- Staff presence (alert suppression) ---
+    def _update_staff_presence(self, person_detections, uniform_detections,
+                               hairnet_detections, frame, now_ts):
+        """Record which table ROIs currently have staff present.
+
+        Staff (per business rule) is a person whose bounding box contains BOTH an
+        allowed uniform detection AND a hairnet detection. When such staff are
+        at/near a table (e.g. arranging or attending it), service-discipline
+        alerts for that table are suppressed for `staff_presence_timeout` seconds.
+        """
+        if frame is None or frame.size == 0:
+            return
+        h, w = frame.shape[:2]
+
+        for person in person_detections:
+            pbbox = person.get("bbox")
+            if not pbbox or len(pbbox) != 4:
+                continue
+
+            has_uniform = any(
+                self._is_center_in_bbox(u.get("center"), pbbox, 0.1)
+                for u in uniform_detections
+            )
+            has_hairnet = any(
+                self._is_center_in_bbox(hn.get("center"), pbbox, 0.1)
+                for hn in hairnet_detections
+            )
+            if not (has_uniform and has_hairnet):
+                continue
+
+            # Staff person - mark the table whose ROI contains their feet position
+            x1, y1, x2, y2 = pbbox
+            feet_point = (((x1 + x2) / 2) / w, y2 / h)  # normalized
+            for tid, roi_info in self.table_rois.items():
+                polygon = roi_info.get("polygon")
+                bbox_norm = roi_info.get("bbox")
+                if not polygon or not bbox_norm:
+                    continue
+                if self._point_in_polygon(feet_point, polygon, bbox_norm):
+                    self.table_staff_present[tid] = now_ts
+                    logger.debug(
+                        f"[{self.channel_id}] 👷 Staff (uniform + hairnet) present at "
+                        f"table {tid} - alerts suppressed"
+                    )
+                    break
+
+    def _is_staff_present(self, table_id, now_ts):
+        """Return True if staff (uniform + hairnet) were recently seen at the table."""
+        if not self.settings.get("suppress_alert_when_staff_present", True):
+            return False
+        last_seen = self.table_staff_present.get(table_id)
+        if last_seen is None:
+            return False
+        return (now_ts - last_seen) <= self.settings.get("staff_presence_timeout", 5.0)
 
     # --- Processing helpers ---
     def _classify_detections(self, detections, frame_shape):
@@ -832,6 +964,7 @@ class ServiceDisciplineMonitor:
             ds_inputs = []
             person_detections_list = []
             uniform_detections_list = []
+            hairnet_detections_list = []
             
             # Process person detections
             for det in person_detections:
@@ -865,6 +998,14 @@ class ServiceDisciplineMonitor:
                             "class_name": class_name,
                             "center": [(x1 + x2) / 2, (y1 + y2) / 2]
                         })
+                    elif class_name.lower().replace(" ", "_") == self.hairnet_class:
+                        # Hairnet detection - used (with uniform) to identify staff
+                        hairnet_detections_list.append({
+                            "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                            "confidence": conf,
+                            "class_name": class_name,
+                            "center": [(x1 + x2) / 2, (y1 + y2) / 2]
+                        })
             
             # Update DeepSORT tracker
             if self.tracking_enabled and self.tracker and ds_inputs:
@@ -880,7 +1021,14 @@ class ServiceDisciplineMonitor:
             
             # Process tracked persons and classify them
             self._process_tracked_persons(tracks, person_detections_list, uniform_detections_list, current_time, frame)
-            
+
+            # Record which tables currently have staff (uniform + hairnet) present
+            # so we can suppress alerts while staff are arranging/attending the table
+            self._update_staff_presence(
+                person_detections_list, uniform_detections_list,
+                hairnet_detections_list, frame, now_ts
+            )
+
             # Detect interactions and update events
             self._detect_interactions(current_time)
             
@@ -1310,7 +1458,17 @@ class ServiceDisciplineMonitor:
         for table_id, table_info in self.table_tracking.items():
             customer_ids = table_info.get("customer_track_ids", [])
             last_alert_time = table_info.get("last_alert_time")
-            
+
+            # Suppress alerts while staff (uniform + hairnet) is at/near this table
+            # (e.g. waiter sitting near or arranging the table)
+            if self._is_staff_present(table_id, now_ts):
+                if self.frame_count % 300 == 0:
+                    logger.info(
+                        f"[{self.channel_id}] 🚫 Table {table_id}: staff (uniform + hairnet) "
+                        f"present - suppressing service discipline alerts"
+                    )
+                continue
+
             for customer_id in customer_ids:
                 if customer_id not in self.person_tracks:
                     continue
@@ -1476,6 +1634,13 @@ class ServiceDisciplineMonitor:
         roi_info = self.table_rois.get(table_id, {})
         roi_polygon = roi_info.get("polygon")
         roi_bbox = roi_info.get("bbox")
+        # Fallback: if the ROI wasn't loaded into memory, read it straight from
+        # channels.json so the Telegram alert always carries the configured ROI.
+        if not roi_polygon:
+            cfg_polygon, cfg_bbox = self._get_table_roi_from_config(table_id)
+            if cfg_polygon:
+                roi_polygon = cfg_polygon
+                roi_bbox = cfg_bbox
         roi_bbox = [round(float(v), 4) for v in roi_bbox] if roi_bbox else None
 
         # Prepare alert info for GIF recording
