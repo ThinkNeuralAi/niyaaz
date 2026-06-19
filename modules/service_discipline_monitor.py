@@ -61,8 +61,8 @@ class ServiceDisciplineMonitor:
             "Uniform_grey",
             "Uniform_cream",
             "Uniform_blue",
--           "Uniform_white",
--           "Uniform_brown"
+            "Uniform_white",
+            "Uniform_brown"
         }
 
         # Hairnet class (from best.pt). A person wearing an allowed uniform AND a
