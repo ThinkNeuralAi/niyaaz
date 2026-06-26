@@ -380,9 +380,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -503,9 +504,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -590,9 +592,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -685,9 +688,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -772,9 +776,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -879,9 +884,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -1518,9 +1524,10 @@
                 "points": []
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -1607,9 +1614,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -1858,9 +1866,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -1928,9 +1937,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -2376,9 +2386,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },
@@ -2492,7 +2503,7 @@
               }
             },
             "settings": {
-              "wait_time_threshold": 120.0,
+              "wait_time_threshold": 300.0,
               "alert_cooldown": 180.0
             }
           }
@@ -2594,9 +2605,10 @@
                 ]
               }
             },
-            "settings": {
-              "wait_time_threshold": 120.0,
-              "alert_cooldown": 180.0
+              "settings": {
+              "wait_time_threshold": 300.0,
+              "service_wait_threshold": 300.0,
+              "alert_cooldown": 1800.0
             }
           }
         },

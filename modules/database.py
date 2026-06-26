@@ -1906,7 +1906,38 @@ class DatabaseManager:
             self.db.session.commit()
             
             # Send Telegram notification - DISABLED FOR CASH DETECTION AND QUEUE ALERTS
-            if alert_type not in ('cash_detection_alert', 'queue_alert'):
+            #
+            # For service_discipline_alert, only send Telegram for the alerts that
+            # the dashboard "Service Discipline Reports" section actually displays.
+            # That section excludes table-service violation types
+            # (wrong_uniform / slow_reset / unclean_table), so we mirror that filter
+            # here to keep Telegram in sync with the dashboard.
+            skip_telegram = False
+            if alert_type == 'service_discipline_alert':
+                vtype = None
+                if isinstance(alert_data, dict):
+                    vtype = alert_data.get('violation_type')
+                # Service discipline must ONLY generate genuine service discipline
+                # alerts (order_wait / service_wait). Any other violation type
+                # (e.g. table-service wrong_uniform / slow_reset / unclean_table)
+                # must NOT produce a Telegram alert for this use case.
+                if vtype not in ('order_wait', 'service_wait'):
+                    skip_telegram = True
+                    logger.info(
+                        f"Skipping Telegram for service_discipline_alert ({channel_id}) "
+                        f"with violation_type={vtype} - not a service discipline violation"
+                    )
+
+            # Table service violation alerts are intentionally NOT sent to Telegram.
+            # Only service discipline alerts and table cleanliness alerts are wanted there.
+            if alert_type in ('table_service_alert', 'table_service_violation'):
+                skip_telegram = True
+                logger.info(
+                    f"Skipping Telegram for {alert_type} ({channel_id}) - "
+                    f"table service violation alerts are disabled"
+                )
+
+            if alert_type not in ('cash_detection_alert', 'queue_alert') and not skip_telegram:
                 try:
                     from modules.telegram_notifier import get_telegram_notifier
                     notifier = get_telegram_notifier()
@@ -3590,9 +3621,10 @@ class DatabaseManager:
             snapshot_info = f"snapshot_path={snapshot_path}" if snapshot_path else "snapshot_path=None (NO SNAPSHOT)"
             logger.info(f"✅ Table service violation saved: ID={violation_id}, Table {table_id} in channel {channel_id}, waiting time: {waiting_time_str}, order wait: {order_wait_str}, service wait: {service_wait_str}, {snapshot_info}")
             
-            # Send Telegram notification (can be disabled via environment variable)
-            # IMPORTANT: Only send Telegram alert if snapshot_path exists and file is valid
-            if not os.getenv("DISABLE_TABLE_SERVICE_ALERTS", "").lower() in ("true", "1", "yes"):
+            # Telegram notifications for table service violations are DISABLED.
+            # Only service discipline alerts and table cleanliness alerts are sent to Telegram.
+            # The violation is still recorded in the database above for the dashboard/reports.
+            if False:  # table_service_violation Telegram alerts disabled
                     # Extract violation_type from alert_data to create specific message
                     violation_type = None
                     if alert_data and isinstance(alert_data, dict):
