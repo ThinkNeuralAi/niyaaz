@@ -1905,7 +1905,7 @@ class DatabaseManager:
             self.db.session.add(alert_gif)
             self.db.session.commit()
             
-            # Send Telegram notification - DISABLED FOR CASH DETECTION AND QUEUE ALERTS
+            # Send Telegram notification - DISABLED FOR CASH DETECTION
             #
             # For service_discipline_alert, only send Telegram for the alerts that
             # the dashboard "Service Discipline Reports" section actually displays.
@@ -1937,7 +1937,7 @@ class DatabaseManager:
                     f"table service violation alerts are disabled"
                 )
 
-            if alert_type not in ('cash_detection_alert', 'queue_alert') and not skip_telegram:
+            if alert_type not in ('cash_detection_alert',) and not skip_telegram:
                 try:
                     from modules.telegram_notifier import get_telegram_notifier
                     notifier = get_telegram_notifier()

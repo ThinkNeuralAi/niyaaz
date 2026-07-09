@@ -55,7 +55,7 @@ class TableServiceMonitor:
         # Model configuration - Use custom trained model (best.pt)
         self.model_weight = "models/best.pt"
         self.conf_threshold = 0.5  # General confidence threshold for all detections
-        self.unclean_conf_threshold = 0.80  # Very high threshold for unclean detections (reduces false positives from normal table settings)
+        self.unclean_conf_threshold = 0.85  # Very high threshold for unclean detections (reduces false positives from normal table settings)
         self.nms_iou = 0.45
         
         # Temporal filtering for unclean detections - require multiple consecutive detections
@@ -110,7 +110,7 @@ class TableServiceMonitor:
         # Settings
         self.settings = {
             "unclean_alert_cooldown": 180.0,  # 3 minutes between unclean table alerts
-            "unclean_duration_threshold": 10.0,  # Only alert if table stays unclean (no person) for > 10 seconds
+            "unclean_duration_threshold": 60.0,  # Only alert if table stays unclean (no person) for > 60 seconds
             # Note: cooldown is enforced on top of the threshold to prevent repeat-alert spam
         }
         
