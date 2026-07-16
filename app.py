@@ -3151,6 +3151,13 @@ def api_generate_daily_report():
             email_config = get_email_config()
             sent = send_report_email(filepath, email_config)
             result['email_sent'] = sent
+            # Record the email marker for full (all-stores) reports so the
+            # scheduler's catch-up doesn't re-send the same day's email.
+            if sent and not store_id:
+                from modules.daily_report import _mark_daily_report_emailed, IST
+                from datetime import datetime as _dt, timedelta as _td
+                report_date = target_date or (_dt.now(IST) - _td(days=1)).strftime('%Y-%m-%d')
+                _mark_daily_report_emailed(report_date)
         else:
             result['email_sent'] = False
             result['email_skipped'] = True

@@ -1,0 +1,32 @@
+[Unit]
+Description=Sakshi.AI Video Analytics Platform (auto-restart supervisor)
+# Wait for the network and the database to be up before starting.
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/Niyaaz_multistore/Niyaz
+
+# auto_restart.py supervises app.py and relaunches it if it crashes.
+# System python3 is used because it has all project dependencies installed
+# (the checked-in venv/ is not a usable Linux interpreter).
+ExecStart=/usr/bin/python3 /home/ubuntu/Niyaaz_multistore/Niyaz/auto_restart.py
+
+# Resilience: if auto_restart.py itself ever dies, systemd relaunches it.
+# Combined with auto_restart.py's own app.py supervision this gives:
+#   * server reboot        -> systemd starts the service on boot
+#   * app.py crashes       -> auto_restart.py relaunches it
+#   * supervisor dies      -> systemd restarts the service
+Restart=always
+RestartSec=5
+
+# Real-time (unbuffered) logging into the journal.
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
