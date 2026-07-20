@@ -274,3 +274,131 @@
 2026-07-16 11:52:16,284 - INFO - 🛑 Stopping application (PID: 2079)...
 2026-07-16 11:52:16,498 - INFO - ✅ Application stopped gracefully
 2026-07-16 11:52:16,499 - INFO - ✅ Restarter stopped
+2026-07-16 18:56:40,193 - INFO - ============================================================
+2026-07-16 18:56:40,193 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-16 18:56:40,193 - INFO - ============================================================
+2026-07-16 18:56:40,193 - INFO - Watch files: False
+2026-07-16 18:56:40,193 - INFO - Restart delay: 5s
+2026-07-16 18:56:40,193 - INFO - Scheduled restart: disabled
+2026-07-16 18:56:40,193 - INFO - Press Ctrl+C to stop
+2026-07-16 18:56:40,193 - INFO - ============================================================
+2026-07-16 18:56:40,193 - INFO - 
+2026-07-16 18:56:40,193 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-16 18:56:40,193 - INFO - Using Python: /usr/bin/python3
+2026-07-16 18:56:40,193 - INFO - ✅ Application started with PID: 2103
+2026-07-16 18:59:42,224 - INFO - ============================================================
+2026-07-16 18:59:42,224 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-16 18:59:42,224 - INFO - ============================================================
+2026-07-16 18:59:42,224 - INFO - Watch files: False
+2026-07-16 18:59:42,224 - INFO - Restart delay: 5s
+2026-07-16 18:59:42,224 - INFO - Scheduled restart: disabled
+2026-07-16 18:59:42,224 - INFO - Press Ctrl+C to stop
+2026-07-16 18:59:42,224 - INFO - ============================================================
+2026-07-16 18:59:42,224 - INFO - 
+2026-07-16 18:59:42,225 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-16 18:59:42,225 - INFO - Using Python: /usr/bin/python3
+2026-07-16 18:59:42,225 - INFO - ✅ Application started with PID: 2012
+2026-07-16 19:02:02,060 - INFO - Received signal 15, shutting down...
+2026-07-16 19:02:02,086 - INFO - 🛑 Stopping application (PID: 2012)...
+2026-07-16 19:02:02,300 - INFO - ✅ Application stopped gracefully
+2026-07-16 19:02:02,300 - INFO - ✅ Restarter stopped
+2026-07-16 19:31:54,900 - INFO - ============================================================
+2026-07-16 19:31:54,901 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-16 19:31:54,901 - INFO - ============================================================
+2026-07-16 19:31:54,901 - INFO - Watch files: False
+2026-07-16 19:31:54,901 - INFO - Restart delay: 5s
+2026-07-16 19:31:54,901 - INFO - Scheduled restart: disabled
+2026-07-16 19:31:54,901 - INFO - Press Ctrl+C to stop
+2026-07-16 19:31:54,901 - INFO - ============================================================
+2026-07-16 19:31:54,901 - INFO - 
+2026-07-16 19:31:54,901 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-16 19:31:54,901 - INFO - Using Python: /usr/bin/python3
+2026-07-16 19:31:54,901 - INFO - ✅ Application started with PID: 2097
+2026-07-17 08:01:20,441 - INFO - ============================================================
+2026-07-17 08:01:20,441 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-17 08:01:20,441 - INFO - ============================================================
+2026-07-17 08:01:20,441 - INFO - Watch files: False
+2026-07-17 08:01:20,441 - INFO - Restart delay: 5s
+2026-07-17 08:01:20,441 - INFO - Scheduled restart: disabled
+2026-07-17 08:01:20,441 - INFO - Press Ctrl+C to stop
+2026-07-17 08:01:20,441 - INFO - ============================================================
+2026-07-17 08:01:20,441 - INFO - 
+2026-07-17 08:01:20,441 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-17 08:01:20,441 - INFO - Using Python: /usr/bin/python3
+2026-07-17 08:01:20,441 - INFO - ✅ Application started with PID: 2099
+2026-07-17 08:20:59,887 - INFO - ============================================================
+2026-07-17 08:20:59,887 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-17 08:20:59,887 - INFO - ============================================================
+2026-07-17 08:20:59,887 - INFO - Watch files: False
+2026-07-17 08:20:59,887 - INFO - Restart delay: 5s
+2026-07-17 08:20:59,887 - INFO - Scheduled restart: disabled
+2026-07-17 08:20:59,887 - INFO - Press Ctrl+C to stop
+2026-07-17 08:20:59,887 - INFO - ============================================================
+2026-07-17 08:20:59,887 - INFO - 
+2026-07-17 08:20:59,887 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-17 08:20:59,887 - INFO - Using Python: /usr/bin/python3
+2026-07-17 08:20:59,887 - INFO - ✅ Application started with PID: 2067
+2026-07-17 10:57:11,252 - INFO - Received signal 15, shutting down...
+2026-07-17 10:57:11,564 - INFO - 🛑 Stopping application (PID: 2067)...
+2026-07-17 10:57:11,595 - INFO - ✅ Application stopped gracefully
+2026-07-17 10:57:11,596 - INFO - ✅ Restarter stopped
+2026-07-17 19:45:39,590 - INFO - ============================================================
+2026-07-17 19:45:39,590 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-17 19:45:39,590 - INFO - ============================================================
+2026-07-17 19:45:39,590 - INFO - Watch files: False
+2026-07-17 19:45:39,590 - INFO - Restart delay: 5s
+2026-07-17 19:45:39,590 - INFO - Scheduled restart: disabled
+2026-07-17 19:45:39,590 - INFO - Press Ctrl+C to stop
+2026-07-17 19:45:39,590 - INFO - ============================================================
+2026-07-17 19:45:39,590 - INFO - 
+2026-07-17 19:45:39,591 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-17 19:45:39,591 - INFO - Using Python: /usr/bin/python3
+2026-07-17 19:45:39,591 - INFO - ✅ Application started with PID: 105983
+2026-07-17 19:59:59,912 - INFO - ============================================================
+2026-07-17 19:59:59,913 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-17 19:59:59,913 - INFO - ============================================================
+2026-07-17 19:59:59,913 - INFO - Watch files: False
+2026-07-17 19:59:59,913 - INFO - Restart delay: 5s
+2026-07-17 19:59:59,913 - INFO - Scheduled restart: disabled
+2026-07-17 19:59:59,913 - INFO - Press Ctrl+C to stop
+2026-07-17 19:59:59,913 - INFO - ============================================================
+2026-07-17 19:59:59,913 - INFO - 
+2026-07-17 19:59:59,913 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-17 19:59:59,913 - INFO - Using Python: /usr/bin/python3
+2026-07-17 19:59:59,913 - INFO - ✅ Application started with PID: 2067
+2026-07-18 11:46:28,846 - INFO - Received signal 15, shutting down...
+2026-07-18 11:46:29,123 - INFO - 🛑 Stopping application (PID: 2067)...
+2026-07-18 11:46:29,337 - INFO - ✅ Application stopped gracefully
+2026-07-18 11:46:29,337 - INFO - ✅ Restarter stopped
+2026-07-18 11:46:32,940 - INFO - ============================================================
+2026-07-18 11:46:32,940 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-18 11:46:32,941 - INFO - ============================================================
+2026-07-18 11:46:32,941 - INFO - Watch files: False
+2026-07-18 11:46:32,941 - INFO - Restart delay: 5s
+2026-07-18 11:46:32,941 - INFO - Scheduled restart: disabled
+2026-07-18 11:46:32,941 - INFO - Press Ctrl+C to stop
+2026-07-18 11:46:32,941 - INFO - ============================================================
+2026-07-18 11:46:32,941 - INFO - 
+2026-07-18 11:46:32,941 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-18 11:46:32,941 - INFO - Using Python: /usr/bin/python3
+2026-07-18 11:46:32,941 - INFO - ✅ Application started with PID: 14801
+2026-07-20 10:24:18,404 - INFO - Received signal 15, shutting down...
+2026-07-20 10:24:18,420 - INFO - 🛑 Stopping application (PID: 14801)...
+2026-07-20 10:24:18,884 - INFO - ✅ Application stopped gracefully
+2026-07-20 10:24:18,885 - INFO - ✅ Restarter stopped
+2026-07-20 10:24:53,184 - INFO - ============================================================
+2026-07-20 10:24:53,185 - INFO - Sakshi.AI Auto-Restart Wrapper
+2026-07-20 10:24:53,185 - INFO - ============================================================
+2026-07-20 10:24:53,185 - INFO - Watch files: False
+2026-07-20 10:24:53,185 - INFO - Restart delay: 5s
+2026-07-20 10:24:53,185 - INFO - Scheduled restart: disabled
+2026-07-20 10:24:53,185 - INFO - Press Ctrl+C to stop
+2026-07-20 10:24:53,185 - INFO - ============================================================
+2026-07-20 10:24:53,185 - INFO - 
+2026-07-20 10:24:53,185 - INFO - 🚀 Starting Sakshi.AI application...
+2026-07-20 10:24:53,185 - INFO - Using Python: /usr/bin/python3
+2026-07-20 10:24:53,185 - INFO - ✅ Application started with PID: 2118
+2026-07-20 10:27:14,123 - INFO - Received signal 15, shutting down...
+2026-07-20 10:27:14,217 - INFO - 🛑 Stopping application (PID: 2118)...
+2026-07-20 10:27:14,381 - INFO - ✅ Application stopped gracefully
+2026-07-20 10:27:14,381 - INFO - ✅ Restarter stopped
