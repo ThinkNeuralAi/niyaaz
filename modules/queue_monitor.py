@@ -107,8 +107,16 @@ class QueueMonitor:
             # - Uniform classes: Uniform_black (13), Uniform_cream (14), Uniform_grey (15), Uniform_blue (19), Uniform_white (20), Uniform_brown (21)
             # - Counter_person (18): Specific counter staff class
             self.uniform_classes = {
-                "Uniform_black", "Uniform_grey", "Uniform_cream", "Uniform_blue", 
+                "Uniform_black", "Uniform_grey", "Uniform_cream", "Uniform_blue",
                 "Uniform_white", "Uniform_brown", "Counter_person"
+            }
+            # Classes that identify a person as STAFF (uniform / hairnet / apron / counter staff).
+            # Used to exclude staff who happen to stand in the queue ROI from the customer count.
+            # NOTE: negative classes (No_hairnet / No_apron / No_gloves) are intentionally excluded.
+            self.staff_indicator_classes = {
+                "Uniform_black", "Uniform_grey", "Uniform_cream", "Uniform_blue",
+                "Uniform_white", "Uniform_brown", "Counter_person",
+                "Hairnet", "Apron",
             }
             # Map class names to their IDs from best.pt for reference
             self.best_pt_class_ids = {
@@ -122,6 +130,8 @@ class QueueMonitor:
             logger.warning(f"[{self.channel_id}] ⚠️ Failed to initialize uniform detector fallback: {e}")
             self.uniform_detector = None
             self.use_uniform_fallback = False
+            self.uniform_classes = set()
+            self.staff_indicator_classes = set()
 
         # ROI configuration (normalized 0–1 coordinates)
         self.roi_config = {
@@ -544,6 +554,112 @@ class QueueMonitor:
                 keep.append(det)
 
         return keep
+
+    @staticmethod
+    def _box_containment(inner, outer):
+        """
+        Fraction of the `inner` box's area that lies inside the `outer` box.
+
+        Useful for matching a small staff indicator (uniform / hairnet) box against a
+        larger person box: a hairnet is much smaller than a person, so IoU is tiny even
+        when the hairnet clearly belongs to that person. Containment of the small box
+        inside the person box is the right measure here.
+        """
+        ix1 = max(inner[0], outer[0])
+        iy1 = max(inner[1], outer[1])
+        ix2 = min(inner[2], outer[2])
+        iy2 = min(inner[3], outer[3])
+        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        inner_area = (inner[2] - inner[0]) * (inner[3] - inner[1])
+        return inter / inner_area if inner_area > 0 else 0.0
+
+    def _run_uniform_detection(self, frame):
+        """
+        Run the best.pt uniform/staff detector on the frame, reusing the cached result
+        for `uniform_cache_interval` frames. Returns the raw results object (or None).
+        """
+        if self.uniform_detector is None:
+            return None
+        if (
+            self.uniform_detection_cache is None
+            or self.frame_count - self.uniform_cache_frame_count >= self.uniform_cache_interval
+        ):
+            self.uniform_detection_cache = self.uniform_detector(
+                frame,
+                conf=self.detector.confidence_threshold,
+                iou=0.45,
+                verbose=False,
+            )
+            self.uniform_cache_frame_count = self.frame_count
+        return self.uniform_detection_cache
+
+    def _filter_staff_from_queue(self, queue_dets, frame):
+        """
+        Remove staff members from the queue detections.
+
+        A person in the queue ROI is treated as STAFF (and therefore NOT counted as a
+        waiting customer) if a uniform / hairnet / apron detection from best.pt is
+        substantially contained within that person's bounding box.
+
+        Args:
+            queue_dets: list of person detections classified as being in the queue ROI
+            frame: clean BGR frame to run staff detection on
+
+        Returns:
+            queue_dets with staff members removed.
+        """
+        if not queue_dets:
+            return queue_dets
+        if not (self.use_uniform_fallback and self.uniform_detector):
+            return queue_dets
+
+        try:
+            uniform_results = self._run_uniform_detection(frame)
+            if not uniform_results or len(uniform_results) == 0:
+                return queue_dets
+
+            boxes = uniform_results[0].boxes
+            class_names = uniform_results[0].names
+
+            # Collect all staff-indicator boxes in the frame
+            staff_boxes = []
+            for box in boxes:
+                class_id = int(box.cls[0])
+                class_name = class_names[class_id]
+                if class_name in self.staff_indicator_classes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    staff_boxes.append(
+                        {"bbox": [int(x1), int(y1), int(x2), int(y2)], "class_name": class_name}
+                    )
+
+            if not staff_boxes:
+                return queue_dets
+
+            # A person is staff if a staff indicator is largely contained in their bbox
+            containment_threshold = 0.5
+            filtered = []
+            removed = []
+            for det in queue_dets:
+                matched_class = None
+                for sb in staff_boxes:
+                    if self._box_containment(sb["bbox"], det["bbox"]) >= containment_threshold:
+                        matched_class = sb["class_name"]
+                        break
+                if matched_class is not None:
+                    removed.append(matched_class)
+                else:
+                    filtered.append(det)
+
+            if removed:
+                logger.info(
+                    f"[{self.channel_id}] 🧑‍🍳 Excluded {len(removed)} staff from queue count "
+                    f"(indicators: {', '.join(sorted(set(removed)))})"
+                )
+
+            return filtered
+        except Exception as e:
+            logger.warning(f"[{self.channel_id}] ⚠️ Staff-from-queue filtering failed: {e}")
+            return queue_dets
 
     def _update_person_tracking(self, detections, area_type: str) -> int:
         """
@@ -1231,7 +1347,11 @@ class QueueMonitor:
         
         # Classify into queue/counter
         queue_dets, counter_dets = self._classify_detections(detections, w, h)
-        
+
+        # Exclude staff (people wearing uniform / hairnet / apron) standing in the queue
+        # area — they should not be counted as waiting customers.
+        queue_dets = self._filter_staff_from_queue(queue_dets, frame)
+
         # Fallback: If no person detections in counter area OR counter count is 0, try uniform detection
         # This helps when person detection fails but uniform detection works (e.g., camera_2)
         # Also check if we have detections but they're not being counted (tracking/dwell time issue)
