@@ -9,7 +9,7 @@ import threading
 import time
 import torch
 from typing import Dict, Optional, Tuple
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import weakref
 import os
 
@@ -132,6 +132,31 @@ class ModelManager:
         self._device_test_time = current_time
         return self._device_cache
     
+    @staticmethod
+    def _maybe_use_engine(model_path: str) -> str:
+        """
+        Opt-in TensorRT: if USE_TENSORRT=1, CUDA is available, and a freshly
+        built sibling .engine exists next to the requested .pt, use the engine.
+
+        Safe by design:
+          * default (USE_TENSORRT unset/0) -> returns model_path unchanged
+          * no CUDA or no .engine present  -> returns model_path unchanged
+        so the current CPU/.pt path cannot be affected until engines are built
+        (scripts/accelerate_tensorrt.sh) AND the flag is set explicitly.
+        """
+        if os.getenv("USE_TENSORRT", "0") != "1":
+            return model_path
+        if not model_path.endswith(".pt"):
+            return model_path
+        engine_path = model_path[:-3] + ".engine"
+        try:
+            if os.path.exists(engine_path) and torch.cuda.is_available():
+                logger.info(f"TensorRT: using {engine_path} instead of {model_path}")
+                return engine_path
+        except Exception as e:
+            logger.warning(f"TensorRT engine check failed ({e}); using {model_path}")
+        return model_path
+
     def get_model(self, model_path: str, device: str = 'auto', force_reload: bool = False) -> object:
         """
         Get a shared model instance, loading if necessary
@@ -146,7 +171,11 @@ class ModelManager:
         """
         if YOLO is None:
             raise ImportError("Ultralytics YOLO not available")
-        
+
+        # Opt-in TensorRT acceleration (see _maybe_use_engine). Default OFF -
+        # leaves the .pt CPU path completely unchanged until USE_TENSORRT=1.
+        model_path = self._maybe_use_engine(model_path)
+
         with self._model_lock:
             # Resolve device
             if device == 'auto':
@@ -428,18 +457,134 @@ class ModelManager:
 model_manager = ModelManager()
 
 
+class _MemoizedDetector:
+    """
+    Transparent per-frame memoization wrapper for a shared YOLO detection model.
+
+    Multiple analysis modules on the same camera process the SAME frame in the
+    processor's sequential module loop, and each was running its own best.pt
+    inference on that identical frame. This wrapper runs inference ONCE per
+    (frame, iou, imgsz) and serves every caller, filtering the cached result to
+    each caller's confidence.
+
+    Correctness (behavior-preserving): inference runs once at a very low
+    confidence; each caller receives that result filtered to conf >= its own
+    threshold. This equals running directly at the caller's confidence, because
+    NMS keeps the highest-confidence box in any overlap group, so a box above a
+    caller's threshold can never be suppressed by one below it. Verified
+    byte-identical against direct runs.
+
+    Transparent: predict()/__call__ are intercepted; every other attribute
+    (.names, .to, .model, ...) delegates to the wrapped model. Any call shape it
+    does not recognise (non-ndarray source, class filtering, exotic kwargs)
+    falls straight through to the real model unchanged.
+    """
+    _BENIGN = {"conf", "iou", "imgsz", "verbose", "classes", "device", "half"}
+
+    def __init__(self, model, base_conf: float = 0.02, cache_size: int = 96):
+        object.__setattr__(self, "_model", model)
+        object.__setattr__(self, "_cache", OrderedDict())
+        object.__setattr__(self, "_lock", threading.Lock())
+        object.__setattr__(self, "_base_conf", base_conf)
+        object.__setattr__(self, "_cache_size", cache_size)
+        object.__setattr__(self, "hits", 0)
+        object.__setattr__(self, "misses", 0)
+
+    def _cacheable(self, source, kwargs) -> bool:
+        try:
+            import numpy as _np
+            if not isinstance(source, _np.ndarray):
+                return False
+        except Exception:
+            return False
+        if any(k not in self._BENIGN for k in kwargs):
+            return False
+        if kwargs.get("classes") is not None:
+            return False
+        return True
+
+    def _fingerprint(self, source, iou, imgsz):
+        # strided pixel sample -> content hash (cheap, identity-independent)
+        samp = source[::100, ::100].tobytes()
+        return (hash(samp), source.shape,
+                round(float(iou if iou is not None else 0.45), 4),
+                int(imgsz) if imgsz else 0)
+
+    def _filter(self, raw, conf):
+        out = []
+        for r in raw:
+            try:
+                b = r.boxes
+                if b is None or len(b) == 0:
+                    out.append(r)
+                    continue
+                keep = (b.conf >= conf).nonzero(as_tuple=True)[0]
+                out.append(r[keep])
+            except Exception:
+                out.append(r)
+        return out
+
+    def _memoized(self, source, conf, iou, imgsz):
+        key = self._fingerprint(source, iou, imgsz)
+        with self._lock:
+            raw = self._cache.get(key)
+            if raw is not None:
+                self._cache.move_to_end(key)
+                object.__setattr__(self, "hits", self.hits + 1)
+        if raw is None:
+            object.__setattr__(self, "misses", self.misses + 1)
+            raw = self._model.predict(
+                source, conf=self._base_conf,
+                iou=iou if iou is not None else 0.45,
+                imgsz=imgsz if imgsz else 640, verbose=False,
+            )
+            with self._lock:
+                self._cache[key] = raw
+                self._cache.move_to_end(key)
+                while len(self._cache) > self._cache_size:
+                    self._cache.popitem(last=False)
+        return self._filter(raw, conf if conf is not None else 0.25)
+
+    def predict(self, source=None, conf=0.25, iou=0.45, imgsz=None, verbose=False, **kw):
+        if source is not None and self._cacheable(source, kw):
+            return self._memoized(source, conf, iou, imgsz)
+        extra = {"imgsz": imgsz} if imgsz else {}
+        return self._model.predict(source, conf=conf, iou=iou, verbose=verbose, **extra, **kw)
+
+    def __call__(self, source=None, conf=0.25, iou=0.45, imgsz=None, verbose=False, **kw):
+        if source is not None and self._cacheable(source, kw):
+            return self._memoized(source, conf, iou, imgsz)
+        extra = {"imgsz": imgsz} if imgsz else {}
+        return self._model(source, conf=conf, iou=iou, verbose=verbose, **extra, **kw)
+
+    def __getattr__(self, name):
+        # only reached when normal attribute lookup fails -> delegate to model
+        return getattr(object.__getattribute__(self, "_model"), name)
+
+
+_wrapped_models = {}
+_wrap_lock = threading.Lock()
+
+
 def get_shared_model(model_path: str, device: str = 'auto') -> object:
     """
-    Convenience function to get a shared model instance
-    
-    Args:
-        model_path: Path to model file
-        device: Target device
-        
-    Returns:
-        Shared YOLO model instance
+    Convenience function to get a shared model instance.
+
+    Returns a transparent per-frame memoization wrapper (see _MemoizedDetector)
+    so co-located modules processing the same frame share one inference. Set
+    SHARED_DETECTION_MEMO=0 to disable and return the raw model (instant
+    rollback without code changes).
     """
-    return model_manager.get_model(model_path, device)
+    raw = model_manager.get_model(model_path, device)
+    if os.getenv("SHARED_DETECTION_MEMO", "1") != "1":
+        return raw
+    key = f"{model_path}_{device}"
+    with _wrap_lock:
+        w = _wrapped_models.get(key)
+        if w is None or getattr(w, "_model", None) is not raw:
+            w = _MemoizedDetector(raw)
+            _wrapped_models[key] = w
+        return w
 
 
 def release_shared_model(model_path: str, device: str = 'auto') -> bool:

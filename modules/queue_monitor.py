@@ -146,8 +146,9 @@ class QueueMonitor:
             "queue_alert_threshold": 3,    # V1: queue > 3
             "counter_threshold": 1,        # V3: need at least 1 at counter
             "alert_cooldown": 60.0,        # seconds between alerts
-            "wait_time_threshold": 120.0,  # V2: any wait >= 120s (2 minutes)
+            "wait_time_threshold": 480.0,  # V2: single person waiting >= 480s (8 minutes)
             "counter_capacity_max": 4,     # V4: max people allowed at counter
+            "counter_capacity_duration": 300.0,  # V4: must stay over capacity this long (5 min) before alerting
         }
         
 
@@ -169,6 +170,9 @@ class QueueMonitor:
         # Alert state
         self.last_alert_time = None
         self.alert_condition_start_time = None
+        # V4: timestamp when the counter first went over capacity (None = not over).
+        # Used to require the over-capacity state to persist for counter_capacity_duration.
+        self.counter_over_capacity_since = None
         self.alert_condition_sustained_duration = 0.5  # seconds (reduced for faster detection)
 
         # ROI cache for current frame size
@@ -1198,6 +1202,7 @@ class QueueMonitor:
         cooldown = float(self.settings.get("alert_cooldown", 60.0) or 60.0)
         wait_threshold = float(self.settings.get("wait_time_threshold", 120.0) or 120.0)  # 2 minutes
         counter_capacity_max = self.settings.get("counter_capacity_max")  # None or int
+        counter_capacity_duration = float(self.settings.get("counter_capacity_duration", 300.0) or 300.0)
 
         # Compute queue wait times
         queue_wait_times = []
@@ -1258,12 +1263,25 @@ class QueueMonitor:
                 )
                 logger.info(f"[{self.channel_id}] V3 violation detected: queue={self.queue_count}, max_wait={max_wait:.1f}s >= {no_counter_staff_wait_threshold}s, counter={self.counter_count} < required={counter_required}")
 
-        # V4: Counter capacity exceeded
+        # V4: Counter capacity exceeded — only alert if it stays over capacity for
+        # counter_capacity_duration (default 5 min), not on brief over-crowding.
         if counter_capacity_max is not None and self.counter_count > counter_capacity_max:
-            violations.append(
-                f"Counter capacity exceeded: {self.counter_count} > {counter_capacity_max} (max allowed)"
-            )
-            logger.debug(f"[{self.channel_id}] V4 violation detected: counter_count={self.counter_count} > capacity_max={counter_capacity_max}")
+            if self.counter_over_capacity_since is None:
+                self.counter_over_capacity_since = now_ts
+            over_for = now_ts - self.counter_over_capacity_since
+            if over_for >= counter_capacity_duration:
+                violations.append(
+                    f"Counter capacity exceeded: {self.counter_count} > {counter_capacity_max} "
+                    f"for {int(over_for)}s (≥ {int(counter_capacity_duration)}s)"
+                )
+                logger.debug(f"[{self.channel_id}] V4 violation detected: counter_count={self.counter_count} "
+                             f"> capacity_max={counter_capacity_max} sustained {over_for:.0f}s >= {counter_capacity_duration:.0f}s")
+            else:
+                logger.debug(f"[{self.channel_id}] V4 over capacity ({self.counter_count}>{counter_capacity_max}) "
+                             f"for {over_for:.0f}s / {counter_capacity_duration:.0f}s — not alerting yet")
+        else:
+            # Back within capacity — reset the over-capacity timer.
+            self.counter_over_capacity_since = None
 
         if not violations:
             self.alert_condition_start_time = None

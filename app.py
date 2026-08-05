@@ -315,7 +315,22 @@ def load_channels_from_config(config_file='config/channels.json'):
             # Get all active RTSP links using manager method
             all_links = db_manager.get_all_rtsp_links()
             rtsp_links = [l for l in all_links if l.get('is_active')]
-            
+
+            # --- Camera sharding (multiprocessing) ---------------------------
+            # One Python process is hard-capped (~88 inferences/sec by GIL +
+            # single CUDA context), so all cameras in one process crawl at ~1 fps.
+            # Running N worker processes, each handling a disjoint subset of
+            # cameras, multiplies total throughput and finally uses the idle GPU.
+            # SHARD_COUNT=1 (default) => original single-process behavior.
+            _shard_count = max(1, int(os.getenv("SHARD_COUNT", "1")))
+            _shard_index = int(os.getenv("SHARD_INDEX", "0")) % _shard_count
+            if _shard_count > 1:
+                rtsp_links = sorted(rtsp_links, key=lambda l: l.get('channel_id', ''))
+                rtsp_links = [l for i, l in enumerate(rtsp_links)
+                              if i % _shard_count == _shard_index]
+                logger.info(f"🧩 SHARD {_shard_index}/{_shard_count}: this worker handles "
+                            f"{len(rtsp_links)} camera(s): {[l['channel_id'] for l in rtsp_links]}")
+
             if rtsp_links:
                 logger.info(f"📚 Loading {len(rtsp_links)} channels from DATABASE")
                 
@@ -5992,4 +6007,6 @@ if __name__ == '__main__':
     start_monthly_report_scheduler(app, db_manager)
     
     # Start Flask server (this will block, but server is now running)
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    _srv_port = 5000 + (int(os.getenv("SHARD_INDEX", "0")) % max(1, int(os.getenv("SHARD_COUNT", "1"))))
+    logger.info(f"Serving on port {_srv_port} (shard {os.getenv('SHARD_INDEX', '0')}/{os.getenv('SHARD_COUNT', '1')})")
+    socketio.run(app, host='0.0.0.0', port=_srv_port, debug=False, allow_unsafe_werkzeug=True)

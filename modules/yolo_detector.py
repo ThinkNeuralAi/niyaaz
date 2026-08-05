@@ -61,11 +61,23 @@ class YOLODetector:
         self.confidence_threshold = confidence_threshold
         self.device = self._select_device(device)
         self.img_size = img_size  # Must match TensorRT engine build size (640)
+        # Opt-in TensorRT (same semantics as ModelManager._maybe_use_engine):
+        # swap a requested .pt for a sibling .engine when USE_TENSORRT=1 and CUDA
+        # is available. Default off / no engine / no CUDA -> unchanged (.pt).
+        if os.getenv("USE_TENSORRT", "0") == "1" and model_path.endswith(".pt"):
+            _engine = model_path[:-3] + ".engine"
+            try:
+                if os.path.exists(_engine) and torch.cuda.is_available():
+                    logger.info(f"TensorRT: using {_engine} instead of {model_path}")
+                    model_path = _engine
+            except Exception as _e:
+                logger.warning(f"TensorRT engine check failed ({_e}); using {model_path}")
+
         self.model_path = model_path
-        
+
         # Log which model is being loaded
         logger.info(f"Initializing YOLODetector with model: {model_path}")
-        
+
         # Check if model is TensorRT engine or PyTorch model
         self.is_engine = model_path.endswith('.engine') or model_path.endswith('.trt')
         

@@ -116,6 +116,8 @@ class SharedMultiModuleVideoProcessor:
         # Performance tracking
         self.frames_processed = 0
         self.frames_received = 0  # Track all frames for smoother display
+        self.stats_proc_ms = 0.0          # EMA of per-frame module processing time (ms)
+        self.stats_module_ms = {}         # EMA per-module processing time (ms)
         self.start_time = None
         self.actual_fps = 0
         
@@ -488,6 +490,10 @@ class SharedMultiModuleVideoProcessor:
                         result = module.process_frame(frame)
                         
                         module_time = time.time() - module_start
+                        # rolling per-module processing time (ms) for per-camera stats
+                        _mms = module_time * 1000.0
+                        _prev = self.stats_module_ms.get(module_name)
+                        self.stats_module_ms[module_name] = _mms if _prev is None else 0.85 * _prev + 0.15 * _mms
                         if self.frames_processed == 0:
                             logger.info(f"Channel {self.channel_id}: {module_name} completed in {module_time:.2f}s")
                         elif module_time > 0.5:  # Log if module takes more than 500ms
@@ -515,6 +521,9 @@ class SharedMultiModuleVideoProcessor:
                         continue
                 
                 processing_time = time.time() - processing_start
+                # rolling total per-frame processing time (ms) for per-camera stats
+                _pms = processing_time * 1000.0
+                self.stats_proc_ms = _pms if self.stats_proc_ms == 0.0 else 0.85 * self.stats_proc_ms + 0.15 * _pms
                 if processing_time > 1.0:  # Log if total processing takes more than 1 second
                     logger.warning(f"Channel {self.channel_id}: Total module processing took {processing_time:.2f}s")
                 
@@ -733,9 +742,13 @@ class SharedMultiModuleVideoProcessor:
             'source_type': 'RTSP (Shared)' if self.is_rtsp_stream else 'Local',
             'processing_mode': self.processing_mode,
             'frames_processed': self.frames_processed,
+            'frames_received': self.frames_received,
+            'frames_dropped': max(0, self.frames_received - self.frames_processed),
             'elapsed_time': elapsed_time,
             'average_fps': avg_fps,
             'actual_fps': self.actual_fps,
+            'proc_ms': round(self.stats_proc_ms, 1),
+            'module_ms': {k: round(v, 1) for k, v in self.stats_module_ms.items()},
             'target_fps': self.fps_limit,
             'active_modules': list(self.modules.keys()),
             'num_modules': len(self.modules),

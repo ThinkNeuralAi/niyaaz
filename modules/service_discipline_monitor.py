@@ -85,6 +85,40 @@ class ServiceDisciplineMonitor:
         self.uniform_model = get_shared_model(self.uniform_model_path)
         logger.info(f"[{self.channel_id}] Loaded dual models: persons + uniforms")
 
+        # --- Dynamic table detection (best_100.pt: Chair/Sofa/Table) ---
+        # Replaces static table ROIs: physical tables are DETECTED each frame and
+        # tracked to stable IDs, so seating still works when tables are rearranged.
+        # A person is "seated at a table" when their bbox overlaps / is very close
+        # to a detected Table/Sofa (with a Chair/Sofa nearby). Falls back to ROIs
+        # if the model is missing or no tables are detected. Toggle with env
+        # SERVICE_DYNAMIC_TABLES=0 for instant rollback to pure-ROI behavior.
+        self.use_dynamic_tables = os.getenv("SERVICE_DYNAMIC_TABLES", "1") == "1"
+        self.table_model_path = "models/newniyaz.pt"
+        self.table_seat_classes = {"Table", "Sofa"}   # seating surfaces
+        self.chair_classes = {"Chair", "Sofa"}         # Sofa is self-seating
+        self.table_detector = None
+        if self.use_dynamic_tables:
+            try:
+                self.table_detector = get_shared_model(self.table_model_path)
+                logger.info(f"[{self.channel_id}] ✅ Dynamic table model loaded: {self.table_model_path}")
+            except Exception as e:
+                logger.warning(f"[{self.channel_id}] ⚠️ Failed to load {self.table_model_path} ({e}); "
+                               f"falling back to ROI tables")
+                self.table_detector = None
+        # Dynamic-table tuning
+        self.table_conf = 0.4              # detection confidence for tables/chairs
+        self.table_match_iou = 0.3         # IoU to consider a detected table the same physical table
+        self.table_persist_seconds = 30.0  # keep a tracked table this long after last seen
+        self.seat_gap_factor = 0.35        # person "at table" if gap < factor * person_height
+        self.chair_gap_px = 120            # a chair is "with" a table within this pixel gap
+        self.require_chair = os.getenv("SERVICE_REQUIRE_CHAIR", "0") == "1"  # soft by default
+        # Tables are near-static, so we only re-run best_100.pt every N frames and
+        # reuse the tracked tables in between - keeps the added inference cheap.
+        self.table_detect_interval = int(os.getenv("SERVICE_TABLE_DETECT_INTERVAL", "15"))
+        # Tracked tables: {table_id: {"bbox":[x1,y1,x2,y2], "last_seen":ts, "has_chair":bool}}
+        self.tracked_tables = {}
+        self._next_table_num = 1
+
         # DeepSORT
         if DEEPSORT_AVAILABLE:
             self.tracker = DeepSort(
@@ -114,8 +148,14 @@ class ServiceDisciplineMonitor:
             "interaction_distance_min_px": 80,    # absolute floor for tiny bboxes
             "interaction_duration": 2.0,
             "food_served_gap": 10.0,
-            # New: customer must dwell inside ROI this long before T_seated is recorded.
-            "seated_dwell_seconds": 8.0,
+            # Customer must stay CLOSE TO THE TABLE this long continuously before
+            # they are counted as seated/occupying it (T_seated). ~1 min filters
+            # out people merely passing by or standing near a table. Env-tunable.
+            "seated_dwell_seconds": float(os.getenv("SERVICE_SEATED_DWELL_SECONDS", "60.0")),
+            # Grace: the customer may briefly separate from the table (detection
+            # flicker / bbox jitter) without resetting the 1-min dwell timer. Only
+            # if they are away from ALL tables longer than this does the timer reset.
+            "seated_grace_seconds": float(os.getenv("SERVICE_SEATED_GRACE_SECONDS", "5.0")),
             # New: waiter must be GONE this long before interaction-end is committed
             # (smooths over 1-frame tracker dropouts).
             "interaction_grace_seconds": 1.5,
@@ -426,6 +466,13 @@ class ServiceDisciplineMonitor:
                             "confidence": conf, "class_name": cls_name,
                         })
 
+            # --- 1b. Detect + track tables (dynamic, replaces static ROIs) ---
+            # Tables barely move: run best_100.pt only every N frames (or to
+            # bootstrap when nothing is tracked yet) and reuse in between.
+            if (self.frame_count % self.table_detect_interval == 0
+                    or not self.tracked_tables):
+                self._detect_and_track_tables(frame, now_ts)
+
             # --- 2. Run tracker ---
             tracks = []
             if self.tracking_enabled and self.tracker and ds_inputs:
@@ -537,6 +584,122 @@ class ServiceDisciplineMonitor:
         return bool(st and st["is_unclean"])
 
     # ------------------------------------------------------------------
+    # Dynamic table detection / tracking (best_100.pt)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _iou(a, b):
+        ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+        ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+        iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+        inter = iw * ih
+        if inter == 0:
+            return 0.0
+        area_a = (a[2] - a[0]) * (a[3] - a[1])
+        area_b = (b[2] - b[0]) * (b[3] - b[1])
+        union = area_a + area_b - inter
+        return inter / union if union > 0 else 0.0
+
+    @staticmethod
+    def _overlap_ratio(a, b):
+        """Intersection over the smaller box's area (how contained a is in b or vice-versa)."""
+        ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+        ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+        iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+        inter = iw * ih
+        if inter == 0:
+            return 0.0
+        small = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+        return inter / small if small > 0 else 0.0
+
+    @staticmethod
+    def _box_gap(a, b):
+        """Smallest edge-to-edge distance between two boxes (0 if they overlap)."""
+        dx = max(0, max(a[0] - b[2], b[0] - a[2]))
+        dy = max(0, max(a[1] - b[3], b[1] - a[3]))
+        return math.hypot(dx, dy)
+
+    def _detect_and_track_tables(self, frame, now_ts):
+        """
+        Detect Table/Sofa/Chair with best_100.pt and track tables to stable IDs.
+
+        Detected tables are matched to previously-tracked tables by IoU so each
+        physical table keeps a persistent id (dyn_table_N) across frames -
+        essential so per-table order/service timers are not reset every frame.
+        Tables unseen for table_persist_seconds are dropped.
+        """
+        if not self.use_dynamic_tables or self.table_detector is None:
+            return
+        try:
+            res = self.table_detector(frame, conf=self.table_conf,
+                                      iou=self.nms_iou, verbose=False)
+        except Exception as e:
+            logger.warning(f"[{self.channel_id}] table detection failed: {e}")
+            return
+
+        tables, chairs = [], []
+        if res and len(res) > 0 and res[0].boxes is not None:
+            names = res[0].names
+            for box in res[0].boxes:
+                cls = names[int(box.cls[0])]
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                b = [int(x1), int(y1), int(x2), int(y2)]
+                if cls in self.table_seat_classes:
+                    tables.append(b)
+                if cls in self.chair_classes:
+                    chairs.append(b)
+
+        # Match each detected table to an existing tracked table (greedy by IoU).
+        matched = set()
+        for tb in tables:
+            best_id, best_iou = None, self.table_match_iou
+            for tid, t in self.tracked_tables.items():
+                if tid in matched:
+                    continue
+                iou = self._iou(tb, t["bbox"])
+                if iou >= best_iou:
+                    best_iou, best_id = iou, tid
+            has_chair = any(self._box_gap(tb, c) <= self.chair_gap_px for c in chairs)
+            if best_id is not None:
+                self.tracked_tables[best_id]["bbox"] = tb
+                self.tracked_tables[best_id]["last_seen"] = now_ts
+                if has_chair:
+                    self.tracked_tables[best_id]["has_chair"] = True
+                matched.add(best_id)
+            else:
+                tid = f"dyn_table_{self._next_table_num}"
+                self._next_table_num += 1
+                self.tracked_tables[tid] = {"bbox": tb, "last_seen": now_ts,
+                                            "has_chair": has_chair}
+                matched.add(tid)
+
+        # Expire stale tables
+        for tid in [t for t, v in self.tracked_tables.items()
+                    if now_ts - v["last_seen"] > self.table_persist_seconds]:
+            del self.tracked_tables[tid]
+
+    def _get_dynamic_table_for_person(self, person_bbox):
+        """
+        Return the tracked table_id this person is seated at: the detected table
+        whose box the person overlaps or is very close to (gap < factor*height),
+        preferring the strongest overlap. Requires a nearby chair only if
+        require_chair is set. Returns None if no table matches.
+        """
+        ph = max(1, person_bbox[3] - person_bbox[1])
+        near = self.seat_gap_factor * ph
+        best_id, best_score = None, -1.0
+        for tid, t in self.tracked_tables.items():
+            if self.require_chair and not t.get("has_chair"):
+                continue
+            overlap = self._overlap_ratio(person_bbox, t["bbox"])
+            gap = self._box_gap(person_bbox, t["bbox"])
+            if overlap > 0 or gap < near:
+                # score: overlap first, then proximity (closer gap = higher)
+                score = overlap if overlap > 0 else (1.0 - gap / near) * 0.001
+                if score > best_score:
+                    best_score, best_id = score, tid
+        return best_id
+
+    # ------------------------------------------------------------------
     # Track classification + T_seated (with dwell time)
     # ------------------------------------------------------------------
     def _process_tracked_persons(self, tracks, uniform_detections, current_time, frame):
@@ -552,14 +715,20 @@ class ServiceDisciplineMonitor:
             tbbox = [int(ltrb[0]), int(ltrb[1]), int(ltrb[2]), int(ltrb[3])]
             tcenter = [(tbbox[0] + tbbox[2]) / 2, (tbbox[1] + tbbox[3]) / 2]
 
-            # ROI test using feet (bottom-center, normalized)
-            feet = (tcenter[0] / w, tbbox[3] / h)
+            # Determine which table this person is at.
+            # Primary: dynamic detected-table association (best_100.pt) - robust to
+            # tables being rearranged. Fallback: static ROI point-in-polygon.
             table_id = None
-            for tid, roi_info in self.table_rois.items():
-                polygon, bbox_norm = roi_info.get("polygon"), roi_info.get("bbox")
-                if polygon and bbox_norm and self._point_in_polygon(feet, polygon, bbox_norm):
-                    table_id = tid
-                    break
+            if self.use_dynamic_tables and self.tracked_tables:
+                table_id = self._get_dynamic_table_for_person(tbbox)
+            if table_id is None:
+                # ROI fallback (feet = bottom-center, normalized)
+                feet = (tcenter[0] / w, tbbox[3] / h)
+                for tid, roi_info in self.table_rois.items():
+                    polygon, bbox_norm = roi_info.get("polygon"), roi_info.get("bbox")
+                    if polygon and bbox_norm and self._point_in_polygon(feet, polygon, bbox_norm):
+                        table_id = tid
+                        break
 
             if table_id:
                 self._ensure_table_tracking(table_id)
@@ -598,12 +767,20 @@ class ServiceDisciplineMonitor:
             p["bbox"] = tbbox
             p["last_seen"] = now_ts
 
-            # Track ROI dwell time
+            # Track time-close-to-table (dwell) with grace for brief flicker.
+            grace = self.settings.get("seated_grace_seconds", 5.0)
             if table_id:
+                # (Re)start the dwell timer only when starting fresh or the
+                # customer moved to a DIFFERENT table.
                 if p.get("first_seen_in_roi") is None or p.get("table_id") != table_id:
                     p["first_seen_in_roi"] = now_ts
+                p["last_at_table"] = now_ts
             else:
-                p["first_seen_in_roi"] = None
+                # Not near a table THIS frame. Keep the dwell timer running unless
+                # they've been away from every table longer than the grace period.
+                if p.get("first_seen_in_roi") is not None:
+                    if now_ts - p.get("last_at_table", now_ts) > grace:
+                        p["first_seen_in_roi"] = None
 
             # ---- Reclassification logic (does NOT wipe customer events) ----
             if is_waiter and p["type"] == "customer":

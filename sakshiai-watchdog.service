@@ -1,0 +1,37 @@
+[Unit]
+Description=Sakshi.AI Freshness Watchdog (restarts app.py when it goes "alive but blind")
+# Start after the app supervisor and the database are up.
+After=network-online.target postgresql.service sakshiai.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/Niyaaz_multistore/Niyaz
+
+# Watches whether the running app.py holds live camera connections; if it is
+# alive but has zero camera connections for several minutes while the cameras
+# are reachable, it SIGTERMs app.py so auto_restart.py respawns a healthy one.
+# System python3 is used to match the main service (the checked-in venvs are
+# not usable Linux interpreters).
+ExecStart=/usr/bin/python3 /home/ubuntu/Niyaaz_multistore/Niyaz/scripts/sharded_watchdog.py
+
+# Tunables (uncomment to override the in-script defaults):
+# Environment=WATCHDOG_CHECK_INTERVAL=60
+# Environment=WATCHDOG_STALE_LIMIT=5
+# Environment=WATCHDOG_RESTART_COOLDOWN=900
+# Environment=WATCHDOG_MIN_CONNECTIONS=1
+# Environment=WATCHDOG_MEM_LIMIT_MB=24000
+# Environment=WATCHDOG_MEM_STALE_LIMIT=3
+
+# If the watchdog itself ever dies, systemd relaunches it.
+Restart=always
+RestartSec=10
+
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

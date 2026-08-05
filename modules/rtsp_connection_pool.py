@@ -635,21 +635,23 @@ class RTSPConnection:
             )
             
             if self.cap is None:
-                logger.error(f"❌ Cannot create video reader for: {self.rtsp_url}")
-                logger.error(f"   All decoder attempts (GPU, CPU, FFmpeg) failed.")
-                logger.error(f"   Possible causes:")
-                logger.error(f"   - Camera is offline or unreachable")
-                logger.error(f"   - RTSP URL is incorrect")
-                logger.error(f"   - Network connectivity issues")
-                logger.error(f"   - Camera authentication failed")
-                logger.error(f"   - Camera port is blocked by firewall")
-                
-                # Send simplified aggregated alert immediately
+                # Camera unreachable AT STARTUP. Previously this returned False and
+                # the connection was abandoned forever (no thread => no retry). Now
+                # we still start the capture thread; its _reopen()+backoff loop will
+                # connect the camera as soon as it comes online - so a camera that
+                # is merely booting/offline at app start is no longer lost until the
+                # next app restart.
+                logger.warning(f"⚠️ Camera not reachable at startup: {self.rtsp_url} - "
+                               f"starting background reconnect loop (will connect when available)")
                 if self.pool:
                     self.pool._send_aggregated_alert('lost', immediate=True)
-                
-                return False
-            
+                self.is_running = True
+                self.start_time = time.time()
+                self.capture_thread = threading.Thread(target=self._capture_loop)
+                self.capture_thread.daemon = True
+                self.capture_thread.start()
+                return True
+
             logger.info(f"Using {self.decoder_type} decoder for: {self.rtsp_url}")
             
             # Configure video capture (CPU only settings, skip for FFmpeg)
@@ -776,191 +778,184 @@ class RTSPConnection:
             logger.error(f"CPU frame reading error for {self.rtsp_url}: {e}")
             return False, None
     
+    def _sleep_interruptible(self, seconds: float):
+        """Sleep up to `seconds` but wake promptly if the connection is stopped."""
+        end = time.time() + seconds
+        while self.is_running:
+            remaining = end - time.time()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.2, remaining))
+
+    def _reopen(self) -> bool:
+        """
+        (Re)create the underlying video reader using the SAME decoder factory
+        used at startup (GStreamer NVDEC -> OpenCV CUDA -> OpenCV CPU -> FFmpeg).
+
+        This is the core of the permanent reconnect fix: it works for every
+        decoder type (the old code only rebuilt a cv2.VideoCapture, so FFmpeg
+        readers could never reconnect), and it is called repeatedly with backoff
+        so a stream is re-established whenever the camera/network recovers.
+
+        Returns True on success.
+        """
+        # Release any existing reader first.
+        try:
+            if isinstance(self.cap, (cv2.VideoCapture, FFmpegRTSPReader)):
+                self.cap.release()
+        except Exception:
+            pass
+        self.cap = None
+
+        try:
+            cap, is_gpu, decoder_type = GPUDecoderManager.create_gpu_video_reader(
+                self.rtsp_url, target_size=(640, 640)
+            )
+            if cap is None:
+                return False
+            self.cap = cap
+            self.is_gpu_decoder = is_gpu
+            self.decoder_type = decoder_type
+            if not is_gpu and isinstance(cap, cv2.VideoCapture):
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                cap.set(cv2.CAP_PROP_FPS, self.fps_limit)
+            return True
+        except Exception as e:
+            logger.error(f"Reopen failed for {self.rtsp_url}: {e}")
+            self.cap = None
+            return False
+
     def _capture_loop(self):
-        """Main capture loop with GPU/CPU frame reading and automatic reconnection"""
+        """
+        Main capture loop with automatic, INFINITE reconnection.
+
+        Key property: this thread never exits while self.is_running is True.
+        On sustained read failure it drops the reader and rebuilds it via
+        _reopen() with exponential backoff (2s -> 4s -> ... -> 30s cap), so a
+        camera recovers on its own whenever it comes back - no permanent give-up,
+        no hard failure/attempt caps (the bugs that killed 33 of 34 cameras).
+        Backoff also staggers reconnects so a busy NVR isn't hammered.
+        """
         last_frame_time = 0
         consecutive_failures = 0
-        max_failures = 30
-        gpu_fallback_attempted = False
+        read_fail_threshold = 15       # bad reads before we rebuild the reader
+        backoff = 2.0                  # seconds, grows on repeated reopen failure
+        max_backoff = 30.0
         last_warning_time = 0
-        warning_interval = 10  # Only log warnings every 10 seconds
-        reconnect_attempts = 0
-        max_reconnect_attempts = 5
-        early_warning_sent = False  # Track if early warning was sent in current failure sequence
-        
+        warning_interval = 10          # throttle warning logs
+        issues_alerted = False         # 'issues' alert sent for current outage
+        lost_alerted = False           # 'lost' alert sent for current outage
+
         while self.is_running:
             try:
                 current_time = time.time()
-                
-                # Respect FPS limit
+
+                # (Re)connect if we have no reader.
+                if self.cap is None:
+                    if self._reopen():
+                        logger.info(f"✅ (Re)connected to {self.rtsp_url} [{self.decoder_type}]")
+                        consecutive_failures = 0
+                        backoff = 2.0
+                        if issues_alerted or lost_alerted:
+                            if self.pool:
+                                self.pool._send_aggregated_alert('restored')
+                        issues_alerted = False
+                        lost_alerted = False
+                        continue
+                    else:
+                        # Reopen failed - alert once, then back off and retry FOREVER.
+                        if not lost_alerted and self.pool:
+                            lost_alerted = True
+                            self.pool._send_aggregated_alert('lost')
+                        if current_time - last_warning_time >= warning_interval:
+                            logger.warning(f"Reconnect to {self.rtsp_url} failed; "
+                                           f"retrying in {backoff:.0f}s [never gives up]")
+                            last_warning_time = current_time
+                        self._sleep_interruptible(backoff)
+                        backoff = min(backoff * 2, max_backoff)
+                        continue
+
+                # Respect FPS limit.
                 if current_time - last_frame_time < self.frame_interval:
                     time.sleep(0.001)
                     continue
-                
-                # Read frame based on decoder type
+
+                # Read a frame.
                 if self.is_gpu_decoder:
                     ret, frame = self._read_frame_gpu()
-                    
-                    # If GPU reading fails repeatedly, try CPU fallback
-                    if not ret and consecutive_failures > 10 and not gpu_fallback_attempted:
-                        logger.warning(f"GPU decoder struggling, attempting CPU fallback for: {self.rtsp_url}")
-                        try:
-                            # Create CPU fallback with FFmpeg backend
-                            cpu_cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-                            if cpu_cap.isOpened():
-                                self.cap = cpu_cap
-                                self.is_gpu_decoder = False
-                                self.decoder_type = "CPU (Fallback)"
-                                self.cpu_fallback_count += 1
-                                gpu_fallback_attempted = True
-                                logger.info(f"Successfully switched to CPU fallback for: {self.rtsp_url}")
-                                continue
-                        except Exception as e:
-                            logger.error(f"CPU fallback failed for {self.rtsp_url}: {e}")
                 else:
                     ret, frame = self._read_frame_cpu()
-                
+
                 if not ret or not safe_array_check(frame, "valid"):
                     consecutive_failures += 1
-                    
-                    # Send early warning alert when failures start accumulating (once per failure sequence)
-                    if consecutive_failures >= 10 and not early_warning_sent:
-                        early_warning_sent = True  # Mark as sent to avoid duplicates
+
+                    if consecutive_failures >= 10 and not issues_alerted:
+                        issues_alerted = True
                         if self.pool:
                             self.pool._send_aggregated_alert('issues')
-                    
-                    # Only log warnings periodically to reduce spam
+
                     if current_time - last_warning_time >= warning_interval:
                         logger.warning(f"Failed to read frame from {self.rtsp_url} "
-                                     f"(failure {consecutive_failures}/{max_failures}) [{self.decoder_type}]")
+                                       f"(failure {consecutive_failures}) [{self.decoder_type}]")
                         last_warning_time = current_time
-                    
-                    # Attempt reconnection if failures persist
-                    if consecutive_failures >= 15 and reconnect_attempts < max_reconnect_attempts:
-                        reconnect_attempts += 1
-                        logger.info(f"Attempting to reconnect to {self.rtsp_url} (attempt {reconnect_attempts}/{max_reconnect_attempts})")
-                        
-                        # Release current connection
+
+                    # Sustained failure -> drop the reader; the top of the loop
+                    # rebuilds it (with backoff on failure). Thread stays alive.
+                    if consecutive_failures >= read_fail_threshold:
+                        logger.info(f"Dropping stale reader for {self.rtsp_url} to force reconnect")
                         try:
-                            if isinstance(self.cap, cv2.VideoCapture):
+                            if isinstance(self.cap, (cv2.VideoCapture, FFmpegRTSPReader)):
                                 self.cap.release()
-                            elif isinstance(self.cap, FFmpegRTSPReader):
-                                self.cap.release()
-                        except:
+                        except Exception:
                             pass
-                        
-                        # Wait before reconnecting
-                        time.sleep(2)
-                        
-                        # Try to reconnect
-                        reconnect_successful = False
-                        try:
-                            if isinstance(self.cap, cv2.VideoCapture) or self.cap is None:
-                                new_cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-                                if new_cap.isOpened():
-                                    # Test read
-                                    test_ret, test_frame = new_cap.read()
-                                    if test_ret and test_frame is not None:
-                                        # Store reconnection attempt count before resetting
-                                        successful_reconnect_attempt = reconnect_attempts
-                                        
-                                        self.cap = new_cap
-                                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                                        self.cap.set(cv2.CAP_PROP_FPS, self.fps_limit)
-                                        consecutive_failures = 0
-                                        reconnect_attempts = 0
-                                        reconnect_successful = True
-                                        early_warning_sent = False  # Reset early warning flag on successful reconnection
-                                        logger.info(f"Successfully reconnected to {self.rtsp_url}")
-                                        
-                                        # Force immediate frame read and broadcast to notify subscribers
-                                        try:
-                                            test_ret, test_frame = self.cap.read()
-                                            if test_ret and safe_array_check(test_frame, "valid"):
-                                                # Update latest frame immediately
-                                                with self.frame_lock:
-                                                    self.latest_frame = test_frame.copy()
-                                                
-                                                # Broadcast immediately to notify all subscribers
-                                                if self.pool:
-                                                    self.pool.broadcast_frame(self.rtsp_url, test_frame)
-                                                logger.info(f"Immediate frame broadcast after reconnection: {self.rtsp_url}")
-                                        except Exception as e:
-                                            logger.debug(f"Could not immediately broadcast frame after reconnection: {e}")
-                                        
-                                        # Send Telegram alert for successful reconnection
-                                        if self.pool:
-                                            self.pool._send_aggregated_alert('restored')
-                                        continue
-                                    else:
-                                        new_cap.release()
-                                else:
-                                    logger.warning(f"Reconnection attempt {reconnect_attempts} failed: could not open stream")
-                        except Exception as e:
-                            logger.warning(f"Reconnection attempt {reconnect_attempts} failed: {e}")
-                        
-                        # Send Telegram alert if all reconnection attempts failed
-                        if not reconnect_successful and reconnect_attempts >= max_reconnect_attempts:
-                            if self.pool:
-                                self.pool._send_aggregated_alert('lost')
-                    
-                    if consecutive_failures >= max_failures:
-                        logger.error(f"Too many consecutive failures for {self.rtsp_url}, stopping")
-                        
-                        # Send Telegram alert for connection loss
-                        if self.pool:
-                            self.pool._send_aggregated_alert('lost')
-                        break
-                    
+                        self.cap = None
+                        consecutive_failures = 0
+                        continue
+
                     time.sleep(0.1)
                     continue
-                
-                # Reset failure counter and reconnection attempts on successful read
+
+                # --- Successful read ---
                 consecutive_failures = 0
-                reconnect_attempts = 0
-                early_warning_sent = False  # Reset early warning flag on successful read
-                
+
                 # Resize frame if too large (optimize for performance)
                 if frame.shape[1] > 1280:
                     scale_factor = 1280 / frame.shape[1]
                     new_width = 1280
                     new_height = int(frame.shape[0] * scale_factor)
                     frame = cv2.resize(frame, (new_width, new_height))
-                
-                # Update latest frame
+
                 with self.frame_lock:
                     self.latest_frame = frame.copy()
-                
-                # Broadcast to all subscribers via pool
+
                 if self.pool:
                     self.pool.broadcast_frame(self.rtsp_url, frame)
-                
-                # Update statistics
+
                 self.frames_read += 1
                 last_frame_time = current_time
-                
-                # Calculate FPS every 30 frames
+
                 if self.frames_read % 30 == 0:
                     elapsed_time = current_time - self.start_time
                     self.current_fps = self.frames_read / elapsed_time if elapsed_time > 0 else 0
-                    
-                    if self.frames_read % 300 == 0:  # Log every 300 frames
+                    if self.frames_read % 300 == 0:
                         gpu_info = f", GPU frames: {self.gpu_frames_processed}" if self.gpu_frames_processed > 0 else ""
                         fallback_info = f", CPU fallbacks: {self.cpu_fallback_count}" if self.cpu_fallback_count > 0 else ""
-                        
                         logger.info(f"RTSP {self.rtsp_url}: {self.frames_read} frames, "
-                                  f"FPS: {self.current_fps:.2f} [{self.decoder_type}]{gpu_info}{fallback_info}")
-                
+                                    f"FPS: {self.current_fps:.2f} [{self.decoder_type}]{gpu_info}{fallback_info}")
+
             except Exception as e:
                 logger.error(f"Error in RTSP capture loop {self.rtsp_url}: {e}")
-                consecutive_failures += 1
-                
-                if consecutive_failures >= max_failures:
-                    break
-                
-                time.sleep(0.1)
-        
-        logger.info(f"RTSP capture loop ended for: {self.rtsp_url}")
+                # Drop the reader and let the loop rebuild it - never break out.
+                try:
+                    if isinstance(self.cap, (cv2.VideoCapture, FFmpegRTSPReader)):
+                        self.cap.release()
+                except Exception:
+                    pass
+                self.cap = None
+                consecutive_failures = 0
+                self._sleep_interruptible(1.0)
+
+        logger.info(f"RTSP capture loop ended for: {self.rtsp_url} (is_running=False)")
     
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """
